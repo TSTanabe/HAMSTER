@@ -1,13 +1,13 @@
 #!/usr/bin/python
 from Bio import SearchIO
 from Bio import SeqIO
-from collections import deque
-from . import myUtil
+import traceback
+import subprocess
+from . import Database
+#import multiprocessing
+#from multiprocessing import Process, Manager, Pool, Semaphore
 import re
 
-
-#TODO e value in protein speichern // erstmal auslassen
-#TODO check validity of input in class Protein
 
 class Protein:
     """
@@ -23,11 +23,10 @@ class Protein:
     """
 
 
-    def __init__(self,proteinID,HMM,start=0,end=0,score=1): 
-    #TODO check validity of input or exception throw
+    def __init__(self,proteinID,HMM,start=0,end=0,score=1,genomeID=""): 
         #Protein attributes
         self.proteinID = proteinID
-        self.genomeID = ""
+        self.genomeID = genomeID
         self.protein_sequence = ""
         
         #Gene attributes
@@ -38,7 +37,7 @@ class Protein:
         self.gene_locustag = ""
         
         #Cluster attributes
-        self.cluster_ID = "" #reziprok mit Cluster class
+        self.clusterID = "" #reziprok mit Cluster class
         self.keywords = {} #reziprok mit Cluster class
         
         self.domains = {}   # dictionary start coordinate => Domain object
@@ -46,11 +45,6 @@ class Protein:
         
 
     ##### Getter ####
-    def get_proteinID(self):
-        return self.proteinID
-        
-    def get_genomeID(self):
-        return self.genomeID
             
     def get_domains(self):
     #return string
@@ -115,65 +109,13 @@ class Protein:
         #string = f"{a} {b} {c} {d} {e} {f}"
         return listing
             
-    def get_gene_contig(self):
-        return self.gene_contig
-        
-    def get_gene_start(self):
-        return self.gene_start
-        
-    def get_gene_end(self):
-        return self.gene_end
-        
-    def get_gene_strand(self):
-        return self.gene_strand
-        
-    def get_gene_locustag(self):
-        return self.gene_locustag
-        
-    def get_protein_sequence(self):
-        return self.protein_sequence
-        
-    def get_clusterID(self):
-        return self.cluster_ID
-
     def get_sequence(self):
         return str(self.protein_sequence)
         
     def get_length(self):
         return len(self.protein_sequence)
     ##### Setter #####
-    def set_genomeID(self,string):
-        self.genomeID = string
-        return
-        
-    def set_gene_contig(self,string):
-        self.gene_contig = string
-        return
-        
-    def set_gene_start(self,integer):
-        self.gene_start = int(integer)
-        return
-        
-    def set_gene_end(self,integer):
-        self.gene_end = int(integer)
-        return
-        
-    def set_gene_strand(self,string):
-        self.gene_strand = string
-        return
-        
-    def set_gene_locustag(self,string):
-        self.gene_locustag = string
-        return
-        
-    def set_protein_sequence(self,string):
-        self.protein_sequence = string
-        return
-        
-    def set_clusterID(self,string):
-        self.cluster_ID = string
-        return
-    
+
     def check_domain_overlap(self,new_start, new_end,\
     current_start,current_end):
     #2.9.22
@@ -261,7 +203,114 @@ class Domain:
 #   Parsing subroutines
 #------------------------------------------------------------
 
-def parseGFFfile(Filepath,protein_dict,n=0):
+
+def parseHMMreport(Filepath, Thresholds, cut_score=10):
+    protein_dict = {}
+    
+    try:
+        protein_dict = parseHMMreport_hmmer3_format(Filepath, Thresholds, cut_score)
+    except Exception as e:  # Catch all exceptions
+        print(f"Error occurred while processing the file: {Filepath}")
+        traceback.print_exc()  # This prints the complete traceback of the error
+        
+
+    return protein_dict
+    
+    
+def parseHMMreport_hmmer3_format(Filepath,Thresholds,cut_score=10):
+    """
+    1.9.22 
+    Required input are a path to a Hmmreport File from HMMER3 and a thresholds dictionary with threshold scores for each HMM
+    Returns a list of protein objects for further utilization
+    Args
+        -Inputfile Report from HMMER3
+        -Dictionary Thresholds for HMMs
+        
+    Return
+        -list of Protein objects
+    """
+
+    
+    protein_dict = {}
+
+
+    for hmmer_qresult in SearchIO.parse(Filepath,"hmmer3-text"):
+        query = hmmer_qresult.id    # Name of HMM without description
+        hit_proteinID = ""
+        hit_bitscore = 0
+        hit_bias = 0
+        hit_evalue = 1
+        threshold = cut_score
+        if query in Thresholds:
+            threshold = Thresholds[query] # specific threshold
+        
+        
+        for hit in hmmer_qresult:
+            if threshold<hit.bitscore:
+                hit_proteinID = hit.id
+                hit_bitscore = hit.bitscore
+                hit_bias = hit.bias
+                hit_evalue = hit.evalue	
+                hsp_bitscore = 0
+                hsp_start = 0
+                hsp_end = 0
+                for hsp in hit:
+                    #take highest scoring domain as coordinates
+                    if hsp_bitscore < hsp.bitscore:
+                        hsp_start = hsp.hit_start
+                        hsp_end = hsp.hit_end
+                        hsp_bitscore = hsp.bitscore
+                        
+                #print (f"HMM: {query} ProteinID:{hit_proteinID} Hitscore:{hit_bitscore} Bias:{hit_bias} HspScore:{hsp_bitscore} Start:{hsp_start} End:{hsp_end}") Debugging Zeile
+                if hit_proteinID in protein_dict:
+                    protein = protein_dict[hit_proteinID]
+                    
+                    protein.add_domain(query,hsp_start,hsp_end,hit_bitscore)
+                else:
+                    protein_dict[hit_proteinID] = Protein(hit_proteinID,query,hsp_start,hsp_end,hit_bitscore)
+    return protein_dict
+
+
+
+def parseHMMreport_below_cutoff_hits(protein_types,Filepath,Thresholds,cut_score=10):
+    """
+    11.04.2023
+    Routine shall find hits that are below the  threshold but that are still significant
+    candidate hits are returned in a dictionary with proteinID as key and list as value
+    """
+    candidate_dict = {}
+    for hmmer_qresults in SearchIO.parse(Filepath,"hmmer3-text"):
+        query = hmmer_qresults.id
+        if query in protein_types:
+            hit_proteinID = ""
+            hit_bitscore = 0
+            hit_bias = 0
+            hit_evalue = 1
+            threshold = 10
+            if query in Thresholds:
+                threshold = Thresholds[query] #Upper limit
+                cutoff = threshold * 0.1 # Lower limit
+                
+                for hit in hmmer_qresults:
+                    if hit.bitscore<threshold and hit.bitscore > cutoff:
+                        hit_proteinID = hit.id
+                        hit_bitscore = hit.bitscore
+                        hit_bias = hit.bias
+                        hit_evalue = hit.evalue
+                        hsp_bitscore = 0
+                        hsp_start = 0
+                        hsp_end = 0
+                        for hsp in hit:#take highest scoring domain as coordinates
+                            if hsp_bitscore < hsp.bitscore:
+                                hsp_start = hsp.hit_start
+                                hsp_end = hsp.hit_end
+                                hsp_bitscore = hsp.bitscore
+                        candidate_dict[hit_proteinID] = [query,hsp_start,hsp_end,hsp_bitscore]
+    
+    return candidate_dict
+
+
+def parseGFFfile(Filepath, protein_dict):
     """
     3.9.22
     
@@ -270,71 +319,50 @@ def parseGFFfile(Filepath,protein_dict,n=0):
     Args:
         Filepath - GFF3 formatted file
         protein_dict - Dictionary with key proteinID and value Protein Objects
-        n - number of upstream and downstream genes extending the original hit vicinity
     Return:
         protein_dict (even though possibly not necessary)
     """
-    queue = deque(maxlen=n)
-    vicinity_protein_data = {}
-    last_match = 0
+    locustag_pattern = re.compile(r'locus_tag=(\S*?)[\n;]')
+    geneID_pattern = re.compile(r'ID=(cds-)?(\S+?)[;\s]')
     
-    with open(Filepath,"r") as reader:
-        for line in reader.readlines():
-            if line.startswith("#"): #skip comments
+    grep_pattern = "|".join(protein_dict.keys())
+    
+    try:
+        grep_process = subprocess.Popen(['grep', '-E', grep_pattern, Filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = grep_process.communicate()
+
+        if stderr:
+            print("Error in grep process:", stderr)
+            return protein_dict
+        
+        for line in stdout.decode('utf-8').split('\n'):
+            if not line:
                 continue
-            match = re.search('ID=(cds-){0,1}(\S+?)\W{0,1};',line)
-            match = match.group(2) #find the ID of the protein in the line
+            gff = line.split("\t")
+            match = geneID_pattern.search(gff[-1])
+            if not match:
+                continue
+            match = match.group(2)
             if match in protein_dict:
-                #print(protein_dict[match].get_protein())
-                #string teilen und dem 
-                #protein hinzufügen
+                # Add protein
                 protein = protein_dict[match]
-                gff = line.split("\t")
-                protein.set_gene_contig(gff[0])
-                protein.set_gene_start(gff[3])
-                protein.set_gene_end(gff[4])
-                protein.set_gene_strand(gff[6])
-                locustag = getLocustag(line)
-                protein.set_gene_locustag(locustag)
-                #add the information for the hit to the dictionary
-
-                #add genes from queue to the data dict
-                #Add upstream dictionary
-                counter = 0
-                while queue:
-                    protein = queue.popleft() # a list [proteinID, contig, start, end, strand]
-                    vicinity_protein_data[protein.proteinID] = protein
-                    
-                    counter = counter +1
                 
-                last_match = n
-                    
-            elif last_match:
-                #Add the downstream elements to dictionary
-                last_match = last_match-1
-                gff = line.split("\t")
-                protein = Protein(match,"default")
-                protein.set_gene_contig(gff[0])
-                protein.set_gene_start(gff[3])
-                protein.set_gene_end(gff[4])
-                protein.set_gene_strand(gff[6])
-                vicinity_protein_data[match] = protein
-                
-            else:
-                gff = line.split("\t")
-                protein = Protein(match,"default")
-                protein.set_gene_contig(gff[0])
-                protein.set_gene_start(gff[3])
-                protein.set_gene_end(gff[4])
-                protein.set_gene_strand(gff[6])
-
-                queue.append(protein) #queue is a dqueue with length argument n. default 0
-                
-    return vicinity_protein_data
+                protein.gene_contig = str(gff[0])
+                protein.gene_start = int(gff[3])
+                protein.gene_end = int(gff[4])
+                protein.gene_strand = str(gff[6])
+                locustag = getLocustag(locustag_pattern, line)
+                protein.gene_locustag = str(locustag)
+    except Exception as e:
+        error_message = f"\nError occurred: {str(e)}"
+        print(f"\tWARNING: Skipped {faa_file} due to an error - {error_message}")
+        return protein_dict
+    return protein_dict
 
 
-    
-def getProteinSequence(Filepath,protein_dict):
+
+
+def getProteinSequence(Filepath, protein_dict):
     """
     3.9.22
     Adds the protein Sequence to the Protein Objects in a dictionary. ProteinIDs of the dictionary have
@@ -346,162 +374,64 @@ def getProteinSequence(Filepath,protein_dict):
     Return:
         protein_dict (even though possibly not necessary)    
     """
-    with open(Filepath) as reader:
-        for record in SeqIO.parse(reader,"fasta"):
+    reader = None
+    try:
+        reader = open(Filepath, "r")
+        for record in SeqIO.parse(reader, "fasta"):
             if record.id in protein_dict:
                 protein = protein_dict[record.id]
-                protein.set_protein_sequence(record.seq)
-                
+                protein.protein_sequence = str(record.seq)
+    finally:
+        reader.close()
     return protein_dict
 
+def grapProteinSequence(filepath, protein_dict):
+    """
+    Adds the protein sequence to the Protein Objects in a dictionary.
+    ProteinIDs of the dictionary have to match the header of the .faa file.
+    
+    Args:
+        filepath - fasta formatted amino acid sequence containing file
+        protein_dict - Dictionary with key proteinID and value Protein Objects
+    Return:
+        protein_dict (even though possibly not necessary)    
+    """
+    for protein_id in protein_dict.keys():
+        # Use awk to get the sequence until the next '>'
+        awk_command = f"awk '/>{protein_id}/ {{flag=1; next}} /^>/ {{flag=0}} flag {{print}}' {filepath}"
+        result = subprocess.run(awk_command, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            output = result.stdout
+            # Remove all whitespace characters
+            sequence = ''.join(output.split())
+            protein_dict[protein_id].protein_sequence = sequence
+        else:
+            print(f"Protein ID {protein_id} not found in {filepath}")
+    
+    return protein_dict
+        
 
-def writeProteinSequenceFasta(vicinity_genes_dict,genomeID,output_file):
-    with open(output_file,"a") as writer:
-        for protein in vicinity_genes_dict.values():
-            proteinID = f"{genomeID}-{protein.proteinID}"
-            writer.write(f">{proteinID}\n")
-            writer.write(f"{protein.protein_sequence}\n")
-
-
-def getLocustag(string):
-    match = re.search('locus\_tag=(\S*?)[\n|;]',string)
+def getLocustag(locustag_pattern,string):
+    match = locustag_pattern.search(string)
     if match:
         return match.group(1)
     else:
         return ""
 
-def writeQueryHitsSequenceFasta(protein_dict,genomeID,directory):
-
-    for protein in protein_dict.values():
-        
-        proteinID = f"{genomeID}-{protein.proteinID}"
-        
-        domains = protein.get_domains()
-        file_path = directory+"/Query_"+domains+".hit_list"
-        #print(proteinID," ",domains)
-        File = open(file_path, "a")
-        try:
-            File.write(f">{proteinID}\n")
-            File.write(f"{protein.protein_sequence}\n")
-        finally:
-            # Close the file to ensure proper handling
-            File.close()
-
-def parseBlastreportXML(Filepath,Thresholds):
-    
-    protein_dict = {}
-    threshold = 10
-
-        
-    
-
-    for blast_record in SearchIO.parse(Filepath,"blast-xml"):
-        query = blast_record.id    # Name of query
-        if query in Thresholds:
-            threshold = Thresholds[query] # specific threshold
-        else:
-            threshold = 10
-                
-        for hit in blast_record.hits:
-            if threshold<hit.hsps[0].bitscore:
-                # Get the protein identifier of the hit
-                hit_proteinID = hit.id
-
-                # Get the hit score
-                hit_bitscore = hit.hsps[0].bitscore
-
-                # Get the start and stop coordinates of the matching sequence
-                hsp_start = hit.hsps[0].hit_start
-                hsp_end = hit.hsps[0].hit_end
-                #print(f"HMM: {query} ProteinID:{hit_proteinID} Hitscore:{hit_bitscore} Start:{hsp_start} End:{hsp_end}") #Debugging Zeile
-                if hit_proteinID in protein_dict:
-                    protein = protein_dict[hit_proteinID]
-                    
-                    protein.add_domain(query,hsp_start,hsp_end,hit_bitscore)
-                else:
-                    protein_dict[hit_proteinID] = Protein(hit_proteinID,query,hsp_start,hsp_end,hit_bitscore)
-                    
-    return protein_dict   
-    
-                            
-def parseBlastreporttab(Filepath,Thresholds):
-    
-    protein_dict = {}
-    threshold = 10
-
-
-    for blast_record in SearchIO.parse(Filepath,"blast-tab"):
-        query = blast_record.id    # Name of query
-        if query in Thresholds:
-            threshold = Thresholds[query] # specific threshold
-        else:
-            threshold = 10
-                
-        for hit in blast_record.hits:
-            if threshold<hit.hsps[0].bitscore:
-                # Get the protein identifier of the hit
-                hit_proteinID = hit.id
-
-                # Get the hit score
-                hit_bitscore = hit.hsps[0].bitscore
-
-                # Get the start and stop coordinates of the matching sequence
-                hsp_start = hit.hsps[0].hit_start
-                hsp_end = hit.hsps[0].hit_end
-                #print(f"HMM: {query} ProteinID:{hit_proteinID} Hitscore:{hit_bitscore} Start:{hsp_start} End:{hsp_end}") #Debugging Zeile
-                if hit_proteinID in protein_dict:
-                    protein = protein_dict[hit_proteinID]
-                    
-                    protein.add_domain(query,hsp_start,hsp_end,hit_bitscore)
-                else:
-                    protein_dict[hit_proteinID] = Protein(hit_proteinID,query,hsp_start,hsp_end,hit_bitscore)
-                    
-    return protein_dict                          
-
-
-#Parser for linclust
-
-def parse_linclust_find_connected_groups(table_file):
-    # Build the graph
-    graph = {}
-    with open(table_file, 'r') as file:
-        for line in file:
-            identifier1, identifier2 = line.strip().split('\t')
-
-            # Skip line if both columns are identical
-            if identifier1 == identifier2:
-                continue
-            
-            if identifier1 not in graph:
-                graph[identifier1] = set()
-            if identifier2 not in graph:
-                graph[identifier2] = set()
-            graph[identifier1].add(identifier2)
-            graph[identifier2].add(identifier1)
-
-    # Perform DFS to find connected groups
-    visited = set()
-    groups = []
-    for identifier in graph:
-        if identifier not in visited:
-            group = set()
-            dfs(graph, visited, identifier, group)
-            groups.append(group)
-
-    return groups
-
-            
-def dfs(graph, visited, identifier, group):
-    visited.add(identifier)
-    if not isinstance(group, set):
-        group = set()  # Initialize group as a set if it's not already
-    group.add(identifier)
-    for neighbor in graph[identifier]:
-        if neighbor not in visited:
-            dfs(graph, visited, neighbor, group)
 
 
 
 
 
 
+
+
+#print("MAKE THRESHOLDS")
+#thrs = makeThresholdDict('ttest/Thresholds.txt')
+#print("PARSE HMM REPORTS")
+#diction = parseHMMreport("ptest/GCA_000006985.1_ASM698v1_genomic.HmmReport",thrs);
+#print("PARSE GFF FILE")
+#parseGFFfile("ptest/GCA_000006985.1_ASM698v1_genomic.gff",diction)
+#print("PARSE AA SEQUENCE")
+#getProteinSequence("ptest/GCA_000006985.1_ASM698v1_genomic.faa",diction)

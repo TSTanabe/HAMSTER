@@ -2,7 +2,6 @@
 
 import os
 import sys
-#import subprocess
 import gzip
 import shutil
 import random
@@ -14,66 +13,25 @@ def packgz(path):
         dst.writelines(src)
     return file
 
-
-
 def unpackgz(path):
-# gunzip file from path and return unpacked file name
+    # Check if the file is a .gz file
+    if not path.endswith('.gz'):
+        return path
+    
+    # Determine the name of the unpacked file
     file = path[:-3]
+    
+    # Check if the unpacked file already exists
+    if os.path.exists(file):
+        return file  # Unpacked file already exists, no need to unpack
+    
+    # Unpack the .gz file
     with gzip.open(path, 'rb') as f_in:
         with open(file, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
+    
     return file
     
-def command(string):
-    os.system(string)
-    
-    return
-    
-    
-def unlink(path):
-    os.unlink(path)
-    return
-    
-def removeExtension(path):
-    return os.path.splitext(path)[0] 
-
-def getExtension(path):
-    return os.path.splitext(path)[-1]
-     
-def getExtension2(path):
-    name = getFileName(path)
-    if os.path.splitext(path)[-1]:
-        return "."+name.split(".",1)[-1]
-    else:
-        return
-
-def removeExtension2(path):
-    name = getFileName(path)
-    if os.path.splitext(path)[0]:
-        return name.split(".",1)[0]
-    else:
-        return
-
-def getPath(Path):
-    return os.path.split(Path)[0]+"/"
-
-def getAllFiles(directory, ending = 0):
-#get all files of a directory with all subdirectories and return a list
-    list = []
-    for path, subdirs, files in os.walk(directory):
-        for name in files:
-            file = os.path.join(path, name)
-            if ending == 0:
-                list.append(file)
-            elif file.endswith(ending):
-                list.append(file)
-            
-    return list
-
-def getFileName(Path):
-    file_name = os.path.basename(Path)
-    return file_name
-
 def dir_path(string):
 #check if path is valid dir
     if os.path.isdir(string):
@@ -93,6 +51,46 @@ def file_path(string):
         sys.exit(f"\nERROR: {string} is not a valid file")
         #raise Exception(f"\nERROR: {string} is not a valid directory")
 
+
+def print_header(string,verbose=0):
+    if not verbose:
+        print("\n"+string)
+        print(len(string)*"-")
+        
+def clean_empty_files(directory):
+
+    # Loop over all files in the directory
+    for filename in os.listdir(directory):
+        # Check if the file is not a directory
+        if not os.path.isdir(os.path.join(directory, filename)):
+            # Check if the file is empty
+            if os.path.getsize(os.path.join(directory, filename)) == 0:
+                # Remove the file
+                os.remove(os.path.join(directory, filename))
+                #print(filename, 'was removed')
+
+def generate_color(seed_int):
+    random.seed(seed_int)
+    color = '#{:06x}'.format(random.randint(0, 0xFFFFFF))
+    return color        
+        
+def getAllFiles(directory, ending = 0):
+#get all files of a directory with all subdirectories and return a list
+    list = []
+    for path, subdirs, files in os.walk(directory):
+        for name in files:
+            file = os.path.join(path, name)
+            if ending == 0:
+                list.append(file)
+            elif file.endswith(ending):
+                list.append(file)
+            
+    return list        
+        
+        
+        
+    
+#### Next three routines are meant to work together
 def compareFileLists(directory,ext1=0,ext2=0):
 #return a list of all files with extension 1 which have no equivalent with extension 2
     if ext1 and ext2:
@@ -127,21 +125,19 @@ def addExtToList(listing,ext):
         index += 1
     return listing
 
-def getGenomeID(Path):
-    #should return genomeID according to standard genome identifiers from common source
-    #29.8.22
-    File = getFileName(Path)
-    File = removeExtension2(File)
-    return File
 
-def getReportName(Input):
-    file_name = removeExtension(Input)
+
+def getGenomeID(path):
+    #return genomeID according to standard genome identifiers from common source. DO NOT USE '.' Where they do not belong in the filename!!!
+    basename = os.path.basename(path)
+    genomeID = basename.split('.')[0]
+    return genomeID
+
+def getReportName(path):
+    file_name = os.path.splitext(path)[0]
     hmm_report = file_name+".HmmReport"
     return hmm_report
 
-def duplicate(input_list):
-    #returns a list with the doublicate values
-    return list(set([x for x in input_list if input_list.count(x) > 1]))
 
 def taxonomy_lineage(array,trennzeichen):
     #04.11.22
@@ -151,132 +147,39 @@ def taxonomy_lineage(array,trennzeichen):
         div = ''.join(trennzeichen)
         string = div.join(array)
         string = string.replace(" ","-")
-        return string
+        return str(string)
     except:
-        array = ["Superkingdom","Clade","Phylum","Class","Ordnung","Family","Genus","Species"]
-        div = ''.join(trennzeichen)
-        string = div.join(array)
-        string = string.replace(" ","-")
-        return string
-
-def clean_empty_files(directory):
-
-    # Loop over all files in the directory
-    for filename in os.listdir(directory):
-        # Check if the file is not a directory
-        if not os.path.isdir(os.path.join(directory, filename)):
-            # Check if the file is empty
-            if os.path.getsize(os.path.join(directory, filename)) == 0:
-                # Remove the file
-                os.remove(os.path.join(directory, filename))
-                #print(filename, 'was removed')
-
-def generate_color(seed_int):
-    random.seed(seed_int)
-    color = '#{:06x}'.format(random.randint(0, 0xFFFFFF))
-    return color
+        return "NoTaxonomy"
 
 
-def unlink_mmseq_query_tmps(filename):
-    array = [".tab",".queryDB",".queryDB.dbtype",".queryDB.index",".queryDB.lookup",".queryDB_h",".queryDB_h.dbtype",".queryDB_h.index"]
-    for a in array:
-        try:
-            unlink(filename+a)
-        except:
-            continue
-            
-                
-def unlink_mmseq_target_tmps(filename):
-    array = [".tab",".tmp",".alndb",".alndb.index",".alndb.dbtype",".targetDB",".targetDB.dbtype",".targetDB.index",".targetDB.lookup",".targetDB_h",".targetDB_h.dbtype",".targetDB_h.index"]
-    for a in array:
-        try:
-            unlink(filename+a)
-        except:
-            try:
-                shutil.rmtree(filename+a)
-            except:
-                continue
-            continue
+def get_executable_dir():
+    """
+    Get the directory of the current executable or script.
+    This works whether the script is compiled or run directly as a Python script.
+    """
+    if getattr(sys, 'frozen', False):
+        # If the program is compiled, sys.frozen is True, and sys.executable gives the path to the executable
+        return os.path.dirname(sys.executable)
+    else:
+        # If running as a script, __file__ gives the path to the script
+        return os.path.dirname(os.path.abspath(__file__))
 
-
-
-def print_header(string,verbose=0):
-    if not verbose:
-        print("\n"+string)
-        print(len(string)*"-")
-
-
-#For json dump tuple keys have to be converted to string
+def find_executable(executable):
+    """
+    Find the any executable.
+    First check in the system's PATH, then in the local ./bin directory relative to the executable/script.
+    Returns the path to the executable.
+    """
+    # Check if MAFFT is in the system's PATH
+    executable_path = shutil.which(f"{executable}")
+    if executable_path:
+        return executable_path
     
-def convert_keys_to_str(data):
-    if isinstance(data, dict):
-        return {str(key): convert_keys_to_str(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [convert_keys_to_str(item) for item in data]
-    elif isinstance(data, tuple):
-        # Convert the tuple to a string representation (e.g., using repr)
-        return str(data)
-    else:
-        return data
-        
-def convert_keys_to_tuples(data):
-    if isinstance(data, dict):
-        return {convert_key_to_tuple(key): convert_keys_to_tuples(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [convert_keys_to_tuples(item) for item in data]
-    else:
-        return data
-
-def convert_key_to_tuple(key):
-    # Attempt to evaluate the key as a tuple
-    try:
-        return eval(key)
-    except (SyntaxError, NameError):
-        # If it's not a valid Python literal, return the key as is
-        return key    
-
-def get_filename_without_extension(filepath):
-    # Get the base filename from the filepath
-    base_filename = os.path.basename(filepath)
-
-    # Split the filename and file extension
-    filename_without_extension, _ = os.path.splitext(base_filename)
-
-    return filename_without_extension
-
-"""
-allFiles = getAllFiles("ttest",".faa.gz")
-missingGff = compareFileLists("ttest",".faa.gz",".gff.gz")
-#for all missing files try to do prodigal
-
-for File in allFiles:
-    unpackedFile = unpackgz(File)
-    filename = removeExtension(unpackedFile)
-    print(filename)
-
-    filename += ".gff.gz"
-    print(filename)
-    unpackedGffFile= unpackgz(filename)    
-    unlink(unpackedFile)
-    unlink(unpackedGffFile)
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # If not found, check in the local ./bin directory relative to the executable or script
+    executable_dir = get_executable_dir()
+    local_executable_path = os.path.join(executable_dir, "bin", f"{executable}")
+    if os.path.isfile(local_executable_path) and os.access(local_executable_path, os.X_OK):
+        return local_executable_path
+    
+    raise FileNotFoundError(f"{executable} executable not found in system PATH or local bin directory.")
 

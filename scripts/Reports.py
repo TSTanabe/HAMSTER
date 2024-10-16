@@ -3,15 +3,31 @@
 import os
 import shutil
 
-        
+class ReportObject:
+    def __init__(self, matrix = None, fold_matrices = None, optimized_cutoff = None, trusted_cutoff = None, noise_cutoff = None):
+        self.matrix = matrix # is an array []
+        self.fold_matrices = fold_matrices # is a list
+        self.optimized_cutoff = optimized_cutoff
+        self.trusted_cutoff = trusted_cutoff 
+        self.noise_cutoff = noise_cutoff #TODO if infinite than 10        
 
 def move_HMMs(input_folder,output_folder,file_extension):
-
+    print(f"Saving HMMs in the  directory: {output_folder}")
     for datafile in os.listdir(input_folder):
         if datafile.endswith(file_extension):
             source = os.path.join(input_folder, datafile)
             target = os.path.join(output_folder, datafile)
             shutil.move(source,target)
+
+def concatenate_cv_cutoff_files(directory, file_extension, output_file):
+    with open(output_file, 'w') as outfile:
+        for root, dirs, files in os.walk(directory):
+            for file_path in files:
+                if file_path.endswith(file_extension):
+                    file_path = os.path.join(root, file_path)
+                    with open(file_path, 'r') as infile:
+                        outfile.write(infile.read())
+    return output_file
             
 def create_cutoff_file(options,cutoff_dict,directory,filename = "/thresholds.txt"):
     file_path = directory + filename
@@ -22,6 +38,38 @@ def create_cutoff_file(options,cutoff_dict,directory,filename = "/thresholds.txt
             file.write(key+"\t"+str(report.optimized_cutoff)+"\t"+str(report.trusted_cutoff)+"\t"+str(report.noise_cutoff)+"\n")        
     
     return file_path            
+
+def parse_matrices_to_report(directory,file_extension):
+    report_dict = dict()  # List to store folder names
+
+    for root, dirs, files in os.walk(directory):
+        for file_path in files:
+            file_path = os.path.join(root, file_path)
+            if file_path.endswith(file_extension):
+                folder_name = os.path.basename(root)
+                    
+                data = []  # List to store lists of four values
+                column_sums = []
+                with open(file_path, 'r') as infile:
+
+                    for line in infile:     #Make the fold matrices
+                        # Split each line into a list of four values and strip the newline
+                        values = [int(value.strip()) for value in line.strip().split('\t')]
+                        
+                        # Ensure that there are exactly four values in the line
+                        if len(values) == 4:
+                            data.append(values)
+                        else:
+                            print(f"Warning: Skipping line with incorrect number of values: {line}")
+                        
+                            #sum up the fold matrices
+                    columns = list(zip(*data))
+                    column_sums = [sum(map(int, column)) for column in columns]     # Calculate the sum for each column
+                report = ReportObject(column_sums,data)
+                report_dict[folder_name] = report
+                
+                       
+    return report_dict # dictionary key=> model, value= report object
             
 def create_performance_file(options,performance_dict,directory,filename = "/performance.txt"):
     file_path = directory + filename

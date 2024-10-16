@@ -1,30 +1,6 @@
 #!/usr/bin/python
+import os
 from . import myUtil
-#import re
-#import os
-
-
-def makeThresholdDict(File,threshold_type=1):
-    """
-        30.3.23
-        Threshold_type 1 => optimized
-        Threshold_type 2 => noise cutoff
-        Threshold_type 3 => trusted_cutoff
-    """
-    Thresholds = {}
-    with open(File, "r") as reader:
-        for line in reader.readlines():
-            #print(line)
-            #lines = "key1=value1;key2=value2;key3=value3"
-            l = line.split("\t")
-
-            try:
-                Thresholds[l[0]] = float(l[threshold_type])
-            except:
-                print("Error in cutoff line: "+line)
-        #for k, v in Thresholds.items():
-        #   print(k, v)
-    return Thresholds
 
 def HMMsearch(Path,HMMLibrary,cores = 1):
     #Path to faa File, HMMLibrary for the HMMs and cores number of cores used by HMMER3
@@ -32,64 +8,73 @@ def HMMsearch(Path,HMMLibrary,cores = 1):
 
     Output = myUtil.getReportName(Path)
     #print("hmmsearch -E 0.0001 --cpu "+str(cores)+" "+HMMLibrary+" "+Path+">"+Output)
-    myUtil.command(f'hmmsearch -E 0.0001 --cpu {str(cores)} {HMMLibrary} {Path}>{Output}')
+    os.system(f'hmmsearch -E 0.0001 --cpu {str(cores)} {HMMLibrary} {Path}>{Output}')
     return Output
 
-def Diamondsearch(path,query,cores,evalue):
-    
-    database_name="${path%.*}_database"
-    diamond_results="${path%.*}_diamondresults"
-    myUtil.command(f'diamond makedb --in {path} --db {database_name}')
-    myUtil.command(f'diamond blastp -d {database_name} -q {query} -o {diamond_results} -p {cores} -e {evalue}')
-    unlink(database_name)
 
-    return diamond_results
-
-def MMseqsSearch(path,query,options):
+def MMseqsSearch(path,query_db_name,options,cores=1):
     #query is the static fasta file with the query sequences
     #path is the assembly fasta file
-    cores = options.cores
     evalue = options.evalue
     coverage = options.searchcoverage
     minseqid = options.minseqid
     
-    query_db_name=f"{query}.queryDB" #can be done during argument parsing if possible
-    #myUtil.command(f'mmseqs createdb {query} {query_db_name} 1>/dev/null')
     
     target_db_name=f"{path}.targetDB"
-    myUtil.command(f'mmseqs createdb {path} {target_db_name} 1>/dev/null')
+    os.system(f'mmseqs createdb {path} {target_db_name} 1>/dev/null')
     tmp = f"{path}.tmp"
     
     output_results=f"{path}.alndb"
-    output_results2=f"{path}.tab"
+    output_results_tab=f"{path}.tab"
 
-    myUtil.command(f'mmseqs search {query_db_name} {target_db_name} {output_results} {tmp} --threads {options.cores} --alignment-mode {options.alignment_mode} --min-seq-id {options.minseqid} -e {options.evalue} -c {options.searchcoverage} 1>/dev/null') #attention cores is used here --min-seq-id {coverage}
-    myUtil.command(f'mmseqs convertalis {query_db_name} {target_db_name} {output_results} {output_results2} --format-mode 0 --threads {options.cores} 1>/dev/null')
-
-    return output_results2
+    os.system(f'mmseqs search {query_db_name} {target_db_name} {output_results} {tmp} --threads {cores} --alignment-mode {options.alignment_mode} --min-seq-id {options.minseqid} -e {options.evalue} -c {options.searchcoverage} 1>/dev/null') #attention cores is used here --min-seq-id {coverage}
+    os.system(f'mmseqs convertalis {query_db_name} {target_db_name} {output_results} {output_results_tab} --format-mode 0 --threads {cores} 1>/dev/null')
+    
+    
+    return output_results_tab
 
 def MMseqsLinclust(query,options):    
 
     #query_db_name="${query%.*}.queryDB" #can be done during argument parsing if possible
     query_db_name=f"{query}.queryDB"
-    myUtil.command(f'mmseqs createdb {query} {query_db_name} 1>/dev/null')
+    os.system(f'mmseqs createdb {query} {query_db_name} 1>/dev/null')
 
     output_results=f"{query}.output"
     output_results2=f"{query}_cluster.tsv"
 
-    myUtil.command(f'mmseqs cluster {query_db_name} {output_results} tmp --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage} 1>/dev/null') #-c is the minimal coverage
-    myUtil.command(f'mmseqs createtsv {query_db_name} {query_db_name} {output_results} {output_results2} --threads {options.cores} 1>/dev/null')
+    os.system(f'mmseqs cluster {query_db_name} {output_results} tmp --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage} 1>/dev/null') #-c is the minimal coverage
+    os.system(f'mmseqs createtsv {query_db_name} {query_db_name} {output_results} {output_results2} --threads {options.cores} 1>/dev/null')
 
     return output_results2
 
 
-#def getGenomeID(Path):
-    #should return genomeID according to standard genome identifiers from common source
-    #29.8.22
-    #9.10.22 deprecated, moved to my Util
-#    File = myUtil.getFileName(Path)
-#    File = myUtil.removeExtension2(File)
-#    return File
+
+
+
+def convert_diamond_to_mmseqs_format(diamond_tab_file, output_file):
+    with open(diamond_tab_file, 'r') as infile, open(output_file, 'w') as outfile:
+        for line in infile:
+            columns = line.strip().split('\t')
+            query, target = columns[0], columns[1]
+            percent_identity = float(columns[2])
+            alignment_length = int(columns[3])
+            mismatches = int(columns[4])
+            gapopens = int(columns[5])
+            q_start, q_end = int(columns[6]), int(columns[7])
+            t_start, t_end = int(columns[8]), int(columns[9])
+            evalue = float(columns[10])
+            bits = float(columns[11])
+            
+            nident = int(percent_identity / 100 * alignment_length)
+            q_len = q_end - q_start + 1
+            t_len = t_end - t_start + 1
+            qcov = alignment_length / q_len
+            tcov = alignment_length / t_len
+            
+            output_line = f"{query}\t{target}\t{q_start}\t{q_end}\t{t_start}\t{t_end}\t{q_len}\t{t_len}\t{alignment_length}\t{nident}\t{mismatches}\t{gapopens}\t{qcov:.2f}\t{tcov:.2f}\t{evalue}\t{bits}\n"
+            outfile.write(output_line)
+
+
 
 
 
