@@ -109,7 +109,7 @@ def parse_arguments(arguments):
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float,default = 0.75, help='Merge if sequences from two csb is identical above this threshold')
     
-    csb.add_argument('-csb_distinct', dest='csb_distinct_grouping', action='store_true', help='Skip training set clustering')
+    csb.add_argument('-no_csb_distinct', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
     csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, help='Acceptable dissimilarity for protein training datasets to be clustered')
     
 
@@ -202,12 +202,13 @@ def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     
     Csb_proteins.csb_proteins_fasta(options)
-    options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
+    if options.csb_distinct_grouping:
+    	Csb_phylogeny.csb_phylogeny(options)
     return
     
 
 def model_alignment(options):
-    Alignment.initial_alignments(options)
+    Alignment.initial_alignments(options, options.fasta_output_directory)
 
 
 def cross_validation(options):
@@ -281,6 +282,7 @@ def main(args=None):
         csb_finder(options)
 #5
     if options.stage <= 5:
+        myUtil.print_header("\nPreparing training data fasta files")
         generate_csb_sequence_fasta(options)   
 
 #6    
@@ -301,8 +303,6 @@ def main(args=None):
 
 #8  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
-    #die FP Sequenzen ausgeben
-    #die FN Sequenzen ausgeben
     if options.stage <= 8:
         report_cv_performance(options)
     

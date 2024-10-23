@@ -23,9 +23,9 @@ def csb_proteins_fasta(options):
     merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon)
 
     #fetch the grouped protein sets
-    if options.csb_distinct_grouping:
-        fetch_protein_to_fasta(options,grouped)
-    
+    #if options.csb_distinct_grouping:
+    #    fetch_protein_to_fasta(options,grouped)
+    # Do not fetch the very redundant datasets but always merge these    
     #fetch the merged subsets
     fetch_protein_to_fasta(options,merged,"Merged_")
     fetch_protein_to_fasta(options,singles,"Single_")

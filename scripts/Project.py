@@ -21,6 +21,7 @@ def prepare_result_space(options,project="project"):
         options.fasta_alignment_directory = options.result_files_directory+"/Alignments"        
         options.Hidden_markov_model_directory = options.result_files_directory+"/Hidden_markov_models"
         options.cross_validation_directory = options.result_files_directory+"/Cross_validation"
+        options.phylogeny_directory = options.result_files_directory+"/Protein_Phylogeny"
         options.Csb_directory = options.result_files_directory+"/Collinear_syntenic_blocks"
         
         
@@ -67,6 +68,8 @@ def prepare_result_space(options,project="project"):
         os.mkdir(options.Hidden_markov_model_directory)
         options.cross_validation_directory = options.result_files_directory+"/Cross_validation"
         os.mkdir(options.cross_validation_directory)
+        options.phylogeny_directory = options.result_files_directory+"/Protein_Phylogeny"
+        os.mkdir(options.phylogeny_directory)
         options.Csb_directory = options.result_files_directory+"/Collinear_syntenic_blocks"
         os.mkdir(options.Csb_directory)
         

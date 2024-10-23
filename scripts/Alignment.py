@@ -66,9 +66,9 @@ def align_tcs(options,):
 #it aligns with mafft and removes gaps with trimal at 95 % 
             
             
-def initial_alignments(options):
+def initial_alignments(options, fasta_output_directory):
 
-    directory_to_clean = options.fasta_output_directory
+    directory_to_clean = fasta_output_directory
 
     # Clean up preexisting alignments
     if os.path.exists(directory_to_clean):
@@ -78,19 +78,19 @@ def initial_alignments(options):
                 os.remove(file_path)
                 
                 
-    filepaths = get_alignments(options)
+    filepaths = get_alignments(options, fasta_output_directory)
     
 
     # Trim the concatenated alignment using trimAl
     for fasta_file in filepaths:
         base_name = os.path.splitext(os.path.basename(fasta_file))[0] # Extract the filename without the .faa extension
-        output_fasta = os.path.join(options.fasta_output_directory, f"{base_name}.fasta_aln")
+        output_fasta = os.path.join(fasta_output_directory, f"{base_name}.fasta_aln")
         remove_gaps_with_trimal(fasta_file, output_fasta, options.gap_remove_threshold)
     
     alignment_files = myUtil.getAllFiles(options.fasta_output_directory,".fasta_aln")
     return alignment_files
     
-def get_alignments(options):
+def get_alignments(options,fasta_output_directory):
     """
     02.11.22
         Args:
@@ -191,5 +191,86 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.95):
     except subprocess.CalledProcessError as e:
         print(f"Error occurred during trimming with trimAl: {e.stderr.decode('utf-8')}")
         raise
+
+
+
+
+
+def run_fasttree_on_alignment(alignment_file):
+    """
+    Runs FastTree on a given alignment file and writes the output to a tree file.
+
+    Args:
+        alignment_file (str): The path to the alignment file.
+
+    Returns:
+        str: The path to the generated tree file.
+    """
+    fasttree = find_executable("fasttree")
+    try:
+        # Define the output tree file based on the alignment file name
+        output_tree_file = os.path.splitext(alignment_file)[0] + ".tree"
+        
+        # Check if the output tree file already exists
+        if os.path.exists(output_tree_file):
+            print(f"Tree file already exists for {alignment_file}, skipping FastTree.")
+            return output_tree_file  # Return the existing tree file
+                
+        # Run FastTree on the alignment file and write the result to the output tree file
+        with open(output_tree_file, 'w') as outfile:
+            subprocess.run([fasttree, alignment_file], stdout=outfile, check=True)
+        
+        print(f"FastTree completed for {alignment_file}")
+        
+        # Return the path to the output tree file
+        return output_tree_file
+    
+    except subprocess.CalledProcessError as e:
+        print(f"Error running FastTree on {alignment_file}: {e}")
+        return None
+
+
+def calculate_phylogeny_parallel(alignment_files, options):
+    """
+    Parallelizes the execution of FastTree on multiple alignment files using multiprocessing.
+
+    Args:
+        alignment_files (list): A list of paths to alignment files.
+        options: An object containing options, specifically the number of cores available (options.cores).
+
+    Returns:
+        dict: A dictionary where the key is the filename (without extension) and the value is the path to the tree file.
+    """
+    # Create a multiprocessing pool with the specified number of cores
+    with multiprocessing.Pool(processes=options.cores) as pool:
+        # Distribute the workload among the cores and collect the results (tree file paths)
+        tree_files = pool.map(run_fasttree_on_alignment, alignment_files)
+
+    # Create a dictionary to map the filenames (without extension) to the tree file paths
+    tree_dict = {}
+    for tree_file in tree_files:
+        if tree_file is not None:
+            filename = os.path.splitext(os.path.basename(tree_file))[0]
+            tree_dict[filename] = tree_file
+    
+    return tree_dict
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
