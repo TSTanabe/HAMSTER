@@ -2,9 +2,9 @@
 
 
 import os
-import numpy as np
 from . import Csb_Mp_Algorithm
 from scipy.spatial import distance
+from sklearn.cluster import DBSCAN
 from sklearn.cluster import AgglomerativeClustering
 from itertools import combinations
 from collections import defaultdict
@@ -20,9 +20,12 @@ def csb_prediction(options):
     #modified CsbfinderS algorithm
     computed_Instances_dict = Csb_Mp_Algorithm.csb_finderS_matchpoint_algorithm(options.redundancy_hash,gene_clusters,options.insertions,options.occurence) #k insertions und q occurences müssen über die optionen festgelegt werden
 
+    # Combine reverse csbs
+    reverse_pairs = find_reverse_pairs(computed_Instances_dict)
+    computed_Instances_dict = merge_sets_for_pairs(computed_Instances_dict, reverse_pairs)
+    
     options.computed_Instances_dict = computed_Instances_dict
     
-
 def csb_jaccard(options):
     #convert the keys in computed_instances_dict into a list
     computed_Instances_key_list = csb_Instance_key_list(options.computed_Instances_dict, options.min_csb_size)
@@ -60,6 +63,12 @@ def print_cluster(filepath, cluster_dict):
 
     return filepath
 
+
+
+########################################################################################
+################ Secondary subroutines #################################################
+################ Subroutines used here #################################################
+########################################################################################
 
 def dereplicate(filepath):
     # Dictionary to store lines based on variable columns
@@ -172,9 +181,46 @@ def write_grouped_csb(filepath, data):
                 f.write(f"{item}\t")
             # Add a newline after each entry
             f.write('\n')            
-#################################
+###########################################################################
+# Added 19.10.2024 to specifically cluster the reverse csb
 
+def find_reverse_pairs(my_dict):
+    reverse_pairs = []
+    seen = set()  # Um Duplikate zu vermeiden
+    
+    for key in my_dict.keys():
+        reversed_key = key[::-1]  # Erzeuge das Revers-Tupel
+        
+        # Überprüfe, ob das Revers in den Keys ist und das Paar noch nicht überprüft wurde
+        if reversed_key in my_dict and reversed_key not in seen:
+            reverse_pairs.append((key, reversed_key))
+            seen.add(key)  # Füge das Paar zu "gesehenen" hinzu
+            seen.add(reversed_key)
+    
+    return reverse_pairs
 
+def merge_sets_for_pairs(my_dict, reverse_pairs):
+    """
+    Merges sets of reverse key pairs and keeps only one of the keys in the dictionary.
+    
+    Args:
+        my_dict (dict): Original dictionary with tuples as keys and sets as values.
+        reverse_pairs (list): List of tuple pairs where the second tuple is the reverse of the first.
+    
+    Returns:
+        dict: The updated dictionary with merged sets and only one key per reverse pair.
+    """
+    # Iteriere über die Reverse-Paare und führe die Sets zusammen
+    for key1, key2 in reverse_pairs:
+        if key1 in my_dict and key2 in my_dict:
+            # Führe die Sets von key1 und key2 zusammen
+            my_dict[key1] = my_dict[key1].union(my_dict[key2])
+            # Entferne key2 aus dem Dictionary
+            del my_dict[key2]
+    
+    return my_dict
+
+###########################################################################
 # Read the gene clusters from the file
 def jaccard(set1,set2):
     if not isinstance(set1, set) or not isinstance(set2,set):
@@ -191,8 +237,10 @@ def jaccard(set1,set2):
 
     return jaccard_similarity
 
-def calculate_similarity_matrix_jaccard(cluster_columns):
+def calculate_similarity_matrix_jaccard_deprectaed(cluster_columns):
     #cluster_columns needs to be a list of sets, not tuple because jaccard relies on the set datatype
+    #
+    #THIS ROUTINE NEEDS NUMPY. wich i tried to remove
     
     # Determine the number of clusters
     num_clusters = len(cluster_columns) if cluster_columns else 0
@@ -207,6 +255,27 @@ def calculate_similarity_matrix_jaccard(cluster_columns):
     similarity_matrix = distance.squareform(flattened_matrix)
     similarity_matrix += np.identity(len(cluster_columns))# replacing zeros with ones at the diagonal. 
     
+    print(similarity_matrix)
+    sys.exit()
+    return similarity_matrix
+
+def calculate_similarity_matrix_jaccard(cluster_columns):
+    #cluster_columns needs to be a list of sets, not tuple because jaccard relies on the set datatype
+    
+    # Convert sets to a 2D binary matrix
+    unique_elements = sorted(set().union(*cluster_columns))  # Find all unique elements across the sets
+    binary_matrix = [[1 if element in cluster else 0 for element in unique_elements] for cluster in cluster_columns]
+    
+    # Compute the Jaccard distance (1 - Jaccard similarity)
+    jaccard_distances = distance.pdist(binary_matrix, metric='jaccard')
+    
+    # Convert the distances to a full similarity matrix using squareform
+    similarity_matrix = 1 - distance.squareform(jaccard_distances)
+    
+    # Add 1s to the diagonal to represent self-similarity
+    for i in range(len(cluster_columns)):
+        similarity_matrix[i, i] = 1.0
+
 
     return similarity_matrix
 
@@ -231,7 +300,6 @@ def hierachy_clustering(similarity_matrix,threshold):
     #returns a dictionary, key is a number identifying the cluster (eine ganze zahl). value is a list with numbers. these numbers
     #are the cluster labels. this dictionary is pushed forward to the subroutine Clusters.keyword_dictionary
     return clusters
-
 
 def csb_index_to_gene_clusterID(cluster_dict,computed_Instances_key_list,computed_Instances_dict,prefix="csb*",suffix="*"):
     result_dict = dict() # csbID to geneclusters
@@ -266,7 +334,31 @@ def replicates(csb_gene_cluster_dict, redundancy_hash, filepath_redundant):
         csb_gene_cluster_dict[key] = new_list
     return csb_gene_cluster_dict  # Return the updated dictionary
 
-        
+######################################################################
+################ For proteinID clustering ############################
+################ in Csb_proteins          ############################
+######################################################################
+
+def apply_dbscan_on_similarity_matrix(similarity_matrix, eps=0.5, min_samples=2):
+    """
+    Applies DBSCAN clustering on a Jaccard similarity matrix.
+
+    Args:
+        similarity_matrix (numpy.ndarray): A square matrix of Jaccard similarities between sets.
+        eps (float): The maximum distance between two points to be considered as neighbors.
+        min_samples (int): The minimum number of points required to form a cluster.
+
+    Returns:
+        numpy.ndarray: An array of cluster labels, where -1 indicates noise.
+    """
+    # Step 1: Convert similarity matrix to distance matrix (1 - similarity)
+    distance_matrix = 1 - similarity_matrix
+
+    # Step 2: Apply DBSCAN with the precomputed distance matrix
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
+    labels = dbscan.fit_predict(distance_matrix)
+
+    return labels    
 
 
 

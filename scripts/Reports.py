@@ -9,7 +9,11 @@ class ReportObject:
         self.fold_matrices = fold_matrices # is a list
         self.optimized_cutoff = optimized_cutoff
         self.trusted_cutoff = trusted_cutoff 
-        self.noise_cutoff = noise_cutoff #TODO if infinite than 10        
+        self.noise_cutoff = noise_cutoff
+        
+        self.accuracy = 0
+        self.f1score = 0
+        self.mcc = 0        
 
 def move_HMMs(input_folder,output_folder,file_extension):
     print(f"Saving HMMs in the  directory: {output_folder}")
@@ -73,24 +77,18 @@ def parse_matrices_to_report(directory,file_extension):
             
 def create_performance_file(options,performance_dict,directory,filename = "/performance.txt"):
     file_path = directory + filename
+    
+    for key,report in performance_dict.items():
+        report.accuracy = calculate_balanced_accuracy(report.fold_matrices)
+        report.f1score = calculate_f1_score(report.matrix)
+        report.mcc = calculate_mcc(report.matrix)        
+    
     with open(file_path, 'w') as file:
-        file.write("HMM\tbalanced accuracy\tF1 score\tMCC\tmatrix\tCsb\n")
-        sorted_keys = sorted(performance_dict.keys())
-        
-        csbs = read_grouped_csb(options.csb_output_file)
-        
-        for key in sorted_keys:
-            report = performance_dict[key]
-            csb = csbs_report(key,csbs)
-            
-            #welche werte brauchen wir?
-            #balanced accuracy
-            accuracy = calculate_balanced_accuracy(report.fold_matrices)
-            #F1 score
-            f1score = calculate_f1_score(report.matrix)
-            #MCC
-            mcc = calculate_mcc(report.matrix)
-            file.write(key+"\t"+str(accuracy)+"\t"+str(f1score)+"\t"+str(mcc)+"\t"+str(report.matrix)+"\t"+csb+"\n")        
+        file.write("HMM\tbalanced accuracy\tF1 score\tMCC\tmatrix[TP,FP,FN,TN]\t\n")
+        sorted_items = sorted(performance_dict.items(), key=lambda x: (x[0].split('_')[-1], x[1].mcc))
+  
+        for key, report in sorted_items:
+            file.write(key+"\t"+str(report.accuracy)+"\t"+str(report.f1score)+"\t"+str(report.mcc)+"\t"+str(report.matrix)+"\n")        
 
     return file_path
             
@@ -204,40 +202,5 @@ def print_report(filepath):
                 for last_part, count in last_part_count.items():
                     output_file.write(f"\t{last_part} was found {count} times\n")
                     output_file.write(f"protein IDs\t {last_part}: {leading_parts_set}")
-#    # Print the results
-#    print("Last Part Count:")
-#    for last_part, count in last_part_count.items():
-#        print(f"{last_part}: {count}")
-
-#    print("\nSets with Last Parts:")
-#    for last_part, leading_parts_set in sets_with_last_parts.items():
-
-
-#with :
-#output_file.write(line)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#make a new textfile to write to in the same location as the filepath
-
-#for each line in the filepath
-#split the line by the tab separation
-#columns 1 2 and 3 are printed sets revert them into sets
-#for each set iterate the elements
-#each element split at the **
-#the last part of the split may occur in other elements of the set. count how often this last part occurs in the intire set at hand and store the string of the last part in a hast as key and the number of occurence as value
-#for the leading part from the split, store this string in a set. the set shall be an anonymous set that is itself the value of a dict. the corresponding key shall be the last part of the split
 
 

@@ -109,14 +109,14 @@ def parse_arguments(arguments):
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float,default = 0.75, help='Merge if sequences from two csb is identical above this threshold')
     
-    csb.add_argument('-csb_distinct', dest='csb_distinct_grouping', action='store_true', help='Set to merge only if sequences from two csb are distinct.')
-    
+    csb.add_argument('-csb_distinct', dest='csb_distinct_grouping', action='store_true', help='Skip training set clustering')
+    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, help='Acceptable dissimilarity for protein training datasets to be clustered')
     
 
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('--min_seqs', dest='min_seqs', type=int, default = 5, help='Min. number of required sequences for the alignment')
     alignment.add_argument('--gap_col_remove', dest='gap_remove_threshold', type=int, default = 95, help='[0,100] remove alignment columns with percent gaps')
-    
+
     #hhfilter = parser.add_argument_group("Optional HHfilter parameters")
     #hhfilter.add_argument('--hhfilter_id', dest='hhfilter_id', type=int, default = 90, choices = [], help='[0,100]  maximum pairwise percent sequence identity def=90')
     #hhfilter.add_argument('--hhfilter_diff', dest='hhfilter_diff', type=int, default = 0, help='[0,inf[  filter MSA by selecting most diverse set of sequences, keeping at least this many seqs in each MSA block of length 50 def=0 ')
@@ -202,7 +202,7 @@ def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     
     Csb_proteins.csb_proteins_fasta(options)
-    
+    options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
     return
     
 
@@ -214,6 +214,10 @@ def cross_validation(options):
 
     Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
+    
+    if options.sequence_faa_file is None or not os.path.exists(options.sequence_faa_file):
+        options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
+    
     Validation.parallel_cross_validation(options)
 
 
