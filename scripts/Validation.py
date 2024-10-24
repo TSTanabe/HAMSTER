@@ -105,12 +105,8 @@ def process_cross_folds(args_tuple):
         writer.write('\n'.join(['\t'.join(map(str, row)) for row in fold_matrix]))
     
     
-    
     #More informative output of positive and negative hits
     hit_id_reports(cv_directory, options.database_directory, model_hit_distribution)
-    
-    
-
     
     return None
 
@@ -166,20 +162,6 @@ def create_cross_validation_sets(alignment_file, output_directory, ending=".cv",
                 train_f.write(f">{record_id}\n{sequence}\n")
                 
 
-def deprecated_concat_files_with_extension(directory, extension, output_file):
-    file_list = [os.path.join(directory, file) for file in os.listdir(directory) if file.endswith(extension)]
-    if not file_list:
-        print(f"No files with the '{extension}' extension found in {directory}")
-        return None
-    
-    with open(output_file, 'w') as output:
-        
-        for filename in file_list:
-            #file_path = os.path.join(directory, filename)
-            with open(filename, 'r') as f:
-                output.write(f.read())
-
-    return output_file
 
 def extract_record_ids_from_alignment(alignment_file):
     record_ids = set()
@@ -261,7 +243,7 @@ def cutoffs(true_positives,true_negatives,report_filepath):
     sum_TP = len(true_positives) #true_positives is a set, sum_TP is the total number of TP
     true_positive_dict = {}
     false_positive_dict = {}
-    false_negative_dict = {}
+    false_negative_dict = {key: 0 for key in true_positives}
     
     TP = 0
     FP = 0
@@ -298,9 +280,10 @@ def cutoffs(true_positives,true_negatives,report_filepath):
                 if FP == 0:
                     trusted_cutoff = bitscore
                 FN = sum_TP - TP #wenn tp die hit_ids speichert dann könnte man hier direkt die FN hit IDs rausfiltern über vergleiche von sets
-
-                false_negative_set = true_positives - set(true_positive_dict) #total true positives minus the true positive hits
-                false_negative_dict = {key: bitscore for key in false_negative_set}
+                
+                
+                if hit_id in false_negative_dict: #track the bitscores, TPs will be removed from here when better MCC is found
+                    false_negative_dict[hit_id] = bitscore
             else:
                 if hit_id in false_positive_dict:
                     continue #skip if hits are double because of domains
@@ -318,8 +301,11 @@ def cutoffs(true_positives,true_negatives,report_filepath):
                 optimized_cutoff = bitscore
                 matrix = [TP,FP,FN,TN]
                 
-
-                if not FN == len(false_negative_dict.keys()):
+                # Remove all TPs at this point from the false_negative_dict thus scores can be recorded for all hits but only those in the
+                # below the threshold will be returned              
+                false_negative_dict = {k: v for k, v in false_negative_dict.items() if k not in set(true_positive_dict)}
+                
+                if not FN == len(false_negative_dict.keys()): # This should never happen
                     print("\n ERROR False negative dict in the cutoff routine")
                     print(FN)
                     print(false_negative_dict)
@@ -329,13 +315,13 @@ def cutoffs(true_positives,true_negatives,report_filepath):
                     print(set(true_positive_dict))
                     print("\n\n\n")
 
-                hit_id_distribution = [true_positive_dict.copy(), false_positive_dict.copy(), false_negative_dict.copy()] #distribution of hit ids at optimum MCC
+
             if TP == sum_TP:
                 noise_cutoff = bitscore
                 break #MCC there is no better MCC without more TP
             if noise_cutoff > bitscore:
                 noise_cutoff = bitscore
-   
+    hit_id_distribution = [true_positive_dict.copy(), false_positive_dict.copy(), false_negative_dict.copy()] #distribution of hit ids at optimum MCC   
     return optimized_cutoff,trusted_cutoff,noise_cutoff,MCC,matrix, hit_id_distribution
 
 
@@ -445,6 +431,30 @@ def write_report_to_file(cv_directory, dict_label, sorted_data):
             f.write(f"{key}\t{score}\t{count}\t{neighborhood}\n")
 
 
+
+def write_report_to_iTolBinary(cv_directory, dict_label, sorted_data):
+    # Create the file path
+    report_file = os.path.join(cv_directory, f"{dict_label}_iTolBinary.hit_report")
+    
+    # Prepare the header for the iTOL binary dataset
+    header = """DATASET_BINARY
+SEPARATOR COMMA
+DATASET_LABEL,Full Binary Dataset
+COLOR,#ff0000
+FIELD_SHAPE,1
+FIELD_LABELS,ID
+FIELD_COLORS,#ff0000
+DATA
+"""
+    
+    # Open the output file for writing
+    with open(report_file, 'w') as outfile:
+        outfile.write(header)
+        for key, score, count, neighborhood in sorted_data:
+            f.write(f"{key},1\n")
+
+
+
 def hit_id_reports(cv_directory, database, data):
     """
     Generates a report with the true positive, false positive, and false negative hits, 
@@ -518,6 +528,7 @@ def hit_id_reports(cv_directory, database, data):
                 
             # Write the sorted data to a file
         write_report_to_file(cv_directory, dict_label, sorted_data)
+        write_report_to_iTolBinary(cv_directory, dict_label, sorted_data)
 
 
     # At this point, the key counts and gene vicinity data for TP, FP, and FN have been processed
