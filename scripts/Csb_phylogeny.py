@@ -2,11 +2,13 @@
 
 import sqlite3
 import os
+import sys
 
 import subprocess
-import multiprocessing
+
 
 from . import Csb_cluster
+from . import Csb_proteins
 from . import Alignment
 from . import myUtil
 
@@ -34,8 +36,7 @@ def csb_phylogeny(options):
     family_alignment_files = Alignment.initial_alignments(options, options.phylogeny_directory)
     
     #calculate phylogeny for each alignment file
-    tree_files = Alignment.calculate_phylogeny_parallel(family_alignment_files,options) #creates .tree files in the phylogeny directory
-
+    tree_files = Alignment.calculate_phylogeny_parallel(options, family_alignment_files) #creates .tree files in the phylogeny directory
     #Find the Last Common Ancestors (LCA) for each potential training set and write the fasta file
     get_last_common_ancestor_fasta(options,options.TP_merged,tree_files)
     get_last_common_ancestor_fasta(options,options.TP_singles,tree_files)
@@ -59,9 +60,9 @@ def get_domain_key_list_pairs(input_dict, output_dict=None):
     return output_dict
 
     
-def fetch_protein_family_to_fasta(options, domain_family_dict):
+def fetch_protein_family_to_fasta(options, domain_keyword_dict):
 
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
 
         # Iterate over the domain-keyword dictionary
@@ -100,7 +101,7 @@ def fetch_protein_family_to_fasta(options, domain_family_dict):
 
 
 
-def find_lca_and_monophyly(tree, protein_ids):
+def find_lca_and_monophyly(protein_ids, tree_file):
     """
     Given a phylogenetic tree and a set of protein identifiers, 
     this function finds the last common ancestor (LCA) of the given proteins,
@@ -115,6 +116,7 @@ def find_lca_and_monophyly(tree, protein_ids):
     - is_monophylum: True if the clade is monophyletic, False otherwise.
     - included_identifiers: If not monophyletic, returns all included protein identifiers in the LCA clade.
     """
+    tree = Phylo.read(tree_file, 'newick')
     
     # Find the LCA of the given protein identifiers
     lca = tree.common_ancestor(protein_ids)
@@ -131,14 +133,21 @@ def find_lca_and_monophyly(tree, protein_ids):
 
 
 def get_last_common_ancestor_fasta(options,grouped,trees_dict):
-
-    for proteinID_frozenset, keyword_domain_pairs in grouped:
+    for proteinID_frozenset, keyword_domain_pairs in grouped.items():
+        
+        #define domain, key and tree
         keyword, domain = keyword_domain_pairs[0]
         tree = trees_dict[domain]
+        
+        #get the monophyletic group
         lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
+        
+        #check distance to the original group
+        
+        
         if clade_identifier_set:
             # For the new monophyletic clade fetch all proteins to the training data alignment directory for later processing
-            Csb_proteins.fetch_protein(options, {frozenset(clade_identifier_set):(keyword,domain)}, 'monophyl')
+            Csb_proteins.fetch_protein_to_fasta(options, {frozenset(clade_identifier_set):[(keyword,domain)]}, 'monophyl')
     
 
 

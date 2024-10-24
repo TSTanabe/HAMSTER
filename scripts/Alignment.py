@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import subprocess
+import multiprocessing
 from . import myUtil
 
 
@@ -71,26 +72,30 @@ def initial_alignments(options, fasta_output_directory):
     directory_to_clean = fasta_output_directory
 
     # Clean up preexisting alignments
-    if os.path.exists(directory_to_clean):
+    if os.path.exists(directory_to_clean): #TODO make this an option and also clean the treefiles if they exist
         for filename in os.listdir(directory_to_clean):
             if filename.endswith(".fasta_aln"):
                 file_path = os.path.join(directory_to_clean, filename)
                 os.remove(file_path)
                 
-                
-    filepaths = get_alignments(options, fasta_output_directory)
+    print(fasta_output_directory)            
+    filepaths = make_alignments(options, fasta_output_directory)
     
 
     # Trim the concatenated alignment using trimAl
     for fasta_file in filepaths:
         base_name = os.path.splitext(os.path.basename(fasta_file))[0] # Extract the filename without the .faa extension
         output_fasta = os.path.join(fasta_output_directory, f"{base_name}.fasta_aln")
+        
+        if os.path.exists(output_fasta):
+            continue
+            
         remove_gaps_with_trimal(fasta_file, output_fasta, options.gap_remove_threshold)
     
-    alignment_files = myUtil.getAllFiles(options.fasta_output_directory,".fasta_aln")
+    alignment_files = myUtil.getAllFiles(fasta_output_directory,".fasta_aln")
     return alignment_files
     
-def get_alignments(options,fasta_output_directory):
+def make_alignments(options,fasta_output_directory):
     """
     02.11.22
         Args:
@@ -99,16 +104,19 @@ def get_alignments(options,fasta_output_directory):
         Alignment files should be concated if header is the same            
     """
 
-    fasta_files = myUtil.getAllFiles(options.fasta_output_directory,".faa") 
+    fasta_files = myUtil.getAllFiles(fasta_output_directory,".faa") 
     for fasta_file in fasta_files:
         input_dir = os.path.dirname(fasta_file)
         base_name = os.path.splitext(os.path.basename(fasta_file))[0] # Extract the filename without the .faa extension
         output_fasta = os.path.join(input_dir, f"{base_name}.faa_aln") # Create the output filename with .aln extension in the same directory as the input file
 
+        if os.path.exists(output_fasta):
+            continue
+                    
         #Align with default mafft
         align_fasta_with_mafft(fasta_file, output_fasta, options.cores)
     
-    alignment_files = myUtil.getAllFiles(options.fasta_output_directory,".faa_aln")            
+    alignment_files = myUtil.getAllFiles(fasta_output_directory,".faa_aln")            
     
     return alignment_files
 
@@ -206,6 +214,7 @@ def run_fasttree_on_alignment(alignment_file):
     Returns:
         str: The path to the generated tree file.
     """
+    print(alignment_file)
     fasttree = find_executable("fasttree")
     try:
         # Define the output tree file based on the alignment file name
@@ -230,7 +239,7 @@ def run_fasttree_on_alignment(alignment_file):
         return None
 
 
-def calculate_phylogeny_parallel(alignment_files, options):
+def calculate_phylogeny_parallel(options, alignment_files):
     """
     Parallelizes the execution of FastTree on multiple alignment files using multiprocessing.
 

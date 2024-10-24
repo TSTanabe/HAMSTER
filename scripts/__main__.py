@@ -14,6 +14,7 @@ from . import ParseSequenceLinclustReports
 
 from . import Csb_cluster
 from . import Csb_proteins
+from . import Csb_phylogeny
 
 from . import Alignment
 
@@ -203,7 +204,8 @@ def generate_csb_sequence_fasta(options):
     
     Csb_proteins.csb_proteins_fasta(options)
     if options.csb_distinct_grouping:
-    	Csb_phylogeny.csb_phylogeny(options)
+        print("Preparing phylogeny")
+        Csb_phylogeny.csb_phylogeny(options)
     return
     
 
