@@ -202,12 +202,12 @@ def csb_finder(options):
 def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     
-    Csb_proteins.csb_proteins_fasta(options)
+    Csb_proteins.csb_proteins_datasets(options) # groups training data
     if options.csb_distinct_grouping:
-        print("Preparing phylogeny")
-        Csb_phylogeny.csb_phylogeny(options)
-    return
-    
+        Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
+    else:
+    	options.TP_monophyla = {}
+    Csb_proteins.training_data_fasta(options) # generates the fasta files
 
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)

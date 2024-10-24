@@ -2,15 +2,8 @@
 
 import sqlite3
 import os
-import sys
 
-import subprocess
-
-
-from . import Csb_cluster
-from . import Csb_proteins
 from . import Alignment
-from . import myUtil
 
 from Bio import Phylo
 
@@ -18,7 +11,7 @@ from Bio import Phylo
 #do not compare the csb appearences as they jaccard itself should have managed it.
 
 
-def csb_phylogeny(options):
+def csb_phylogeny_datasets(options):
 
     # options.phylogeny_directory #to save the protein family trees
 
@@ -26,22 +19,28 @@ def csb_phylogeny(options):
     # options.TP_singles = singles #not merged because unique dataset data key: set => value tuple(keyword,domain)
 
     #collect for each domain the relevant csb keywords
-    domain_family_dict = get_domain_key_list_pairs(options.TP_merged)
-    domain_family_dict = get_domain_key_list_pairs(options.TP_singles, domain_family_dict)
+    training_datasets = {**options.TP_merged, **options.TP_singles}
+    
+    domain_family_dict = get_domain_key_list_pairs(training_datasets)
+    #domain_family_dict = get_domain_key_list_pairs(options.TP_singles, domain_family_dict)
 
     #fetch the proteins for each 
-    fetch_protein_family_to_fasta(options,domain_family_dict)
+    fetch_protein_family_to_fasta(options, domain_family_dict)
     
     #align the protein family
     family_alignment_files = Alignment.initial_alignments(options, options.phylogeny_directory)
     
     #calculate phylogeny for each alignment file
     tree_files = Alignment.calculate_phylogeny_parallel(options, family_alignment_files) #creates .tree files in the phylogeny directory
-    #Find the Last Common Ancestors (LCA) for each potential training set and write the fasta file
-    get_last_common_ancestor_fasta(options,options.TP_merged,tree_files)
-    get_last_common_ancestor_fasta(options,options.TP_singles,tree_files)
-    return
     
+    #Find the Last Common Ancestors (LCA) for each potential training set and write the fasta file
+    monophylums = get_last_common_ancestor_fasta(options,training_datasets,tree_files)
+    #get_last_common_ancestor_fasta(options,options.TP_singles,tree_files)
+    
+    options.TP_monophyla = monophylums
+
+    
+        
 def get_domain_key_list_pairs(input_dict, output_dict=None):
     # If no output_dict is provided, initialize a new empty dictionary
     if output_dict is None:
@@ -133,6 +132,7 @@ def find_lca_and_monophyly(protein_ids, tree_file):
 
 
 def get_last_common_ancestor_fasta(options,grouped,trees_dict):
+    monophyly = {}
     for proteinID_frozenset, keyword_domain_pairs in grouped.items():
         
         #define domain, key and tree
@@ -146,9 +146,9 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict):
         
         
         if clade_identifier_set:
-            # For the new monophyletic clade fetch all proteins to the training data alignment directory for later processing
-            Csb_proteins.fetch_protein_to_fasta(options, {frozenset(clade_identifier_set):[(keyword,domain)]}, 'monophyl')
-    
+            monophyly[frozenset(clade_identifier_set)] = [(keyword,domain)]
+
+    return monophyly    
 
 
 

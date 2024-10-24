@@ -7,7 +7,7 @@ from . import Csb_cluster
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
-def csb_proteins_fasta(options):
+def csb_proteins_datasets(options):
     
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     
@@ -21,17 +21,18 @@ def csb_proteins_fasta(options):
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
     merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon)
-
-    #fetch the grouped protein sets
-    #if options.csb_distinct_grouping:
-    #    fetch_protein_to_fasta(options,grouped)
-    # Do not fetch the very redundant datasets but always merge these    
-    #fetch the merged subsets
-    fetch_protein_to_fasta(options,merged,"Merged_")
-    fetch_protein_to_fasta(options,singles,"Single_")
-    options.TP_grouped = grouped
+    
     options.TP_merged = merged
     options.TP_singles = singles
+    
+
+
+def training_data_fasta(options):
+    training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
+    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon)
+    fetch_protein_to_fasta(options,merged,"Merged_")
+    fetch_protein_to_fasta(options,singles,"Single_")
+    
     
 def parse_csb_file_to_dict(file_path):
     data_dict = {}
@@ -285,6 +286,8 @@ def merge_similar_groups(grouped_sets, epsilon):
             if set_label == label:
                 # Merge the sets with the same label
                 merged_set = merged_set.union(cluster_columns[idx])  # Union of frozen sets
+                keyword,domain = grouped_sets[cluster_columns[idx]]
+                pair = ("m"+keyword,domain) #additional m to mark up the csb
                 merged_list.extend(grouped_sets[cluster_columns[idx]])  # Merge corresponding lists
 
         # Store the merged set (converted to frozenset to make it a valid dictionary key)
