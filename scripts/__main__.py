@@ -118,16 +118,6 @@ def parse_arguments(arguments):
     alignment.add_argument('--min_seqs', dest='min_seqs', type=int, default = 5, help='Min. number of required sequences for the alignment')
     alignment.add_argument('--gap_col_remove', dest='gap_remove_threshold', type=int, default = 95, help='[0,100] remove alignment columns with percent gaps')
 
-    #hhfilter = parser.add_argument_group("Optional HHfilter parameters")
-    #hhfilter.add_argument('--hhfilter_id', dest='hhfilter_id', type=int, default = 90, choices = [], help='[0,100]  maximum pairwise percent sequence identity def=90')
-    #hhfilter.add_argument('--hhfilter_diff', dest='hhfilter_diff', type=int, default = 0, help='[0,inf[  filter MSA by selecting most diverse set of sequences, keeping at least this many seqs in each MSA block of length 50 def=0 ')
-    #hhfilter.add_argument('--hhfilter_cov', dest='hhfilter_cov', type=int, default = 0, choices = [], help='[0,100]  minimum percent coverage with query def=0')
-    #hhfilter.add_argument('--hhfilter_qid', dest='hhfilter_qid', type=int, default = 0, choices = [], help='[0,100]  minimum percent sequence identity with query def=0')
-    #hhfilter.add_argument('--hhfilter_maxseq', dest='hhfilter_maxseq', type=int, default = 65535, help='<int>  max number of input rows def=65535') 
-    #hhfilter.add_argument('--hhfilter_maxres', dest='hhfilter_maxres', type=int, default = 20001, help='<int>  max number of HMM columns def=20001') 
-
-
-
 
 
     options = Options()
@@ -185,7 +175,7 @@ def initial_search(options):
 def cluster_sequences(options):
     #Groups sequences via linclust and updates the database with grouped identifiers
     
-    print(f"MMseqs linclust with --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage}")    
+    print(f"MMseqs cluster with --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage}")    
     ParseSequenceLinclustReports.cluster_sequences(options)
 
 
@@ -300,8 +290,6 @@ def main(args=None):
     if options.stage <= 7:
         myUtil.print_header("\nPerforming cross valdation procedure")
         cross_validation(options)
-        #report_cv_performance(options)
-        
 
 #8  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer

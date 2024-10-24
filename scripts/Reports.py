@@ -85,7 +85,7 @@ def create_performance_file(options,performance_dict,directory,filename = "/perf
     
     with open(file_path, 'w') as file:
         file.write("HMM\tbalanced accuracy\tF1 score\tMCC\tmatrix[TP,FP,FN,TN]\t\n")
-        sorted_items = sorted(performance_dict.items(), key=lambda x: (x[0].split('_')[-1], x[1].mcc))
+        sorted_items = sorted(performance_dict.items(), key=lambda x: (x[0].split('_')[-1], x[1].mcc), reverse=True)
   
         for key, report in sorted_items:
             file.write(key+"\t"+str(report.accuracy)+"\t"+str(report.f1score)+"\t"+str(report.mcc)+"\t"+str(report.matrix)+"\n")        

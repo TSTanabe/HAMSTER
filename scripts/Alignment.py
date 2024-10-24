@@ -3,6 +3,9 @@ import sys
 import shutil
 import subprocess
 import multiprocessing
+
+import veryfasttree # for the phylogeny
+
 from . import myUtil
 
 
@@ -204,7 +207,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.95):
 
 
 
-def run_fasttree_on_alignment(alignment_file):
+def run_fasttree_on_alignment(alignment_file,cores=2):
     """
     Runs FastTree on a given alignment file and writes the output to a tree file.
 
@@ -214,7 +217,6 @@ def run_fasttree_on_alignment(alignment_file):
     Returns:
         str: The path to the generated tree file.
     """
-    print(alignment_file)
     fasttree = find_executable("fasttree")
     try:
         # Define the output tree file based on the alignment file name
@@ -224,7 +226,13 @@ def run_fasttree_on_alignment(alignment_file):
         if os.path.exists(output_tree_file):
             print(f"Tree file already exists for {alignment_file}, skipping FastTree.")
             return output_tree_file  # Return the existing tree file
-                
+        
+        #TODO replacement with veryfasttree, better due to the GPL3 licence and the binding with python
+        # remove the unnecessary second subprocess call and the find executable 
+        tree = veryfasttree.run(input_alignment, threads=cores, quiet=True)        
+        with open(output_tree_file, 'w') as outfile:
+            outfile.write(tree)
+        
         # Run FastTree on the alignment file and write the result to the output tree file
         with open(output_tree_file, 'w') as outfile:
             subprocess.run([fasttree, alignment_file], stdout=outfile, check=True)
