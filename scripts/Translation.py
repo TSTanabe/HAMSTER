@@ -186,7 +186,10 @@ def unpacker(file):
 
 ################# Concatenate subroutines     
 def create_glob_file(options):
-
+    
+    if os.path.isfile(options.glob_faa) and os.path.isdir(options.fasta_file_directory):
+        return #return if a glob fasta file and deconcatenated files were provided
+    
     options.glob_faa = options.result_files_directory+"/glob.faa"
     with open(options.glob_faa, 'w') as outfile:
         for genomeID in options.queued_genomes:

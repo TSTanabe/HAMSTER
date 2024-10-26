@@ -14,7 +14,6 @@ from Bio import Phylo
 def csb_phylogeny_datasets(options):
 
     # options.phylogeny_directory #to save the protein family trees
-
     # options.TP_merged = merged #already merged because of highly similar training data key: set => value tuple(keyword,domain)
     # options.TP_singles = singles #not merged because unique dataset data key: set => value tuple(keyword,domain)
 
@@ -22,7 +21,6 @@ def csb_phylogeny_datasets(options):
     training_datasets = {**options.TP_merged, **options.TP_singles}
     
     domain_family_dict = get_domain_key_list_pairs(training_datasets)
-    #domain_family_dict = get_domain_key_list_pairs(options.TP_singles, domain_family_dict)
 
     #fetch the proteins for each 
     fetch_protein_family_to_fasta(options, domain_family_dict)
@@ -35,7 +33,6 @@ def csb_phylogeny_datasets(options):
     
     #Find the Last Common Ancestors (LCA) for each potential training set and write the fasta file
     monophylums = get_last_common_ancestor_fasta(options,training_datasets,tree_files)
-    #get_last_common_ancestor_fasta(options,options.TP_singles,tree_files)
     
     options.TP_monophyla = monophylums
 
@@ -55,18 +52,20 @@ def get_domain_key_list_pairs(input_dict, output_dict=None):
                 output_dict[domain] = []
             # Append the key to the list of keys for the domain
             output_dict[domain].append(key)
-
     return output_dict
 
     
 def fetch_protein_family_to_fasta(options, domain_keyword_dict):
-
+#TODO dieses fetch nimmt weitaus mehr als erwartet, wahrscheinlich weil hier nicht auf die proteinID geprüft wird sondern nur nach csb und protein typ gefetchd wird.
+# Es werden auf jeden Fall viel zu viele sequenzen geholt, ich weiß nur nicht warum
     with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
 
         # Iterate over the domain-keyword dictionary
         for domain, keywords in domain_keyword_dict.items():
-            
+            print(domain)
+            modified_keywords = [keyword[1:] for keyword in keywords] #remove the marker character
+            print(modified_keywords)
             # Use a parameterized query to check for the domain and the keywords
             query = '''
                 SELECT DISTINCT P.proteinID, P.sequence
@@ -76,23 +75,32 @@ def fetch_protein_family_to_fasta(options, domain_keyword_dict):
                 JOIN Keywords K ON C.clusterID = K.clusterID
                 WHERE D.domain = ? AND K.keyword IN ({})
             '''.format(','.join('?' * len(keywords)))
-
             # Execute the query with the domain and the list of keywords
-            cur.execute(query, (domain, *keywords))
+            cur.execute(query, (domain, *modified_keywords))
 
             proteins = cur.fetchall()
 
-            # Use a set to track already written proteinIDs
-            written_proteins = set()
-
             # Write the results to the domain-specific FASTA file
             # Create the filename for this domain's output file
-            filename = f"{domain}.faa"
+            name = domain.split('_')[-1]
+            filename = f"{name}.faa"
             output_fasta_path = os.path.join(options.phylogeny_directory, filename)
-            with open(output_fasta_path, 'w') as fasta_file:
+            
+            # Use a set to track already written proteinIDs
+            written_proteins = set()
+            if os.path.exists(output_fasta_path):
+                # Open the existing file and extract protein IDs
+                with open(output_fasta_path, 'r') as fasta_file:
+                    for line in fasta_file:
+                        if line.startswith('>'):
+                            # Extract protein ID from the FASTA header line (assuming ID is everything after '>')
+                            protein_id = line[1:].strip().split()[0]  # Assuming ID is the first part after '>'
+                            written_proteins.add(protein_id)
+
+            #Append with the fetched sequences
+            with open(output_fasta_path, 'a') as fasta_file:
                 for proteinID, sequence in proteins:
                     if proteinID not in written_proteins:
-                        # Add protein to the file and mark it as written
                         fasta_file.write(f'>{proteinID}\n{sequence}\n')
                         written_proteins.add(proteinID)
 
@@ -118,7 +126,14 @@ def find_lca_and_monophyly(protein_ids, tree_file):
     tree = Phylo.read(tree_file, 'newick')
     
     # Find the LCA of the given protein identifiers
-    lca = tree.common_ancestor(protein_ids)
+    try:
+        # Attempt to find the LCA of the given protein identifiers
+        lca = tree.common_ancestor(protein_ids)
+    except Exception as e:
+        # Print the tree file and error message if an exception occurs
+        print(f"Error finding LCA in tree file: {tree_file}")
+        print(f"Original error: {e}")
+        return None, None, None
     
     # Check if the clade is monophyletic
     is_monophylum = tree.is_monophyletic(protein_ids)
@@ -137,6 +152,7 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict):
         
         #define domain, key and tree
         keyword, domain = keyword_domain_pairs[0]
+        domain = domain.split('_')[-1]
         tree = trees_dict[domain]
         
         #get the monophyletic group

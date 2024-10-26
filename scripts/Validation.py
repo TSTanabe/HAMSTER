@@ -441,7 +441,7 @@ def write_report_to_iTolBinary(cv_directory, dict_label, sorted_data):
 SEPARATOR COMMA
 DATASET_LABEL,Full Binary Dataset
 COLOR,#ff0000
-FIELD_SHAPE,1
+FIELD_SHAPES,1
 FIELD_LABELS,ID
 FIELD_COLORS,#ff0000
 DATA
@@ -451,7 +451,7 @@ DATA
     with open(report_file, 'w') as outfile:
         outfile.write(header)
         for key, score, count, neighborhood in sorted_data:
-            f.write(f"{key},1\n")
+            outfile.write(f"{key},1\n")
 
 
 

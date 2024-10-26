@@ -12,8 +12,8 @@ def cluster_sequences(options):
 
     #Get all the hits for the sequences in the query file
     prefix = "Query_"
-    
-    initial_hit_files = [os.path.join(options.fasta_initial_hit_directory, f) for f in os.listdir(options.fasta_initial_hit_directory) if f.startswith(prefix)]
+    suffix = ".hit_list"
+    initial_hit_files = [os.path.join(options.fasta_initial_hit_directory, f) for f in os.listdir(options.fasta_initial_hit_directory) if f.startswith(prefix) and f.endswith(suffix)]
     limit = len(initial_hit_files)
     
     for index,fasta_file in enumerate(initial_hit_files):

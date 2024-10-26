@@ -5,7 +5,7 @@ import subprocess
 import multiprocessing
 
 import veryfasttree # for the phylogeny
-
+from contextlib import redirect_stdout, redirect_stderr
 from . import myUtil
 
 
@@ -179,7 +179,7 @@ def align_fasta_with_mafft(input_fasta, output_fasta, cores=2):
 
 
 
-def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.95):
+def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
     """
     Remove columns with gaps using trimAl based on the specified gap threshold.
 
@@ -189,6 +189,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.95):
         gap_threshold: Proportion of gaps allowed in a column (default: 0.95).
     """
     trimal = find_executable("trimal")
+    print(f"Trimming {input_fasta} with {gap_threshold}")
     try:
         # Run the trimAl command with the gap threshold
         subprocess.run([
@@ -196,6 +197,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.95):
             "-in", input_fasta, 
             "-out", output_alignment, 
             "-gt", str(gap_threshold),
+            "-keepseqs",
             "-keepheader"
         ], check=True)
         #print(f"Trimming complete: {input_fasta} -> {output_alignment}")
@@ -217,9 +219,7 @@ def run_fasttree_on_alignment(alignment_file,cores=2):
     Returns:
         str: The path to the generated tree file.
     """
-    fasttree = find_executable("fasttree")
     try:
-        # Define the output tree file based on the alignment file name
         output_tree_file = os.path.splitext(alignment_file)[0] + ".tree"
         
         # Check if the output tree file already exists
@@ -227,19 +227,14 @@ def run_fasttree_on_alignment(alignment_file,cores=2):
             print(f"Tree file already exists for {alignment_file}, skipping FastTree.")
             return output_tree_file  # Return the existing tree file
         
-        #TODO replacement with veryfasttree, better due to the GPL3 licence and the binding with python
-        # remove the unnecessary second subprocess call and the find executable 
-        tree = veryfasttree.run(input_alignment, threads=cores, quiet=True)        
+
+
+        tree = veryfasttree.run(alignment_file, threads=cores, quiet=True, nopr=True, nosupport=True)
         with open(output_tree_file, 'w') as outfile:
             outfile.write(tree)
-        
-        # Run FastTree on the alignment file and write the result to the output tree file
-        with open(output_tree_file, 'w') as outfile:
-            subprocess.run([fasttree, alignment_file], stdout=outfile, check=True)
-        
+
         print(f"FastTree completed for {alignment_file}")
         
-        # Return the path to the output tree file
         return output_tree_file
     
     except subprocess.CalledProcessError as e:

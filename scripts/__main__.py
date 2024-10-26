@@ -47,8 +47,6 @@ class Options:
         self.non_redundant = 0
         self.redundancy_hash = dict()
         
-        self.csb_overlap_factor = 0.75 #merge subsets with at least this overlap
-        self.gap_remove_threshold = 0.95 #remove columns with gaps with trimal
 
         self.sequence_faa_file = None #filepath to all sequences fasta file
         self.reports = dict()
@@ -94,8 +92,8 @@ def parse_arguments(arguments):
     
     #Linclust parameters
     search.add_argument('--alignment-mode',dest='alignment_mode',type=int, default=2, choices=[0,1,2,3,4], help='mmseqs2 linclust search alignment mode')
-    search.add_argument('--cluster-coverage', dest='clustercoverage', type=float, default = 0.000, help='mmseqs2 linclust min. coverage used for clustering sequences')
-    search.add_argument('--cluster:min-seq-id',dest='cminseqid',type=float, default=0.000, help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    search.add_argument('--cluster-coverage', dest='clustercoverage', type=float, default = 0.700, help='mmseqs2 linclust min. coverage used for clustering sequences')
+    search.add_argument('--cluster:min-seq-id',dest='cminseqid',type=float, default=0.250, help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
@@ -106,7 +104,7 @@ def parse_arguments(arguments):
     csb = parser.add_argument_group("Optional collinear synthenic block parameters")
     csb.add_argument('-insertions', dest='insertions', type=int,default = 2, help='Max. insertions in a csb')
     csb.add_argument('-occurence', dest='occurence', type=int,default = 2, help='Min. number of csb occurs at least times')
-    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 2, help='Min. csb size before recognized as csb')
+    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, help='Min. csb size before recognized as csb')
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float,default = 0.75, help='Merge if sequences from two csb is identical above this threshold')
     
@@ -116,17 +114,39 @@ def parse_arguments(arguments):
 
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('--min_seqs', dest='min_seqs', type=int, default = 5, help='Min. number of required sequences for the alignment')
-    alignment.add_argument('--gap_col_remove', dest='gap_remove_threshold', type=int, default = 95, help='[0,100] remove alignment columns with percent gaps')
-
-
+    alignment.add_argument('--gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, help='[0,1] remove alignment columns with only percent amino acids')
+    
+    
+    if len(arguments) == 0: # Print help if no arguments were provided
+        parser.print_help()
+        sys.exit("ERROR: No arguments provided.")
 
     options = Options()
     parser.parse_args(namespace=options)
     
-    if options.fasta_file_directory is None or options.query_file is None:  
-        sys.exit("ERROR: Missing query file or target genomes. Please use -f and -q arguments")
+    validate_options(options)
     
     return options
+    
+    
+def validate_options(options):
+    # Check if a database file exists
+    database_provided = options.database_directory and os.path.isfile(options.database_directory)
+    
+    # Check if a result directory exists
+    result_directory_provided = options.result_directory and os.path.isdir(options.result_directory)
+    
+    # Check if both fasta file directory and query file exist
+    fasta_and_query_provided = (
+        options.fasta_file_directory and 
+        options.query_file and 
+        os.path.isdir(options.fasta_file_directory) and 
+        os.path.isfile(options.query_file)
+    )
+    
+    # Only proceed if one of the conditions is met
+    if not (database_provided or result_directory_provided or fasta_and_query_provided):
+        sys.exit("ERROR: Please provide either a database file, a result directory, or both a fasta file directory and a query file using the -f and -q arguments.")
     
 
 def fasta_preparation(options):
@@ -139,7 +159,7 @@ def fasta_preparation(options):
         Queue.queue_files(options)
         return
     
-    #concats fasta if wished
+    #Comcatenate the fasta files, in case of a glob fasta file is provided deconcat it
     if options.glob_faa and options.glob_gff:
         print(f"Preparing separate files from {options.glob_faa}")
         #create separated files
@@ -155,12 +175,8 @@ def fasta_preparation(options):
 def initial_search(options):
     #Writes a database with the protein hits and their gene clusters for later use.
     #Writes fasta files for each hit for linclust    
-    if os.path.isfile(options.database_directory):
-        genomeIDs = Database.fetch_genomeIDs(options.database_directory)
-        Queue.compare_with_existing_database(options,genomeIDs)
-    else:
+    if not os.path.isfile(options.database_directory):
         Database.create_database(options.database_directory)
-
 
     if options.glob_search:
         #Search the glob file

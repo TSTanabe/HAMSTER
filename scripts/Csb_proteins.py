@@ -10,7 +10,9 @@ from . import Csb_cluster
 def csb_proteins_datasets(options):
     
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
-    
+    pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
+    print(pattern_dictionary)
+    csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     #Remove non-query proteins from the sets
     #Fetch for each csb id all the domains in the csb that are query domains
     dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
@@ -20,7 +22,7 @@ def csb_proteins_datasets(options):
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
-    merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon)
+    merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon,"m")
     
     options.TP_merged = merged
     options.TP_singles = singles
@@ -29,9 +31,9 @@ def csb_proteins_datasets(options):
 
 def training_data_fasta(options):
     training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
-    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon)
-    fetch_protein_to_fasta(options,merged,"Merged_")
-    fetch_protein_to_fasta(options,singles,"Single_")
+    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
+    fetch_protein_to_fasta(options,merged)
+    fetch_protein_to_fasta(options,singles)
     
     
 def parse_csb_file_to_dict(file_path):
@@ -64,7 +66,6 @@ def parse_csb_file_to_dict(file_path):
             data_dict[identifier] = value_set
 
     return data_dict    
-
 
 
 def fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
@@ -106,7 +107,7 @@ def fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
             cur.execute(query, (*like_domains, keyword))
             
             rows = cur.fetchall()
-
+            print(f"{query} {like_domains} {keyword}" + str(len(rows)))
             # Group results by (keyword, domain) and apply filtering based on min_seqs
             for proteinID, domain in rows:
                 key = (keyword, domain)
@@ -255,7 +256,7 @@ def group_proteinID_sets(csb_proteinIDs_dict):
     return grouped_sets #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
 
 
-def merge_similar_groups(grouped_sets, epsilon):
+def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
     # Step 1: Extract the frozen sets (keys) from the dictionary
     cluster_columns = list(grouped_sets.keys())
     
@@ -271,11 +272,15 @@ def merge_similar_groups(grouped_sets, epsilon):
 
     # Step 5: Group sets by their DBSCAN label
     for label in set(labels):  # Loop through unique labels
+        
+        
+        # Handle noise points (label -1)
         if label == -1:
-            # Handle noise points (label -1)
+            
             for idx, set_label in enumerate(labels):
                 if set_label == -1:
-                    noise_points[cluster_columns[idx]] = grouped_sets[cluster_columns[idx]]
+                    modified_identifiers = [("s" + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
+                    noise_points[cluster_columns[idx]] = modified_identifiers
             continue
         
         # For non-noise points, merge sets with the same label
@@ -286,9 +291,11 @@ def merge_similar_groups(grouped_sets, epsilon):
             if set_label == label:
                 # Merge the sets with the same label
                 merged_set = merged_set.union(cluster_columns[idx])  # Union of frozen sets
-                keyword,domain = grouped_sets[cluster_columns[idx]]
-                pair = ("m"+keyword,domain) #additional m to mark up the csb
-                merged_list.extend(grouped_sets[cluster_columns[idx]])  # Merge corresponding lists
+                
+                # Extend merged_list, adding merge_extension to each identifier in the list
+                modified_identifiers = [(merge_extension + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
+                merged_list.extend(modified_identifiers)  # Merge with modified identifiers
+
 
         # Store the merged set (converted to frozenset to make it a valid dictionary key)
         merged_groups[frozenset(merged_set)] = merged_list
@@ -297,190 +304,6 @@ def merge_similar_groups(grouped_sets, epsilon):
     return merged_groups, noise_points
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-def find_subsets(grouped_sets):
-    """
-    Routine just for the information of the user
-    Finds and stores information about subset relationships between sets in grouped_sets.
-
-    Args:
-        grouped_sets: Dictionary where keys are frozensets of protein IDs and values are lists of (keyword, domain) tuples.
-
-    Returns:
-        A dictionary where the keys are frozensets and the values are lists of frozensets that are supersets of the key.
-    """
-    subset_info = {}  # To store subset relationships
-
-    # Convert the grouped_sets dictionary into a list of tuples for easy comparison
-    grouped_list = list(grouped_sets.keys())
-
-    # Compare each set against every other set
-    for i, smaller_set in enumerate(grouped_list):
-        for j, larger_set in enumerate(grouped_list):
-            if i != j and smaller_set < larger_set:  # Check if smaller_set is a proper subset of larger_set
-                if smaller_set not in subset_info:
-                    subset_info[larger_set] = []
-                subset_info[larger_set].append(smaller_set)
-    
-
-    return subset_info
-
-def merge_subsets(subset_info, grouped_sets, grouping_threshold, csb_directory):
-    reversed_merged_subsets = {}
-    output_file_path = os.path.join(csb_directory, "Csb_sequence_subsets.txt")
-
-    with open(output_file_path, 'w') as output_file:
-        # Debugging loop for showing the results
-        for smaller_set, larger_sets in subset_info.items():
-            key_smaller = grouped_sets[smaller_set]
-            core_len = len(smaller_set)
-
-            output_file.write(f"Set {key_smaller} {core_len}\n {smaller_set} \n is a subset of the following sets:\n")
-            var_len = 0
-            for larger_set in larger_sets:
-                output_file.write(f"Larger set: {larger_set} ")
-                key_larger = grouped_sets[larger_set]
-                var_len += len(larger_set) - core_len
-                output_file.write(f" {key_larger} \n")
-            
-            output_file.write(f"Core length is {core_len} and var length is {var_len}\n")
-            
-            total_len = core_len + var_len
-            if core_len / total_len > grouping_threshold:
-                # Merge the large and small sets
-                merge_set = set(smaller_set.copy())
-                for larger_set in larger_sets:
-                    merge_set.update(larger_set)
-                
-                output_file.write(f"**** Merged the sets core {key_smaller} to the larger ones \n {merge_set}\n\n")
-                
-                merge_set_frozenset = frozenset(merge_set)
-                
-                # If the frozenset already exists, append the new key_smaller[0]
-                if merge_set_frozenset in reversed_merged_subsets:
-                    reversed_merged_subsets[merge_set_frozenset].append(key_smaller[0])
-                else:
-                    # Otherwise, create a new entry with the frozenset as the key
-                    reversed_merged_subsets[merge_set_frozenset] = [key_smaller[0]]
-            else:
-                print("\tGROUPING THRESHOLD NOT REACHED")
-                print(key_smaller)
-                print(smaller_set)
-    return reversed_merged_subsets
-
-
-def merge_subsets_deprecated2(subset_info, grouped_sets, grouping_threshold, csb_directory):
-    reversed_merged_subsets = {}
-    output_file_path = os.path.join(csb_directory, "Csb_sequence_subsets.txt")
-
-    with open(output_file_path, 'w') as output_file:
-        # Debugging loop for showing the results
-        for smaller_set, larger_sets in subset_info.items():
-            key_smaller = grouped_sets[smaller_set]
-            core_len = len(smaller_set)
-
-            output_file.write(f"Set {key_smaller} {core_len}\n {smaller_set} \n is a subset of the following sets:\n")
-            
-            sorted_larger_sets = sorted(larger_sets, key=len) #sorts from smallest to largest
-            var_len = 0
-            variable_gene_set = set()
-            for index, larger_set in enumerate(sorted_larger_sets):
-                
-                variable_gene_set = (larger_set.difference(smaller_set))
-                output_file.write(f"Variable gene set: {variable_gene_set}\n")
-                key_larger = grouped_sets[larger_set]
-                
-                output_file.write(f"Larger set {key_larger}: {larger_set} \n")
-                total_len = core_len + len(variable_gene_set)
-                output_file.write(f"{core_len} / {total_len} < {grouping_threshold}.   Variable gene set was {len(variable_gene_set)}\n")
-                if core_len / total_len < grouping_threshold:
-                    output_file.write("Threshold reached, now merging files\n")
-                    merge_set = set(smaller_set.copy())
-                    keys = []
-                    
-                    for item in larger_sets[:index]: #slice the original list to the sets that deviate less than cutoff from smallest set
-                        merge_set.update(item)
-                        keys.append(grouped_sets[item])
-                    
-                    output_file.write(f"**** Merged the core set {key_smaller} with larger sets up to index {index}: \n {merge_set}\n\n")
-                    merge_set_frozenset = frozenset(merge_set)
-                    if merge_set_frozenset in reversed_merged_subsets:
-                        reversed_merged_subsets[merge_set_frozenset].append(keys)
-                    else:
-                        # Otherwise, create a new entry with the frozenset as the key
-                        reversed_merged_subsets[merge_set_frozenset] = [keys]                    
-                    
-                    #addiere die restlichen larger sets einzeln
-                    #If larger is significantly larger than the smaller set, do not merge but add to the return for further processing
-                    for item in larger_sets[index:]:
-                        output_file.write(f"**** Larger sets that were not merged: {grouped_sets[item]}\n\n")
-                        item_frozenset = frozenset(item)
-                        if item_frozenset in reversed_merged_subsets:
-                            reversed_merged_subsets[item_frozenset].append(grouped_sets[item])
-                        else:
-                            # Otherwise, create a new entry with the frozenset as the key
-                            reversed_merged_subsets[merge_set_frozenset] = [grouped_sets[item]]                        
-                
-                    
-                    
-
-            
-    return reversed_merged_subsets
-
-def merge_subsets_deprecated(subset_info, grouped_sets, grouping_threshold, csb_directory):
-    reversed_merged_subsets = {}
-    output_file_path = os.path.join(csb_directory, "Csb_sequence_subsets.txt")
-
-    with open(output_file_path, 'w') as output_file:
-        # Debugging loop for showing the results
-        for smaller_set, larger_sets in subset_info.items():
-            key_smaller = grouped_sets[smaller_set]
-            core_len = len(smaller_set)
-
-            output_file.write(f"Set {key_smaller} {core_len}\n {smaller_set} \n is a subset of the following sets:\n")
-            var_len = 0
-            for larger_set in larger_sets:
-                output_file.write(f"Larger set: {larger_set} ")
-                key_larger = grouped_sets[larger_set]
-                var_len += len(larger_set) - core_len
-                output_file.write(f" {key_larger} \n")
-            
-            output_file.write(f"Core length is {core_len} and var length is {var_len}\n")
-            
-            total_len = core_len + var_len
-            if core_len / total_len > grouping_threshold:
-                # Merge the large and small sets
-                merge_set = set(smaller_set.copy())
-                for larger_set in larger_sets:
-                    merge_set.update(larger_set)
-                
-                output_file.write(f"**** Merged the sets core {key_smaller} to the larger ones \n {merge_set}\n\n")
-                
-                merge_set_frozenset = frozenset(merge_set)
-                
-                # If the frozenset already exists, append the new key_smaller[0]
-                if merge_set_frozenset in reversed_merged_subsets:
-                    reversed_merged_subsets[merge_set_frozenset].append(key_smaller[0])
-                else:
-                    # Otherwise, create a new entry with the frozenset as the key
-                    reversed_merged_subsets[merge_set_frozenset] = [key_smaller[0]]
-            else:
-                print("\tGROUPING THRESHOLD NOT REACHED")
-                print(key_smaller)
-                print(smaller_set)
-    return reversed_merged_subsets
 
 
 
