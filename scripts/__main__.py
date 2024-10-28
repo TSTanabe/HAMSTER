@@ -92,8 +92,8 @@ def parse_arguments(arguments):
     
     #Linclust parameters
     search.add_argument('--alignment-mode',dest='alignment_mode',type=int, default=2, choices=[0,1,2,3,4], help='mmseqs2 linclust search alignment mode')
-    search.add_argument('--cluster-coverage', dest='clustercoverage', type=float, default = 0.700, help='mmseqs2 linclust min. coverage used for clustering sequences')
-    search.add_argument('--cluster:min-seq-id',dest='cminseqid',type=float, default=0.250, help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    search.add_argument('--cluster-coverage', dest='clustercoverage', type=float, default = 0.000, help='mmseqs2 linclust min. coverage used for clustering sequences')
+    search.add_argument('--cluster:min-seq-id',dest='cminseqid',type=float, default=0.000, help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
@@ -134,7 +134,7 @@ def validate_options(options):
     database_provided = options.database_directory and os.path.isfile(options.database_directory)
     
     # Check if a result directory exists
-    result_directory_provided = options.result_directory and os.path.isdir(options.result_directory)
+    result_directory_provided = options.result_files_directory and os.path.isdir(options.result_files_directory)
     
     # Check if both fasta file directory and query file exist
     fasta_and_query_provided = (
@@ -150,10 +150,8 @@ def validate_options(options):
     
 
 def fasta_preparation(options):
-    #Unpacks and translates fasta
-    Translation.parallel_translation(options.fasta_file_directory, options.cores)
-    Translation.parallel_transcription(options.fasta_file_directory, options.cores)
     
+   
     if not options.glob_search:
         print("Not concatenating protein fasta files")
         Queue.queue_files(options)
@@ -166,7 +164,12 @@ def fasta_preparation(options):
         Translation.deconcat(options)
         Queue.queue_files(options)
     else:
-        #concat to to globfile
+
+        #Unpacks and translates fasta
+        Translation.parallel_translation(options.fasta_file_directory, options.cores)
+        Translation.parallel_transcription(options.fasta_file_directory, options.cores)
+
+        #concat to to globfile 
         Queue.queue_files(options)
         print(f"Generating glob file")
         Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier   

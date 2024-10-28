@@ -97,7 +97,7 @@ def process_parallel_search(args_tuple):
 def initial_glob_search(options):
     print(f"Starting blastp search")
     
-    blast_results_table = MMseqsSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #Diamond search the target fasta file
+    blast_results_table = MMseqsSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
@@ -400,7 +400,7 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
         if columns:
             try:
                 #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-                hit_proteinID = columns[0].split('___',1)[-1]
+                hit_proteinID = columns[0].split('___',1)[-1] #TODO kann probleme geben, wenn die faas nur concatenated werden aber nicht mehr genomeID___ besitzen!!!
                 query = columns[1]
                 hit_bitscore = int(float(columns[3]))
                 hsp_start = int(float(columns[4]))

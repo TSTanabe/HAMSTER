@@ -187,7 +187,7 @@ def unpacker(file):
 ################# Concatenate subroutines     
 def create_glob_file(options):
     
-    if os.path.isfile(options.glob_faa) and os.path.isdir(options.fasta_file_directory):
+    if not options.glob_faa is None and os.path.isfile(options.glob_faa) and os.path.isdir(options.fasta_file_directory):
         return #return if a glob fasta file and deconcatenated files were provided
     
     options.glob_faa = options.result_files_directory+"/glob.faa"
@@ -200,6 +200,7 @@ def create_glob_file(options):
                 # Modify the header
                 original_id = record.id.split()[0]  # Extract the identifier up to the first whitespace
                 record.id = f"{genomeID}___{original_id}"  # Add the genome identifier
+                record.description = ""
                 # Write the modified record to the output file
                 SeqIO.write(record, outfile, "fasta")
 
@@ -268,6 +269,7 @@ def deconcatenate_faa(input_filepath, output_directory):
 
   
  
+
 def deconcatenate_gff(input_filepath, output_directory):
     """
     Deconcatenates a protein GFF file into genome-wise GFF files.
@@ -283,12 +285,8 @@ def deconcatenate_gff(input_filepath, output_directory):
     current_genome_id = None
     output_handle = None
 
-    def close_current_handle():
-        if output_handle:
-            output_handle.close()
-
     # Pre-compile the regular expression for better performance
-    genome_id_regex = re.compile(r'ID=([^_]+)___')
+    genome_id_regex = re.compile(r'ID=(.*?)___')
 
     # Open the input file and process it line by line
     with open(input_filepath, "r") as reader:
@@ -297,17 +295,21 @@ def deconcatenate_gff(input_filepath, output_directory):
             match = genome_id_regex.search(row)
             if match:
                 genomeID = match.group(1)
-
                 # If the genomeID changes, switch to a new file
                 if genomeID != current_genome_id:
-                    close_current_handle()
+                    # Close the previous file handle if open
+                    if output_handle:
+                        output_handle.close()
+
                     current_genome_id = genomeID
                     output_filepath = os.path.join(output_directory, f"{genomeID}.gff")
-                    output_handle = open(output_filepath, "a", buffering=1)
+                    output_handle = open(output_filepath, "a")
 
-            # Write the current row to the appropriate genome file
-            output_handle.write(row)
-    
-    # Close the last output handle
-    close_current_handle()
-    print(f"Deconcatenation of GFF complete. Files saved to {output_directory}")    
+                # Write the current row to the appropriate genome file
+                output_handle.write(row)
+
+    # Close the last output handle if open
+    if output_handle:
+        output_handle.close()
+
+    print(f"Deconcatenation of GFF complete. Files saved to {output_directory}")

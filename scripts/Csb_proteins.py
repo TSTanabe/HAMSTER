@@ -11,7 +11,6 @@ def csb_proteins_datasets(options):
     
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
-    print(pattern_dictionary)
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     #Remove non-query proteins from the sets
     #Fetch for each csb id all the domains in the csb that are query domains
@@ -107,7 +106,7 @@ def fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
             cur.execute(query, (*like_domains, keyword))
             
             rows = cur.fetchall()
-            print(f"{query} {like_domains} {keyword}" + str(len(rows)))
+            #print(f"{query} {like_domains} {keyword}" + str(len(rows)))
             # Group results by (keyword, domain) and apply filtering based on min_seqs
             for proteinID, domain in rows:
                 key = (keyword, domain)
