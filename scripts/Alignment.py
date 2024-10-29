@@ -4,8 +4,6 @@ import shutil
 import subprocess
 import multiprocessing
 
-import veryfasttree # for the phylogeny
-from contextlib import redirect_stdout, redirect_stderr
 from . import myUtil
 
 
@@ -207,39 +205,44 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
 
 
 
-
-
-def run_fasttree_on_alignment(alignment_file,cores=2):
+def run_fasttree_on_alignment(alignment_file, cores=2):
     """
-    Runs FastTree on a given alignment file and writes the output to a tree file.
-
-    Args:
-        alignment_file (str): The path to the alignment file.
-
-    Returns:
-        str: The path to the generated tree file.
-    """
-    try:
-        output_tree_file = os.path.splitext(alignment_file)[0] + ".tree"
-        
-        # Check if the output tree file already exists
-        if os.path.exists(output_tree_file):
-            print(f"Tree file already exists for {alignment_file}, skipping FastTree.")
-            return output_tree_file  # Return the existing tree file
-        
-
-
-        tree = veryfasttree.run(alignment_file, threads=cores, quiet=True, nopr=True, nosupport=True)
-        with open(output_tree_file, 'w') as outfile:
-            outfile.write(tree)
-
-        print(f"FastTree completed for {alignment_file}")
-        
-        return output_tree_file
+    Aligns a given .faa FASTA file using MAFFT.
     
+    Args:
+        alignment_file: Path to the input FASTA (.fasta_aln) file.
+    """
+    # Find MAFFT executable
+    veryfasttree = find_executable("VeryFastTree-avx2")  # Ensure this function finds the MAFFT executable
+
+    # Replace the original suffix with '.tree'
+    base_name = os.path.splitext(alignment_file)[0]  # Get the file name without the extension
+    output_tree_file = base_name + ".tree"  # Add the .tree extension
+
+    if os.path.exists(output_tree_file):
+        print(f"Tree file already exists for {alignment_file}, skipping FastTree.")
+        return output_tree_file  # Return the existing tree file
+
+
+    # Run MAFFT alignment
+    try:
+        with open(output_tree_file, "w") as f:
+            subprocess.run(
+                [veryfasttree, "-nosupport", "-threads", str(cores), "-ext", "AVX2", alignment_file],
+                stdout=f,         # Direct stdout to the output file
+                stderr=subprocess.PIPE,  # Keep stderr for error handling
+                check=True
+            )
+        print(f"VeryFastTree-avx2 complete: {alignment_file}")
+        return output_tree_file
     except subprocess.CalledProcessError as e:
-        print(f"Error running FastTree on {alignment_file}: {e}")
-        return None
+        print(f"Error occurred during VeryFastTree-avx2: {e.stderr.decode('utf-8')}")
+        raise
+    except FileNotFoundError:
+        print("VeryFastTree-avx2 executable not found. Please make sure VeryFastTree-avx2 is installed and in your system's PATH or in the local bin directory.")
+
+
+
 
 
 def calculate_phylogeny_parallel(options, alignment_files):
