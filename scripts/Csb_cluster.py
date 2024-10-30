@@ -2,6 +2,7 @@
 
 
 import os
+import heapq
 from . import Csb_Mp_Algorithm
 from scipy.spatial import distance
 from sklearn.cluster import DBSCAN
@@ -9,8 +10,14 @@ from sklearn.cluster import AgglomerativeClustering
 from itertools import combinations
 from collections import defaultdict
 
+
+
+            
+            
 # For the clustering of csbs by jaccard and agglomerativeClustering
 def csb_prediction(options):
+
+    options.gene_clusters_file = sort_file_by_first_column_external(options.gene_clusters_file, options.glob_chunks)
     #Finds collinear syntenic blocks with the csb finder algorithm using a printed representation of the clusters.
     options.redundant,options.non_redundant = dereplicate(options.gene_clusters_file) #returns two filepaths, dereplicates identical gene clusters
     
@@ -54,22 +61,62 @@ def csb_jaccard(options):
 
 
 
-def print_cluster(filepath, cluster_dict):
-    with open(filepath, 'a') as writer:
-        for cluster in cluster_dict:
-            writer.write(cluster.clusterID)  # Write cluster ID (assuming cluster.clusterID is a string)
-            domains = '\t'.join(cluster.domains)  # Join the domains list into a tab-separated string
-            writer.write("\t" + domains + "\n")  # Write cluster domains followed by a newline
-
-    return filepath
-
-
 
 ########################################################################################
 ################ Secondary subroutines #################################################
 ################ Subroutines used here #################################################
 ########################################################################################
 
+def sort_file_by_first_column_external(input_file, chunk_size=10000):
+    """
+    Sorts a large file by the number of columns in each line, and then by the first column's string.
+    Saves the output with a `sorted_` prefix to the original file name.
+    
+    Args:
+        input_file (str): Path to the input file with genome identifiers in the first column.
+        chunk_size (int): Number of lines to process per chunk.
+        
+    Returns:
+        str: Path to the sorted output file.
+    """
+    # Generate the output file path with 'sorted_' prefix
+    directory, filename = os.path.split(input_file)
+    output_file = os.path.join(directory, f"sorted_{filename}")
+    
+    temp_files = []
+
+    # Step 1: Read file in chunks, sort each chunk, and write to temporary files
+    with open(input_file, 'r') as infile:
+        while True:
+            lines = [infile.readline().strip() for _ in range(chunk_size)]
+            lines = [line for line in lines if line]  # Remove any empty lines
+            if not lines:
+                break
+            # Sort by number of columns, then by first column string
+            lines.sort(key=lambda x: (len(x.split()), x.split()[0]))
+            temp_file = f'temp_{len(temp_files)}.txt'
+            with open(temp_file, 'w') as f:
+                f.write('\n'.join(lines) + '\n')
+            temp_files.append(temp_file)
+
+    # Step 2: Merge sorted temporary files
+    with open(output_file, 'w') as outfile:
+        open_files = [open(temp_file, 'r') for temp_file in temp_files]
+        sorted_stream = heapq.merge(*(f for f in open_files), key=lambda x: (len(x.split()), x.split()[0]))
+        for line in sorted_stream:
+            outfile.write(line)
+        
+        # Close and remove temporary files
+        for f in open_files:
+            f.close()
+        for temp_file in temp_files:
+            os.remove(temp_file)
+
+    return output_file
+            
+            
+            
+            
 def dereplicate(filepath):
     # Dictionary to store lines based on variable columns
     line_dict = {}

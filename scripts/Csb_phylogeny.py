@@ -154,7 +154,7 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict):
         #define domain, key and tree
         keyword, domain = keyword_domain_pairs[0]
         domain = domain.split('_')[-1]
-        tree = trees_dict[domain]
+        tree = trees_dict['lca_'+domain] #Treefiles have keys with lca_{domain}, because .faa files were marked for the HMM
         
         #get the monophyletic group
         lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)

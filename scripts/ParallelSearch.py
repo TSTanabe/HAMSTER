@@ -97,7 +97,7 @@ def process_parallel_search(args_tuple):
 
 def initial_glob_search(options):
     print(f"Starting blastp search")
-    
+
     blast_results_table = MMseqsSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")

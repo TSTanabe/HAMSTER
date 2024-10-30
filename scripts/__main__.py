@@ -65,61 +65,61 @@ class Options:
 def parse_arguments(arguments):
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
     
-    parser = argparse.ArgumentParser(formatter_class=argparse.HelpFormatter, description = "HAMSTER version 0.0.6 \nSyntax: HAMSTER [OPTIONS]",epilog = "")
+    parser = argparse.ArgumentParser(formatter_class=argparse.HelpFormatter, description = "HAMSTER version 0.0.8 \nSyntax: HAMSTER [OPTIONS]",epilog = "")
     
     
-    parser.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = None, help='Directory of the target fasta files')
-    parser.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, help='Query sequences fasta file')
+    parser.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = None, metavar = '<directory>', help='Directory of the target fasta files')
+    parser.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Query sequences fasta file')
 
     resources = parser.add_argument_group("Optional parameters")
-    resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9],help='Start at stage')
-    resources.add_argument('-c', dest='cores', type=int, default = 2, help='Number of CPUs')
-    resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, help='Taxonomy csv file')
-    resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", help='Directory for the result files/results from a previous run') # project folder TODO print the directory that is used for reconfirmation with the user
+    resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='Start at stage')
+    resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Number of CPUs')
+    resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
+    resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run') # project folder TODO print the directory that is used for reconfirmation with the user
     resources.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Filepath to existing database')
     
-    resources.add_argument('-glob_faa', dest='glob_faa', type=myUtil.file_path, default=None, help='Concatenated fasta file')
-    resources.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, help='Concatenated gff file')
-    resources.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>',help='Chunk size for parsing results from glob before entering into database')
+    resources.add_argument('-glob_faa', dest='glob_faa', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Predefined concatenated fasta file')
+    resources.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated gff file')
+    resources.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing results from glob before entering into database')
     resources.add_argument('-no_glob', dest='glob_search', action='store_false', help='Do not concatenated fasta file for search')
     
         
     search = parser.add_argument_group("Optional search parameters and sequence clustering parameters for mmseqs2")
-    search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, help='E-value cutoff [0,inf]')
-    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, help='Score cutoff [0,inf]')
-    search.add_argument('--min-seq-id',dest='minseqid',type=float, default=0.000, help='Sequence search matches above this sequence identity [0.0,1.0]')
-    search.add_argument('--search-coverage', dest='searchcoverage', type=float, default=0.000, help='Min. coverage used for searching')
+    search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
+    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
+    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=0.000, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
+    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.000, metavar = '<float>', help='Min. coverage used for searching')
     
     #Linclust parameters
-    search.add_argument('--alignment-mode',dest='alignment_mode',type=int, default=2, choices=[0,1,2,3,4], help='mmseqs2 linclust search alignment mode')
-    search.add_argument('--cluster-coverage', dest='clustercoverage', type=float, default = 0.000, help='mmseqs2 linclust min. coverage used for clustering sequences')
-    search.add_argument('--cluster:min-seq-id',dest='cminseqid',type=float, default=0.000, help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 linclust search alignment mode')
+    search.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.000, metavar='<float>', help='mmseqs2 linclust min. coverage used for clustering sequences')
+    search.add_argument('-cluster:min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
     genecluster = parser.add_argument_group("Optional gene cluster parameters")
-    genecluster.add_argument('--distance', dest='nucleotide_range', type=int, default = 3500, help='Max. nucleotide distance between synthenic genes')
+    genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes')
     genecluster.add_argument('-p', dest= 'patterns_file' , type=myUtil.file_path, default=__location__+"/src/Patterns", metavar='<filepath>', help='Filepath to patterns file')
     
     csb = parser.add_argument_group("Optional collinear synthenic block parameters")
-    csb.add_argument('-insertions', dest='insertions', type=int,default = 2, help='Max. insertions in a csb')
-    csb.add_argument('-occurence', dest='occurence', type=int,default = 2, help='Min. number of csb occurs at least times')
-    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, help='Min. csb size before recognized as csb')
-    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
-    csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float,default = 0.75, help='Merge if sequences from two csb is identical above this threshold')
+    csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb')
+    csb.add_argument('-occurence', dest='occurence', type=int,default = 2, metavar='<int>', help='Min. number of csb occurs at least times')
+    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
+    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
+    csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold')
     
     csb.add_argument('-no_csb_distinct', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
-    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, help='Acceptable dissimilarity for protein training datasets to be clustered')
+    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered')
     
 
     alignment = parser.add_argument_group("Optional alignment parameters")
-    alignment.add_argument('--min_seqs', dest='min_seqs', type=int, default = 5, help='Min. number of required sequences for the alignment')
-    alignment.add_argument('--gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, help='[0,1] remove alignment columns with only percent amino acids')
+    alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
+    alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
     
     
     if len(arguments) == 0: # Print help if no arguments were provided
         parser.print_help()
-        sys.exit("ERROR: No arguments provided.")
+        sys.exit("No arguments were provided.")
 
     options = Options()
     parser.parse_args(namespace=options)
@@ -266,7 +266,7 @@ def main(args=None):
     Project.prepare_result_space(options)
     
     
-    if options.stage <= 1:
+    if options.stage <= 2:
         myUtil.print_header("\nProkaryotic gene recognition and translation via prodigal")
         fasta_preparation(options)
         
