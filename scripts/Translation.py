@@ -231,7 +231,8 @@ def deconcat(options):
     
 def deconcatenate_faa(input_filepath, output_directory):
     """
-    Deconcatenates a protein FASTA file into genome-wise FASTA files.
+    Deconcatenates a protein FASTA file into genome-wise FASTA files,
+    removing everything in the header up to the first '___'.
     
     Args:
         input_filepath (str): Path to the concatenated FASTA file.
@@ -252,7 +253,11 @@ def deconcatenate_faa(input_filepath, output_directory):
         fasta_parser = SeqIO.parse(infile, "fasta")
         for record in fasta_parser:
             identifier = record.id
-            genome_id = identifier.split('___')[0]
+            genome_id, _, remaining_id = identifier.partition('___')
+            
+            # Update the record ID to exclude the genome ID part
+            record.id = remaining_id if remaining_id else identifier
+            record.description = ""
             
             # If the genome_id changes, close the previous file handle and open a new one
             if genome_id != current_genome_id:

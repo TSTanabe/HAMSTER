@@ -6,6 +6,7 @@ from . import myUtil
 from . import Csb_finder
 from . import Database
 from . import ParseReports
+from . import Alignment
 
 import traceback
 import subprocess
@@ -168,18 +169,20 @@ def MMseqsSearch(path, query, cores, evalue, coverage, minseqid, alignment_mode=
     #query is the static fasta file with the query sequences
     #path is the assembly fasta file
     
+    mmseqs = Alignment.find_executable("mmseqs")
+    
     target_db_name=f"{path}.targetDB"
-    os.system(f'mmseqs createdb {path} {target_db_name} 1>/dev/null')
+    os.system(f'{mmseqs} createdb {path} {target_db_name} 1>/dev/null')
     tmp = f"{path}.tmp"
     
     query_db_name=f"{query}.queryDB" #can be done during argument parsing if possible
-    os.system(f'mmseqs createdb {query} {query_db_name} 1>/dev/null')
+    os.system(f'{mmseqs} createdb {query} {query_db_name} 1>/dev/null')
     
     output_results=f"{path}.alndb"
     output_results_tab=f"{path}.tab"
 
-    os.system(f'mmseqs search {query_db_name} {target_db_name} {output_results} {tmp} --threads {cores} --alignment-mode {alignment_mode} --min-seq-id {minseqid} -e {evalue} -c {coverage} 1>/dev/null') #attention cores is used here --min-seq-id {coverage}
-    os.system(f'mmseqs convertalis {query_db_name} {target_db_name} {output_results} {output_results_tab} --threads {cores} --format-output "target,query,evalue,bits,tstart,tend,pident" 1>/dev/null')
+    os.system(f'{mmseqs} search {query_db_name} {target_db_name} {output_results} {tmp} --threads {cores} --alignment-mode {alignment_mode} --min-seq-id {minseqid} -e {evalue} -c {coverage} 1>/dev/null') #attention cores is used here --min-seq-id {coverage}
+    os.system(f'{mmseqs} convertalis {query_db_name} {target_db_name} {output_results} {output_results_tab} --threads {cores} --format-output "target,query,evalue,bits,tstart,tend,pident" 1>/dev/null')
     
     #os.system(f'mmseqs rmdb {query_db_name}')
     #os.system(f'mmseqs rmdb {target_db_name}')
@@ -269,7 +272,6 @@ def process_parallel_bulk_parse(args_tuple):
         
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
-        
         #Complete the hit information
         ParseReports.parseGFFfile(gff_file,protein_dict)
         ParseReports.getProteinSequence(faa_file,protein_dict)
@@ -277,7 +279,6 @@ def process_parallel_bulk_parse(args_tuple):
         #Find the syntenic regions and insert to database
         cluster_dict = Csb_finder.find_syntenicblocks(genomeID,protein_dict,options.nucleotide_range)
         Csb_finder.name_syntenicblocks(csb_patterns_diction,csb_pattern_names,cluster_dict,1)
-
         data_queue.put((genomeID,protein_dict,cluster_dict))
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"

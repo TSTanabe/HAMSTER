@@ -212,7 +212,6 @@ def find_syntenicblocks(genomeID, protein_dict, distance=3500):
     #sort by first contig, then start
     proteinID_list = sorted(protein_dict, key=lambda x: \
     (protein_dict[x].gene_contig, protein_dict[x].gene_start)) 
-
     clusterID_number = 1
     cluster = Cluster(f"{genomeID}_{clusterID_number}", distance)
     cluster.genomeID = genomeID

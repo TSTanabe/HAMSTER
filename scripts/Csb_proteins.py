@@ -29,8 +29,11 @@ def csb_proteins_datasets(options):
 
 
 def training_data_fasta(options):
+
+    
     training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
     merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
+    
     fetch_protein_to_fasta(options,merged)
     fetch_protein_to_fasta(options,singles)
     
@@ -212,7 +215,6 @@ def remove_non_query_clusters(database, dictionary):
         # Add each domain to the query_domains set
         for row in rows:
             query_domains.add(row[0])
-
     # Loop through the dictionary and filter based on the domain in the key
     for key, value in dictionary.items():
         if key[1] in query_domains:
@@ -268,10 +270,9 @@ def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
     # Step 4: Create two dictionaries: one for merged groups and one for noise points
     merged_groups = {}
     noise_points = {}
-
+    
     # Step 5: Group sets by their DBSCAN label
     for label in set(labels):  # Loop through unique labels
-        
         
         # Handle noise points (label -1)
         if label == -1:

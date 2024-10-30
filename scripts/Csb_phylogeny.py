@@ -82,8 +82,9 @@ def fetch_protein_family_to_fasta(options, domain_keyword_dict):
 
             # Write the results to the domain-specific FASTA file
             # Create the filename for this domain's output file
+            #this leaves only the protein type not the cluster number
             name = domain.split('_')[-1]
-            filename = f"{name}.faa"
+            filename = f"lca_{name}.faa"
             output_fasta_path = os.path.join(options.phylogeny_directory, filename)
             
             # Use a set to track already written proteinIDs

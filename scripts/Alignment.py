@@ -224,7 +224,7 @@ def run_fasttree_on_alignment(alignment_file, cores=2):
         return output_tree_file  # Return the existing tree file
 
 
-    # Run MAFFT alignment
+    # Run fasttree alignment
     try:
         with open(output_tree_file, "w") as f:
             subprocess.run(

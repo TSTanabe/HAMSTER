@@ -323,10 +323,9 @@ def parseGFFfile(Filepath, protein_dict):
         protein_dict (even though possibly not necessary)
     """
     locustag_pattern = re.compile(r'locus_tag=(\S*?)[\n;]')
-    geneID_pattern = re.compile(r'ID=(cds-)?(\S+?)[;\s]')
+    geneID_pattern = re.compile(r'ID=(cds-)?(\S+?)(?:[;\s]|$)')
     
     grep_pattern = "|".join(protein_dict.keys())
-    
     try:
         grep_process = subprocess.Popen(['grep', '-E', grep_pattern, Filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = grep_process.communicate()

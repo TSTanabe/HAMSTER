@@ -237,27 +237,6 @@ def jaccard(set1,set2):
 
     return jaccard_similarity
 
-def calculate_similarity_matrix_jaccard_deprectaed(cluster_columns):
-    #cluster_columns needs to be a list of sets, not tuple because jaccard relies on the set datatype
-    #
-    #THIS ROUTINE NEEDS NUMPY. wich i tried to remove
-    
-    # Determine the number of clusters
-    num_clusters = len(cluster_columns) if cluster_columns else 0
-
-
-    # Calculate Jaccard similarity matrix
-    jaccard_generator = (jaccard(row1, row2) for row1, row2 in combinations(cluster_columns, r=2))
-    flattened_matrix = np.fromiter(jaccard_generator, dtype=np.float64)
-
-    # since flattened_matrix is the flattened upper triangle of the matrix
-    # we need to expand it.
-    similarity_matrix = distance.squareform(flattened_matrix)
-    similarity_matrix += np.identity(len(cluster_columns))# replacing zeros with ones at the diagonal. 
-    
-    print(similarity_matrix)
-    sys.exit()
-    return similarity_matrix
 
 def calculate_similarity_matrix_jaccard(cluster_columns):
     #cluster_columns needs to be a list of sets, not tuple because jaccard relies on the set datatype
