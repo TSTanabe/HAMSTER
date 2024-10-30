@@ -34,6 +34,13 @@ def training_data_fasta(options):
     training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
     merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
     
+    #print(len(options.TP_merged))
+    #print(len(options.TP_singles))
+    #print(len(options.TP_monophyla))
+    #print(len(merged))
+    #print(len(singles))
+
+    
     fetch_protein_to_fasta(options,merged)
     fetch_protein_to_fasta(options,singles)
     
@@ -260,6 +267,7 @@ def group_proteinID_sets(csb_proteinIDs_dict):
 def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
     # Step 1: Extract the frozen sets (keys) from the dictionary
     cluster_columns = list(grouped_sets.keys())
+    cluster_columns.sort(key=lambda fs: tuple(sorted(fs))) #sort the list to have consistent input order between runs
     
     # Step 2: Calculate the Jaccard similarity matrix for the frozen sets
     similarity_matrix = Csb_cluster.calculate_similarity_matrix_jaccard(cluster_columns)
