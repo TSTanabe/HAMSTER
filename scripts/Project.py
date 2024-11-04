@@ -1,7 +1,41 @@
 #!/usr/bin/python
 
 import os
+import tarfile
 from datetime import datetime
+
+def prepare_directory_structure(directory):
+    """
+    Sets up the `bin` and `src` directories within the specified directory.
+    Unpacks any `.tar.gz` files in `bin` and deletes the archives.
+    Creates an empty `patterns` file in `src` if it does not exist.
+    
+    Args:
+        directory (str): Path to the directory to set up.
+    """
+    # Define the paths for `bin` and `src` directories
+    bin_dir = os.path.join(directory, 'bin')
+    src_dir = os.path.join(directory, 'src')
+
+    # Ensure `bin` and `src` directories exist
+    os.makedirs(bin_dir, exist_ok=True)
+    os.makedirs(src_dir, exist_ok=True)
+    
+    # Process `.tar.xz` files in `bin` directory
+    for file_name in os.listdir(bin_dir):
+        if file_name.endswith('.tar.xz'):
+            file_path = os.path.join(bin_dir, file_name)
+            # Unpack the .tar.xz file
+            with tarfile.open(file_path, 'r:xz') as tar:
+                tar.extractall(bin_dir)
+            # Delete the original .tar.xz file
+            os.remove(file_path)    
+    # Create an empty `patterns` file in `src` if it does not exist
+    patterns_file = os.path.join(src_dir, 'Patterns')
+    if not os.path.exists(patterns_file):
+        with open(patterns_file, 'w') as f:
+            pass  # Creates an empty file
+
 
 def prepare_result_space(options,project="project"):
     
@@ -29,13 +63,6 @@ def prepare_result_space(options,project="project"):
         options.divergent_output_file = options.result_files_directory+"/div_output_file.faa"
         options.csb_output_file = options.Csb_directory+"/Csb_output.txt"
         options.gene_clusters_file = options.Csb_directory+"/All_gene_clusters.txt"
-        
-        if os.path.isfile(options.Csb_directory+"/csb_instances.json"):
-            options.data_computed_Instances_json = options.Csb_directory+"/csb_instances.json"
-        else:
-            options.data_computed_Instances_json = None
-
-        
         
         
         options.report_output_file = options.result_files_directory+"/Report.txt" #for CV

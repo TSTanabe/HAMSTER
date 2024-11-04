@@ -29,7 +29,6 @@ else:
     __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 
-
 class Options:
     def __init__(self):
     
@@ -261,7 +260,9 @@ def report_cv_performance(options):
   
 def main(args=None):
 #1
+    Project.prepare_directory_structure(__location__)
     options = parse_arguments(args)
+    
     myUtil.print_header("\nPreparing space for the results")
     Project.prepare_result_space(options)
     
