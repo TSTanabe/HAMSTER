@@ -17,7 +17,7 @@ def csb_proteins_datasets(options):
     dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
-    
+    print(dictionary)
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     

@@ -401,6 +401,10 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
         if columns:
             try:
                 #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
+                #the hit identifier in the fasta file must have a genomeID___proteinID$ format, only the forst ___ will be recognized
+                
+                #Bei Query___proteinID$
+                
                 hit_proteinID = columns[0].split('___',1)[-1] #TODO kann probleme geben, wenn die faas nur concatenated werden aber nicht mehr genomeID___ besitzen!!!
                 query = columns[1]
                 hit_bitscore = int(float(columns[3]))
@@ -430,7 +434,8 @@ def self_blast_query(options):
     #Selfblast the query file
     report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
     protein_dict = parse_bulk_blastreport_genomize("QUERY",report,{},10) #Selfblast should not have any cutoff score
-    ParseReports.getProteinSequence(options.query_file,protein_dict) #Get the protein Sequences
+    print(protein_dict.keys())
+    ParseReports.getProteinSequence(options.self_seqs,protein_dict) #Get the protein Sequences
     
     Database.insert_database_genomeIDs(options.database_directory, {"QUERY"})
     Database.insert_database_proteins(options.database_directory, protein_dict)

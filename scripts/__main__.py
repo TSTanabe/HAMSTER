@@ -58,7 +58,8 @@ class Options:
         self.csb_name_prefix = "csb-" #prefix of clusterIDs determined by csb finder algorithm
         self.csb_name_suffix = "_" #suffix of clusterIDs determined by csb finder algorithm
         
-        self.self_query = None
+        self.self_query = None #Query fasta like concatenated fasta
+        self.self_seqs = None #Query sequences
 
 
 def parse_arguments(arguments):

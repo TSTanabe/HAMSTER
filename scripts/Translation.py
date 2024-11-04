@@ -204,21 +204,43 @@ def create_glob_file(options):
                 # Write the modified record to the output file
                 SeqIO.write(record, outfile, "fasta")
 
+
 def create_selfquery_file(options):
-    # Construct the path for the output file
+    # Construct the paths for the output files
     options.self_query = options.result_files_directory + "/self_blast.faa"
+    options.self_seqs = options.result_files_directory + "/self_seqs.faa"
     
-    # Open the file for writing
-    with open(options.self_query, 'w') as outfile:
+    # Dictionary to keep track of the number of times each original_id is encountered
+    id_count = {}
     
+    # Open both files for writing
+    with open(options.self_query, 'w') as outfile_query, open(options.self_seqs, 'w') as outfile_seqs:
+        
         # Parse the input query file in FASTA format
         for record in SeqIO.parse(options.query_file, "fasta"):
             
             # Modify the record's identifier
             original_id = record.id.split()[0]  # Extract the identifier up to the first whitespace
-            record.id = f"QUERY___{original_id}"  # Add the genome identifier
-            # Write the modified record to the output file
-            SeqIO.write(record, outfile, "fasta")
+            
+            # Initialize or increment the counter for this ID
+            if original_id in id_count:
+                id_count[original_id] += 1
+            else:
+                id_count[original_id] = 1
+            
+            # Append the count to the original_id for self_blast.faa file
+            record_with_query_prefix = record
+            record_with_query_prefix.id = f"QUERY___{original_id}___{id_count[original_id]}"
+            record_with_query_prefix.description = ""  # Clear description to avoid duplicate ID text
+            
+            # Write the modified record to self_blast.faa with QUERY___ prefix
+            SeqIO.write(record_with_query_prefix, outfile_query, "fasta")
+            
+            # Write the record without QUERY___ prefix to self_seqs.faa
+            record_without_prefix = record
+            record_without_prefix.id = f"{original_id}___{id_count[original_id]}"
+            record_without_prefix.description = ""  # Clear description to avoid duplicate ID text
+            SeqIO.write(record_without_prefix, outfile_seqs, "fasta")
 
 
 ############### Deconcat subroutines
