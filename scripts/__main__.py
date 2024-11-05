@@ -203,6 +203,7 @@ def csb_finder(options):
     Csb_cluster.csb_prediction(options)
     csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
     #print(csb_gene_cluster_dict)
+    Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) #remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
     Database.update_keywords(options.database_directory,csb_gene_cluster_dict) #assigns the names of the keywords to the clusters
 
@@ -210,7 +211,7 @@ def csb_finder(options):
 
 def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
-    
+    Database.index_database(options.database_directory)
     Csb_proteins.csb_proteins_datasets(options) # groups training data
     if options.csb_distinct_grouping:
         Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
