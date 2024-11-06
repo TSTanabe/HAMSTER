@@ -272,6 +272,10 @@ def process_parallel_bulk_parse(args_tuple):
         
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
+        
+        #if options sagt, dass es einzelgenome sind, dann die genomID aus den keys und den protein identifiern entfernen
+        if not options.glob_gff:
+            protein_dict = clean_dict_keys_and_protein_ids(protein_dict, genomeID)
         #Complete the hit information
         ParseReports.parseGFFfile(gff_file,protein_dict)
         ParseReports.getProteinSequence(faa_file,protein_dict)
@@ -405,7 +409,7 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
                 
                 #Bei Query___proteinID$
                 
-                hit_proteinID = columns[0].split('___',1)[-1] #TODO kann probleme geben, wenn die faas nur concatenated werden aber nicht mehr genomeID___ besitzen!!!
+                hit_proteinID = columns[0]
                 query = columns[1]
                 hit_bitscore = int(float(columns[3]))
                 hsp_start = int(float(columns[4]))
@@ -426,6 +430,23 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
     return protein_dict
 
 
+def clean_dict_keys_and_protein_ids(input_dict, genomeID):
+    prefix = genomeID + '___'
+    updated_dict = {}
+    
+    for key, protein in input_dict.items():
+        # Entferne das Präfix von jedem Key, wenn es vorhanden ist
+        new_key = key[len(prefix):] if key.startswith(prefix) else key
+        
+        # Entferne das Präfix von proteinID, falls es vorhanden ist
+        if hasattr(protein, 'proteinID') and protein.proteinID.startswith(prefix):
+            protein.proteinID = protein.proteinID[len(prefix):]
+        
+        # Füge das geänderte Key-Value-Paar zum neuen Dictionary hinzu
+        updated_dict[new_key] = protein
+    
+    return updated_dict
+    
 ################################################################################################        
 ##################################### Selfblast query ##########################################
 ################################################################################################
@@ -435,8 +456,9 @@ def self_blast_query(options):
     report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
     protein_dict = parse_bulk_blastreport_genomize("QUERY",report,{},10) #Selfblast should not have any cutoff score
     print(protein_dict.keys())
-    ParseReports.getProteinSequence(options.self_seqs,protein_dict) #Get the protein Sequences
-    
+    ParseReports.getProteinSequence(options.self_query,protein_dict) #Get the protein Sequences
+    protein_dict = clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
+    print(protein_dict.keys())
     Database.insert_database_genomeIDs(options.database_directory, {"QUERY"})
     Database.insert_database_proteins(options.database_directory, protein_dict)
     writeQueryHitsSequenceFasta(options.fasta_initial_hit_directory, protein_dict)
