@@ -1,6 +1,8 @@
 #!/usr/bin/python
 
 import os
+import sys
+import csv
 import re
 import multiprocessing
 
@@ -186,61 +188,99 @@ def unpacker(file):
 
 ################# Concatenate subroutines     
 def create_glob_file(options):
-    
+    # Check if a glob fasta file and deconcatenated files were already provided
     if not options.glob_faa is None and os.path.isfile(options.glob_faa) and os.path.isdir(options.fasta_file_directory):
-        return #return if a glob fasta file and deconcatenated files were provided
+        return
+
+    # Define the output file path for the glob.faa file
+    options.glob_faa = os.path.join(options.result_files_directory, "glob.faa")
     
-    options.glob_faa = options.result_files_directory+"/glob.faa"
     with open(options.glob_faa, 'w') as outfile:
         for genomeID in options.queued_genomes:
-            # Extract genome identifier from the filename (without extension)
-            faa_file = options.faa_files[genomeID]         
-            # Read the sequences from the current fasta file
-            for record in SeqIO.parse(faa_file, "fasta"):
-                # Modify the header
-                original_id = record.id.split()[0]  # Extract the identifier up to the first whitespace
-                record.id = f"{genomeID}___{original_id}"  # Add the genome identifier
-                record.description = ""
-                # Write the modified record to the output file
-                SeqIO.write(record, outfile, "fasta")
+            faa_file = options.faa_files[genomeID]  # Get the FASTA file for the current genomeID
+
+            # Open each faa_file explicitly and close it after processing
+            infile = open(faa_file, 'r')
+            try:
+                sequence = ""
+                header = None
+
+                for line in infile:
+                    line = line.strip()
+                    if line.startswith(">"):
+                        # Write the previous sequence if it exists
+                        if header and sequence:
+                            outfile.write(f"{header}\n{sequence}\n")
+                        
+                        # Start a new record
+                        original_id = line[1:].split()[0]  # Extract original ID up to the first whitespace
+                        header = f">{genomeID}___{original_id}"  # Create the modified header
+                        sequence = ""  # Reset sequence for the new record
+                    else:
+                        sequence += line  # Append sequence lines
+                
+                # Write the last record if there was one
+                if header and sequence:
+                    outfile.write(f"{header}\n{sequence}\n")
+            finally:
+                infile.close()  # Ensure the file is closed after reading
+
 
 
 def create_selfquery_file(options):
     # Construct the paths for the output files
-    options.self_query = options.result_files_directory + "/self_blast.faa"
-    options.self_seqs = options.result_files_directory + "/self_seqs.faa"
+    options.self_query = os.path.join(options.result_files_directory, "self_blast.faa")
+    options.self_seqs = os.path.join(options.result_files_directory, "self_seqs.faa")
     
     # Dictionary to keep track of the number of times each original_id is encountered
     id_count = {}
     
-    # Open both files for writing
+    # Open both output files for writing
     with open(options.self_query, 'w') as outfile_query, open(options.self_seqs, 'w') as outfile_seqs:
         
-        # Parse the input query file in FASTA format
-        for record in SeqIO.parse(options.query_file, "fasta"):
-            
-            # Modify the record's identifier
-            original_id = record.id.split()[0]  # Extract the identifier up to the first whitespace
-            
-            # Initialize or increment the counter for this ID
-            if original_id in id_count:
-                id_count[original_id] += 1
-            else:
-                id_count[original_id] = 1
-            
-            # Append the count to the original_id for self_blast.faa file
-            record_with_query_prefix = record
-            record_with_query_prefix.id = f"QUERY___{original_id}___{id_count[original_id]}"
-            record_with_query_prefix.description = ""  # Clear description to avoid duplicate ID text
-            
-            # Write the modified record to self_blast.faa with QUERY___ prefix
-            SeqIO.write(record_with_query_prefix, outfile_query, "fasta")
-            
-            # Write the record without QUERY___ prefix to self_seqs.faa
-            record_without_prefix = record
-            record_without_prefix.id = f"{original_id}___{id_count[original_id]}"
-            record_without_prefix.description = ""  # Clear description to avoid duplicate ID text
-            SeqIO.write(record_without_prefix, outfile_seqs, "fasta")
+        # Open the input query file and process it line by line
+        with open(options.query_file, 'r') as infile:
+            sequence = ""
+            header = None
+
+            for line in infile:
+                line = line.strip()
+                if line.startswith(">"):
+                    # If a header is found, process the previous record
+                    if header and sequence:
+                        # Extract the original ID (up to the first whitespace)
+                        original_id = header[1:].split()[0]
+                        
+                        # Increment the counter for this ID
+                        id_count[original_id] = id_count.get(original_id, 0) + 1
+                        count = id_count[original_id]
+
+                        # Create modified headers for both output files
+                        query_header = f">QUERY___{original_id}___{count}"
+                        seqs_header = f">{original_id}___{count}"
+
+                        # Write to self_blast.faa with the QUERY___ prefix
+                        outfile_query.write(f"{query_header}\n{sequence}\n")
+                        # Write to self_seqs.faa without the QUERY___ prefix
+                        outfile_seqs.write(f"{seqs_header}\n{sequence}\n")
+                    
+                    # Start a new record
+                    header = line
+                    sequence = ""  # Reset sequence for the new record
+                else:
+                    sequence += line  # Append sequence lines
+
+            # Write the last record if there was one
+            if header and sequence:
+                original_id = header[1:].split()[0]
+                id_count[original_id] = id_count.get(original_id, 0) + 1
+                count = id_count[original_id]
+
+                query_header = f">QUERY___{original_id}___{count}"
+                seqs_header = f">{original_id}___{count}"
+
+                outfile_query.write(f"{query_header}\n{sequence}\n")
+                outfile_seqs.write(f"{seqs_header}\n{sequence}\n")
 
 
 ############### Deconcat subroutines
@@ -272,21 +312,20 @@ def deconcatenate_faa(input_filepath, output_directory):
 
     # Read the concatenated FASTA file
     with open(input_filepath, "r") as infile:
-        fasta_parser = SeqIO.parse(infile, "fasta")
-        for record in fasta_parser:
-            genome_id, _, remaining_id = record.id.partition('___')
-            record.description = ""
-            
-            # If the genome_id changes, close the previous file handle and open a new one
-            if genome_id != current_genome_id:
-                close_current_handle()
-                current_genome_id = genome_id
-                output_filepath = os.path.join(output_directory, f"{genome_id}.faa")
-                output_handle = open(output_filepath, "a")
-            
-            SeqIO.write(record, output_handle, "fasta")
-    
-    # Close the last output handle
+        for line in infile:
+            if line.startswith(">"):
+                #Extract the genomeID from the identifier line (header)
+                identifier = line[1:].strip() # Remove '>' and any surrounding spaces
+                genome_id = identifier.split('___')[0]
+                
+                if genome_id != current_genome_id:
+                    close_current_handle()
+                    current_genome_id = genome_id
+                    output_filepath = os.path.join(output_directory, f"{genome_id}.faa")
+                    output_handle = open (output_filepath, "a") 
+                output_handle.write(line)
+            else:
+                output_handle.write(line)
     close_current_handle()
     print(f"Deconcatenation of faa complete. Files saved to {output_directory}")
 
@@ -324,6 +363,7 @@ def deconcatenate_gff(input_filepath, output_directory):
                     if output_handle:
                         output_handle.close()
 
+                    # Update the current genome ID and open a new output file for writing
                     current_genome_id = genomeID
                     output_filepath = os.path.join(output_directory, f"{genomeID}.gff")
                     output_handle = open(output_filepath, "a")
