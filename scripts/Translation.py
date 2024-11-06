@@ -8,8 +8,6 @@ import multiprocessing
 
 from . import myUtil
 
-from Bio import SeqIO
-
 def parallel_translation(directory,cores):
     """
     18.5.24
