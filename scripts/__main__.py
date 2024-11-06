@@ -93,7 +93,7 @@ def parse_arguments(arguments):
     #Linclust parameters
     search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
     search.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
-    search.add_argument('-cluster:min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    search.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
@@ -193,6 +193,7 @@ def initial_search(options):
     
 def cluster_sequences(options):
     #Groups sequences via linclust and updates the database with grouped identifiers
+    Database.index_database(options.database_directory)
     
     print(f"MMseqs cluster with --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage}")    
     ParseSequenceLinclustReports.cluster_sequences(options)
