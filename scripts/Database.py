@@ -239,6 +239,8 @@ def insert_database_genomeIDs(database, genomeIDs):
     with sqlite3.connect(database) as con:
         cur = con.cursor()
         cur.execute("""PRAGMA foreign_keys = ON;""")
+        cur.execute("""PRAGMA synchronous = OFF;""")
+        cur.execute("""PRAGMA journal_mode = OFF;""")        
         # Prepare a list of tuples, each containing one genomeID
         genomeID_tuples = [(genomeID,) for genomeID in genomeIDs]
         # Use executemany to insert all genomeIDs in a single batch
@@ -316,6 +318,9 @@ def insert_database_proteins(database, protein_dict):
         try:
             cur = con.cursor()
             cur.execute("""PRAGMA foreign_keys = ON;""")
+            cur.execute("""PRAGMA synchronous = OFF;""")
+            cur.execute("""PRAGMA journal_mode = OFF;""")
+            
             
             protein_list = sorted(protein_dict.values(), key=lambda x: (x.gene_contig, x.gene_start))
             #protein_list = protein_dict.values()
@@ -456,6 +461,8 @@ def insert_database_clusters(database, cluster_dict):
         with sqlite3.connect(database) as con:
             cur = con.cursor()
             cur.execute("""PRAGMA foreign_keys = ON;""")
+            cur.execute("""PRAGMA synchronous = OFF;""")
+            cur.execute("""PRAGMA journal_mode = OFF;""") 
 
             cluster_inserts = []
             protein_updates = []
