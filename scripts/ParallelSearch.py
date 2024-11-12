@@ -98,7 +98,8 @@ def process_parallel_search(args_tuple):
 def initial_glob_search(options):
     print(f"Starting blastp search")
 
-    blast_results_table = MMseqsSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
+    blast_results_table = reverse_DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
+    #blast_results_table = DiamondSearch(options.self_seqs, options.glob_faa, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
@@ -147,9 +148,12 @@ def init_worker(diamond_blast_results_table, score_threshold_diction, csb_patter
 
 ####### Search routine #############
 
-def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid):
+def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
     # path ist die Assembly FASTA-Datei
     # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
+    
+    #Alignment mode is propably not needed anywhere, but I like args to be consistent with mmseqs
+    
 
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
@@ -161,7 +165,31 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid):
 
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
+    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    #output format hit query evalue score identity alifrom alito
+    return output_results_tab
+
+def reverse_DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
+    # path ist die Assembly FASTA-Datei
+    # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
+    
+    #Alignment mode is propably not needed anywhere, but I like args to be consistent with mmseqs
+    
+    #Reverse means that query is the target DB and glob DB is the query, makes it more sensitive
+
+    diamond = myUtil.find_executable("diamond")
+    # Erstellen der Diamond-Datenbank
+    target_db_name = f"{path}.dmnd"
+    os.system(f'{diamond} makedb --quiet --in {query_fasta} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
+    
+    # Suchergebnisse-Dateien
+    output_results_tab = f"{path}.diamond.tab"
+
+    # Durchführen der Diamond-Suche
+    #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
+    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {path} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {path} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 qseqid sseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 

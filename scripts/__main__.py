@@ -87,8 +87,8 @@ def parse_arguments(arguments):
     search = parser.add_argument_group("Optional search parameters and sequence clustering parameters for mmseqs2")
     search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
-    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=0.000, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
-    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.000, metavar = '<float>', help='Min. coverage used for searching')
+    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
+    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=60, metavar = '<float>', help='Min. coverage used for searching')
     
     #Linclust parameters
     search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
