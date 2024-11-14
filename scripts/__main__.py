@@ -80,6 +80,7 @@ def parse_arguments(arguments):
     
     resources.add_argument('-glob_faa', dest='glob_faa', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Predefined concatenated fasta file')
     resources.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated gff file')
+    resources.add_argument('-glob_blast_table', dest='glob_table', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated blast result table')
     resources.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing results from glob before entering into database')
     resources.add_argument('-no_glob', dest='glob_search', action='store_false', help='Do not concatenated fasta file for search')
     
@@ -263,10 +264,9 @@ def report_cv_performance(options):
   
 def main(args=None):
 #1
+    myUtil.print_header("\nPreparing space for the results")
     Project.prepare_directory_structure(__location__)
     options = parse_arguments(args)
-    
-    myUtil.print_header("\nPreparing space for the results")
     Project.prepare_result_space(options)
     
     

@@ -62,7 +62,11 @@ def process_parallel_search(args_tuple):
         faa_file = myUtil.unpackgz(options.faa_files[genomeID])
         gff_file = myUtil.unpackgz(options.gff_files[genomeID])
         cores = 1 # worker process has only one core
-        report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid)
+        
+        if options.glob_table:
+            report = options.glob_table
+        else:
+            report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid)
         
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
@@ -158,7 +162,7 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignmen
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
     target_db_name = f"{path}.dmnd"
-    os.system(f'{diamond} makedb --quiet --in {path} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} makedb --in {path} -d {target_db_name} --threads {cores}')
     
     # Suchergebnisse-Dateien
     output_results_tab = f"{path}.diamond.tab"
@@ -181,7 +185,7 @@ def reverse_DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, 
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
     target_db_name = f"{path}.dmnd"
-    os.system(f'{diamond} makedb --quiet --in {query_fasta} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} makedb --in {query_fasta} -d {target_db_name} --threads {cores}')
     
     # Suchergebnisse-Dateien
     output_results_tab = f"{path}.diamond.tab"
