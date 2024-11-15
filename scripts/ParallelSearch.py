@@ -62,11 +62,7 @@ def process_parallel_search(args_tuple):
         faa_file = myUtil.unpackgz(options.faa_files[genomeID])
         gff_file = myUtil.unpackgz(options.gff_files[genomeID])
         cores = 1 # worker process has only one core
-        
-        if options.glob_table:
-            report = options.glob_table
-        else:
-            report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid)
+        report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits)
         
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
@@ -101,9 +97,10 @@ def process_parallel_search(args_tuple):
 
 def initial_glob_search(options):
     print(f"Starting blastp search")
-
-    blast_results_table = reverse_DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
-    #blast_results_table = DiamondSearch(options.self_seqs, options.glob_faa, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.alignment_mode) #MMseqs2 search the target fasta file
+    blast_results_table = options.glob_table
+    if not blast_results_table:
+        blast_results_table = DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits, options.alignment_mode) #Diamond search the target fasta file
+    
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
@@ -152,7 +149,7 @@ def init_worker(diamond_blast_results_table, score_threshold_diction, csb_patter
 
 ####### Search routine #############
 
-def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
+def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits, alignment_mode=2):
     # path ist die Assembly FASTA-Datei
     # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
     
@@ -162,7 +159,7 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignmen
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
     target_db_name = f"{path}.dmnd"
-    os.system(f'{diamond} makedb --in {path} -d {target_db_name} --threads {cores}')
+    os.system(f'{diamond} makedb --quiet --in {path} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
     
     # Suchergebnisse-Dateien
     output_results_tab = f"{path}.diamond.tab"
@@ -170,11 +167,11 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignmen
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
     print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} -k {diamond_report_hits} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 
-def reverse_DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
+def reverse_DiamondSearch(target_fasta, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
     # path ist die Assembly FASTA-Datei
     # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
     
@@ -184,16 +181,16 @@ def reverse_DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, 
 
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
-    target_db_name = f"{path}.dmnd"
-    os.system(f'{diamond} makedb --in {query_fasta} -d {target_db_name} --threads {cores}')
+    target_db_name = f"{query_fasta}.dmnd"
+    os.system(f'{diamond} makedb --quiet --in {query_fasta} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
     
     # Suchergebnisse-Dateien
-    output_results_tab = f"{path}.diamond.tab"
+    output_results_tab = f"{target_fasta}.diamond.tab"
 
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {path} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {path} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 qseqid sseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {target_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {target_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} -k {diamond_report_hits} --outfmt 6 qseqid sseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 
@@ -485,7 +482,7 @@ def clean_dict_keys_and_protein_ids(input_dict, genomeID):
 
 def self_blast_query(options):
     #Selfblast the query file
-    report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
+    report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100, diamond_report_hits) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
     protein_dict = parse_bulk_blastreport_genomize("QUERY",report,{},10) #Selfblast should not have any cutoff score
     print(protein_dict.keys())
     ParseReports.getProteinSequence(options.self_query,protein_dict) #Get the protein Sequences

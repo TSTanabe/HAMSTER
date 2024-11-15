@@ -85,16 +85,18 @@ def parse_arguments(arguments):
     resources.add_argument('-no_glob', dest='glob_search', action='store_false', help='Do not concatenated fasta file for search')
     
         
-    search = parser.add_argument_group("Optional search parameters and sequence clustering parameters for mmseqs2")
+    search = parser.add_argument_group("Optional search parameters for diamond")
     search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
     search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
     search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=60, metavar = '<float>', help='Min. coverage used for searching')
-    
+    search.add_argument('-reports_hit', dest='diamond_report_hits', type=float, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
+
     #Linclust parameters
-    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
-    search.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
-    search.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    protein_cluster = parser.add_argument_group("sequence clustering parameters for mmseqs2")
+    protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
+    protein_cluster.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
+    protein_cluster.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
@@ -172,8 +174,9 @@ def fasta_preparation(options):
 
         #concat to to globfile 
         Queue.queue_files(options)
-        print(f"Generating glob file")
-        Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier   
+        if not options.options.glob_table:
+            print(f"Generating glob file")
+            Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier   
     Translation.create_selfquery_file(options)
 
 def initial_search(options):
