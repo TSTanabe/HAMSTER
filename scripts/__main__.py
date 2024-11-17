@@ -88,9 +88,12 @@ def parse_arguments(arguments):
     search = parser.add_argument_group("Optional search parameters for diamond")
     search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
-    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
-    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=60, metavar = '<float>', help='Min. coverage used for searching')
-    search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=float, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
+    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
+    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
+    search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]')
+    search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
+
+
 
     #Linclust parameters
     protein_cluster = parser.add_argument_group("sequence clustering parameters for mmseqs2")
@@ -182,6 +185,7 @@ def fasta_preparation(options):
 def initial_search(options):
     #Writes a database with the protein hits and their gene clusters for later use.
     #Writes fasta files for each hit for linclust    
+
     if not os.path.isfile(options.database_directory):
         Database.create_database(options.database_directory)
 
@@ -191,7 +195,7 @@ def initial_search(options):
     else:
         #Process all files separately
         ParallelSearch.initial_genomize_search(options)
-    ParallelSearch.self_blast_query(options)
+
     
     
     

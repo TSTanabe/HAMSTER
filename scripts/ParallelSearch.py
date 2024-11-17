@@ -28,7 +28,7 @@ def initial_genomize_search(options):
     
     score_threshold_diction = Search.makeThresholdDict(options.score_threshold_file, options.threshold_type)
     csb_patterns_diction,csb_pattern_names = Csb_finder.makePatternDict(options.patterns_file)
-    
+    self_blast_query(options)
     
     manager = Manager()
     data_queue = manager.Queue()
@@ -96,15 +96,26 @@ def process_parallel_search(args_tuple):
 ################################################################################################
 
 def initial_glob_search(options):
-    print(f"Starting diamond blastp search")
+    print(f"Initilize diamond blastp search")
+    self_blast_report = self_blast_query(options)
+
+
     blast_results_table = options.glob_table
     if not blast_results_table: # If a blast table is not provided make the blastp
+        print(f"Start diamond blastp search")    
         blast_results_table = DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits_limit, options.alignment_mode) #Diamond search the target fasta file
     
+    print(f"Filter blastp results table")    
+    query_length_dict = get_sequence_legth(options.self_query)
+    selfblast_scores_dict = get_sequence_hits_scores(self_blast_report)
+    blast_results_table = filter_blast_table(blast_results_table, options.evalue, options.thrs_score, options.searchcoverage, options.minseqid, options.thrs_bsr, query_length_dict, selfblast_scores_dict)
+
+
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
+    print("Parsing hits per genome")
     genomeID_batches = split_genomeIDs_into_batches(list(genomeIDs_set), options.cores-1) # batch sets of genomeIDs for each worker
     
     manager = Manager()
@@ -113,7 +124,7 @@ def initial_glob_search(options):
     csb_patterns_diction,csb_pattern_names = Csb_finder.makePatternDict(options.patterns_file)
     score_threshold_diction = {} #empty because all have to be parsed
     
-    with Pool(processes = options.cores*4, initializer=init_worker, 
+    with Pool(processes = options.cores, initializer=init_worker, 
               initargs=(blast_results_table, score_threshold_diction, csb_patterns_diction, csb_pattern_names)) as pool:
     
         p_writer = pool.apply_async(process_writer, (data_queue, options, counter))
@@ -129,7 +140,7 @@ def initial_glob_search(options):
     return
 
 
-# Initializer function to set up global variables for each worker
+# Initializer function to set up global variables for each worker of the parsing process
 def init_worker(diamond_blast_results_table, score_threshold_diction, csb_patterns_diction, csb_pattern_names):
     global global_diamond_blast_results_table
     global global_score_threshold_diction
@@ -446,6 +457,161 @@ def clean_dict_keys_and_protein_ids(input_dict, genomeID):
         updated_dict[new_key] = protein
     
     return updated_dict
+################################################################################################        
+################################## Filter blast hit report #####################################
+################################################################################################
+
+
+def get_sequence_legth(file_path):
+    #get the sequence length per query name without the numbering. If multiple queries have the same
+    #name, then take the average
+    
+    sequence_data = {}  # Dictionary to store lengths per identifier
+    sequence_counts = {}  # Dictionary to track counts of sequences per identifier
+    
+    with open(file_path, 'r') as fasta_file:
+        current_id = None
+        current_sequence = []
+        
+        for line in fasta_file:
+            line = line.strip()
+            if line.startswith(">"):
+                # Process previous sequence if any
+                if current_id:
+                    sequence_length = len("".join(current_sequence))
+                    if current_id in sequence_data:
+                        sequence_data[current_id] += sequence_length
+                        sequence_counts[current_id] += 1
+                    else:
+                        sequence_data[current_id] = sequence_length
+                        sequence_counts[current_id] = 1
+                
+                # Extract the identifier, considering only the part before "___"
+                current_id = line[1:].split('___')[1]
+                current_sequence = []  # Reset sequence for the new identifier
+            else:
+                current_sequence.append(line)
+        
+        # Process the last sequence in the file
+        if current_id:
+            sequence_length = len("".join(current_sequence))
+            if current_id in sequence_data:
+                sequence_data[current_id] += sequence_length
+                sequence_counts[current_id] += 1
+            else:
+                sequence_data[current_id] = sequence_length
+                sequence_counts[current_id] = 1
+    
+    # Calculate average length for identifiers with multiple sequences
+    averaged_data = {}
+    for key in sequence_data:
+        averaged_data[key] = sequence_data[key] / sequence_counts[key]
+    
+    return averaged_data
+    
+    
+def get_sequence_hits_scores(blast_file):
+    """
+    Generates a dictionary of self-blast scores from a BLAST table file.
+
+    :param blast_file: Path to the BLASTP table file.
+    :return: Dictionary with qseqid as keys and the highest self-hit bitscore as values.
+    """
+    selfblast_scores = {}
+
+    with open(blast_file, 'r') as infile:
+        for line in infile:
+            row = line.strip().split('\t')
+            sseqid, qseqid, evalue, bitscore, sstart, send, pident = row
+
+            # Convert bitscore to float for comparison
+            bitscore = float(bitscore)
+
+            # Update the dictionary with the highest bitscore for self-hits
+            if qseqid in selfblast_scores:
+                selfblast_scores[qseqid] = max(selfblast_scores[qseqid], bitscore)
+            else:
+                selfblast_scores[qseqid] = bitscore
+
+    return selfblast_scores
+    
+        
+def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff, identity_cutoff, bsr_cutoff, sequence_lengths, selfblast_scores):
+    """
+    Filters a BLASTP table based on given criteria including Blast Score Ratio (BSR),
+    and writes the results to a new file.
+
+    :param blast_file: Path to the BLASTP table file.
+    :param evalue_cutoff: Maximum allowable e-value.
+    :param score_cutoff: Minimum required bit score.
+    :param coverage_cutoff: Minimum required coverage (percentage as a decimal, e.g., 0.8 for 80%).
+    :param identity_cutoff: Minimum required percentage identity (pident as a decimal, e.g., 0.9 for 90%).
+    :param bsr_cutoff: Minimum required Blast Score Ratio (BSR).
+    :param sequence_lengths: Dictionary of sequence lengths for qseqid.
+    :param selfblast_scores: Dictionary of self-blast scores for each query (qseqid).
+    :return: Path to the filtered output file.
+    """
+    # Determine the output file name and path
+    directory, filename = os.path.split(blast_file)
+    output_file = os.path.join(directory, f"filtered_{filename}")
+    
+    with open(blast_file, 'r') as infile, open(output_file, 'w') as outfile:
+
+        # Process each row in the input file
+        for line in infile:
+            row = line.strip().split('\t')
+            sseqid, qseqid, evalue, bitscore, sstart, send, pident = row
+
+            # Convert necessary fields to numeric values
+            evalue = float(evalue)
+            bitscore = float(bitscore)
+            sstart = int(sstart)
+            send = int(send)
+            pident = float(pident)
+
+            # Calculate coverage
+            query_length = sequence_lengths.get(qseqid, 0)
+            if query_length == 0:
+                outfile.write(line)  # Write the row to the output file
+                continue  # Skip if qseqid has no known sequence length
+
+            alignment_length = abs(send - sstart) + 1
+            coverage = alignment_length / query_length
+
+            # Calculate Blast Score Ratio (BSR)
+            selfblast_score = selfblast_scores.get(qseqid, 0)
+            if selfblast_score == 0:
+                outfile.write(line)  # Write the row to the output file
+                continue  # Skip if qseqid has no self-blast score
+
+            bsr = bitscore / selfblast_score
+
+            # Check cutoffs
+            if (evalue <= evalue_cutoff and
+                bitscore >= score_cutoff and
+                coverage >= coverage_cutoff and
+                pident >= identity_cutoff and
+                bsr >= bsr_cutoff):
+                outfile.write(line)  # Write the row to the output file
+            else:
+                # Determine which criteria failed
+                failed_criteria = []
+                if evalue > evalue_cutoff:
+                    failed_criteria.append(f"evalue ({evalue} > {evalue_cutoff})")
+                if bitscore < score_cutoff:
+                    failed_criteria.append(f"bitscore ({bitscore} < {score_cutoff})")
+                if coverage < coverage_cutoff:
+                    failed_criteria.append(f"coverage ({coverage:.2f} < {coverage_cutoff})")
+                if pident < identity_cutoff:
+                    failed_criteria.append(f"pident ({pident} < {identity_cutoff})")
+                if bsr < bsr_cutoff:
+                    failed_criteria.append(f"bsr ({bsr:.2f} < {bsr_cutoff})")
+
+                print(f"Row skipped due to: {', '.join(failed_criteria)}")
+                print(f"Row details: {line.strip()}")
+
+    return output_file    
+
     
 ################################################################################################        
 ##################################### Selfblast query ##########################################
@@ -455,12 +621,13 @@ def self_blast_query(options):
     #Selfblast the query file
     report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100, options.diamond_report_hits_limit) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
     protein_dict = parse_bulk_blastreport_genomize("QUERY",report,{},10) #Selfblast should not have any cutoff score
-    print(protein_dict.keys())
+    
     ParseReports.getProteinSequence(options.self_query,protein_dict) #Get the protein Sequences
     protein_dict = clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
-    print(protein_dict.keys())
+    
     Database.insert_database_genomeIDs(options.database_directory, {"QUERY"})
     Database.insert_database_proteins(options.database_directory, protein_dict)
     writeQueryHitsSequenceFasta(options.fasta_initial_hit_directory, protein_dict)
     
+    return report
     
