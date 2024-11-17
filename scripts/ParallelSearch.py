@@ -62,7 +62,7 @@ def process_parallel_search(args_tuple):
         faa_file = myUtil.unpackgz(options.faa_files[genomeID])
         gff_file = myUtil.unpackgz(options.gff_files[genomeID])
         cores = 1 # worker process has only one core
-        report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits)
+        report = DiamondSearch(options.glob_faa, options.query_file, cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits_limit)
         
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
@@ -96,10 +96,10 @@ def process_parallel_search(args_tuple):
 ################################################################################################
 
 def initial_glob_search(options):
-    print(f"Starting blastp search")
+    print(f"Starting diamond blastp search")
     blast_results_table = options.glob_table
-    if not blast_results_table:
-        blast_results_table = DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits, options.alignment_mode) #Diamond search the target fasta file
+    if not blast_results_table: # If a blast table is not provided make the blastp
+        blast_results_table = DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits_limit, options.alignment_mode) #Diamond search the target fasta file
     
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
@@ -113,7 +113,7 @@ def initial_glob_search(options):
     csb_patterns_diction,csb_pattern_names = Csb_finder.makePatternDict(options.patterns_file)
     score_threshold_diction = {} #empty because all have to be parsed
     
-    with Pool(processes = options.cores, initializer=init_worker, 
+    with Pool(processes = options.cores*4, initializer=init_worker, 
               initargs=(blast_results_table, score_threshold_diction, csb_patterns_diction, csb_pattern_names)) as pool:
     
         p_writer = pool.apply_async(process_writer, (data_queue, options, counter))
@@ -149,7 +149,7 @@ def init_worker(diamond_blast_results_table, score_threshold_diction, csb_patter
 
 ####### Search routine #############
 
-def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits, alignment_mode=2):
+def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits_limit, alignment_mode=2):
     # path ist die Assembly FASTA-Datei
     # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
     
@@ -166,31 +166,8 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
 
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} -k {diamond_report_hits} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    #output format hit query evalue score identity alifrom alito
-    return output_results_tab
-
-def reverse_DiamondSearch(target_fasta, query_fasta, cores, evalue, coverage, minseqid, alignment_mode=2):
-    # path ist die Assembly FASTA-Datei
-    # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
-    
-    #Alignment mode is propably not needed anywhere, but I like args to be consistent with mmseqs
-    
-    #Reverse means that query is the target DB and glob DB is the query, makes it more sensitive
-
-    diamond = myUtil.find_executable("diamond")
-    # Erstellen der Diamond-Datenbank
-    target_db_name = f"{query_fasta}.dmnd"
-    os.system(f'{diamond} makedb --quiet --in {query_fasta} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
-    
-    # Suchergebnisse-Dateien
-    output_results_tab = f"{target_fasta}.diamond.tab"
-
-    # Durchführen der Diamond-Suche
-    #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {target_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {target_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --id {minseqid} --query-cover {coverage} -k {diamond_report_hits} --outfmt 6 qseqid sseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 
@@ -411,18 +388,12 @@ def writeQueryHitsSequenceFasta(directory, protein_dict):
             current_file.close()
 
 def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
-    """
-    1.9.22 
-    Required input are a path to a Hmmreport File from HMMER3 and a thresholds dictionary with threshold scores for each HMM
-    Returns a list of protein objects for further utilization
-    Args
-        -Inputfile Report from HMMER3
-        -Dictionary Thresholds for HMMs
-        
-    Return
-        -list of Protein objects
-    """
-
+    #
+    # Parse a hit table with sseqid qseqid evalue bitscore sstart send pident
+    # First use grep to get all lines with the genomeID. Requisite: GENOMEID has to be part of the Hit identifier
+    #
+    
+    
     protein_dict = {}
 
     result = subprocess.run(['grep', genomeID, Filepath], stdout=subprocess.PIPE, text=True)
@@ -434,7 +405,7 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
         if columns:
             try:
                 #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-                #the hit identifier in the fasta file must have a genomeID___proteinID$ format, only the forst ___ will be recognized
+                #the hit identifier in the fasta file must have a genomeID___proteinID$ format, only the first ___ will be recognized
                 
                 #Bei Query___proteinID$
                 
@@ -482,7 +453,7 @@ def clean_dict_keys_and_protein_ids(input_dict, genomeID):
 
 def self_blast_query(options):
     #Selfblast the query file
-    report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100, diamond_report_hits) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
+    report = DiamondSearch(options.self_query, options.query_file, options.cores, options.evalue, 100, 100, options.diamond_report_hits_limit) #Selfblast, coverage and identity have to be 100 % or weakly similar domains may occur
     protein_dict = parse_bulk_blastreport_genomize("QUERY",report,{},10) #Selfblast should not have any cutoff score
     print(protein_dict.keys())
     ParseReports.getProteinSequence(options.self_query,protein_dict) #Get the protein Sequences

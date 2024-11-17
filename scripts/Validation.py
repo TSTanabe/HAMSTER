@@ -42,7 +42,7 @@ def parallel_cross_validation(options):
         #TODO als globale variablen gestalten um speicher und Zeit einzusparen
     
     #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores) as pool:
+    with Pool(processes=options.cores*6) as pool:
         
         #starts the workers
         pool.map(process_cross_folds,args_list)
@@ -134,7 +134,7 @@ def get_alignment_files(directory):
 
 
 
-def create_cross_validation_sets(alignment_file, output_directory, ending=".cv", num_folds=5):
+def create_cross_validation_sets_deprecated(alignment_file, output_directory, ending=".cv", num_folds=5):
     # Check if the output directory exists, if not, create it
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
@@ -161,7 +161,44 @@ def create_cross_validation_sets(alignment_file, output_directory, ending=".cv",
             for record_id, sequence in zip(train_record_ids, train_sequences):
                 train_f.write(f">{record_id}\n{sequence}\n")
                 
+def create_cross_validation_sets(alignment_file, output_directory, ending=".cv", num_folds=5):
+    # Check if the output directory exists, if not, create it
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
 
+    # Read the alignment file manually
+    sequences = []
+    record_ids = []
+    with open(alignment_file, "r") as f:
+        record_id = None
+        sequence_lines = []
+        for line in f:
+            line = line.strip()
+            if line.startswith(">"):
+                if record_id is not None:
+                    sequences.append("".join(sequence_lines))
+                    sequence_lines = []
+                record_id = line[1:]  # Remove the ">"
+                record_ids.append(record_id)
+            else:
+                sequence_lines.append(line)
+        if record_id is not None:
+            sequences.append("".join(sequence_lines))
+
+    num_sequences = len(sequences)
+    fold_size = num_sequences // num_folds
+
+    # Create cross-validation folds
+    for fold in range(num_folds):
+        start_idx = fold * fold_size
+        end_idx = (fold + 1) * fold_size
+        train_sequences = sequences[:start_idx] + sequences[end_idx:]
+        train_record_ids = record_ids[:start_idx] + record_ids[end_idx:]
+        train_file = os.path.join(output_directory, f"training_data_{fold}{ending}")
+
+        with open(train_file, "w") as train_f:
+            for record_id, sequence in zip(train_record_ids, train_sequences):
+                train_f.write(f">{record_id}\n{sequence}\n")
 
 def extract_record_ids_from_alignment(alignment_file):
     record_ids = set()

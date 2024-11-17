@@ -90,7 +90,7 @@ def parse_arguments(arguments):
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
     search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0.0,1.0]')
     search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=60, metavar = '<float>', help='Min. coverage used for searching')
-    search.add_argument('-reports_hit', dest='diamond_report_hits', type=float, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
+    search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=float, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
 
     #Linclust parameters
     protein_cluster = parser.add_argument_group("sequence clustering parameters for mmseqs2")
@@ -174,7 +174,7 @@ def fasta_preparation(options):
 
         #concat to to globfile 
         Queue.queue_files(options)
-        if not options.options.glob_table:
+        if not options.glob_table:
             print(f"Generating glob file")
             Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier   
     Translation.create_selfquery_file(options)

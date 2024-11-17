@@ -91,39 +91,52 @@ def getAllFiles(directory, ending = 0):
         
     
 #### Next three routines are meant to work together
-def compareFileLists(directory,ext1=0,ext2=0):
-#return a list of all files with extension 1 which have no equivalent with extension 2
+def compareFileLists(directory, ext1=0, ext2=0):
+    """
+    Returns a list of all files with extension 1 which have no equivalent with extension 2,
+    considering only file names (ignoring directory paths).
+    """
     if ext1 and ext2:
-        Files1 = getAllFiles(directory,ext1)
-        Files2 = getAllFiles(directory,ext2)
-        CompareList1 = removeExtFromList(Files1,ext1)
-        CompareList2 = removeExtFromList(Files2,ext2)
+        # Get all files with the specified extensions
+        Files1 = getAllFiles(directory, ext1)
+        Files2 = getAllFiles(directory, ext2)
+        
+        # Normalize filenames by stripping directories and extensions
+        CompareList1 = removeExtFromList(Files1, ext1)
+        CompareList2 = removeExtFromList(Files2, ext2)
+        
+        # Find files present in ext1 but not in ext2
         Difference = set(CompareList1).difference(set(CompareList2))
         
-        listing = addExtToList(list(Difference),ext1)
-                
+        # Add back the extension to the differing file names
+        listing = addExtToList(list(Difference), ext1)
+        
         return listing
 
-    return
+    return []
 
-def removeExtFromList(listing,ext):
-#removes extension from the right end of each element of a list
-    index = 0
-    for element in listing:
-        element = element[:-len(ext)]
-        listing[index] = element
-        index += 1
-    return listing
-    
+def getAllFiles(directory, ext):
+    """
+    Recursively retrieves all files with the specified extension in the given directory.
+    """
+    matched_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(ext):
+                matched_files.append(os.path.join(root, file))
+    return matched_files
 
-def addExtToList(listing,ext):
-#removes extension from the right end of each element of a list
-    index = 0
-    for element in listing:
-        element += ext
-        listing[index] = element
-        index += 1
-    return listing
+def removeExtFromList(listing, ext):
+    """
+    Removes extension and directory paths from each element of a list.
+    """
+    return [os.path.splitext(os.path.basename(element))[0] for element in listing]
+
+def addExtToList(listing, ext):
+    """
+    Adds an extension back to each element of a list.
+    """
+    return [element + ext for element in listing]
 
 
 

@@ -1,12 +1,8 @@
 #!/usr/bin/python
-from Bio import SearchIO
-from Bio import SeqIO
 import traceback
 import subprocess
-from . import Database
-#import multiprocessing
-#from multiprocessing import Process, Manager, Pool, Semaphore
 import re
+from . import Database
 
 
 class Protein:
@@ -204,110 +200,6 @@ class Domain:
 #------------------------------------------------------------
 
 
-def parseHMMreport(Filepath, Thresholds, cut_score=10):
-    protein_dict = {}
-    
-    try:
-        protein_dict = parseHMMreport_hmmer3_format(Filepath, Thresholds, cut_score)
-    except Exception as e:  # Catch all exceptions
-        print(f"Error occurred while processing the file: {Filepath}")
-        traceback.print_exc()  # This prints the complete traceback of the error
-        
-
-    return protein_dict
-    
-    
-def parseHMMreport_hmmer3_format(Filepath,Thresholds,cut_score=10):
-    """
-    1.9.22 
-    Required input are a path to a Hmmreport File from HMMER3 and a thresholds dictionary with threshold scores for each HMM
-    Returns a list of protein objects for further utilization
-    Args
-        -Inputfile Report from HMMER3
-        -Dictionary Thresholds for HMMs
-        
-    Return
-        -list of Protein objects
-    """
-
-    
-    protein_dict = {}
-
-
-    for hmmer_qresult in SearchIO.parse(Filepath,"hmmer3-text"):
-        query = hmmer_qresult.id    # Name of HMM without description
-        hit_proteinID = ""
-        hit_bitscore = 0
-        hit_bias = 0
-        hit_evalue = 1
-        threshold = cut_score
-        if query in Thresholds:
-            threshold = Thresholds[query] # specific threshold
-        
-        
-        for hit in hmmer_qresult:
-            if threshold<hit.bitscore:
-                hit_proteinID = hit.id
-                hit_bitscore = hit.bitscore
-                hit_bias = hit.bias
-                hit_evalue = hit.evalue	
-                hsp_bitscore = 0
-                hsp_start = 0
-                hsp_end = 0
-                for hsp in hit:
-                    #take highest scoring domain as coordinates
-                    if hsp_bitscore < hsp.bitscore:
-                        hsp_start = hsp.hit_start
-                        hsp_end = hsp.hit_end
-                        hsp_bitscore = hsp.bitscore
-                        
-                #print (f"HMM: {query} ProteinID:{hit_proteinID} Hitscore:{hit_bitscore} Bias:{hit_bias} HspScore:{hsp_bitscore} Start:{hsp_start} End:{hsp_end}") Debugging Zeile
-                if hit_proteinID in protein_dict:
-                    protein = protein_dict[hit_proteinID]
-                    
-                    protein.add_domain(query,hsp_start,hsp_end,hit_bitscore)
-                else:
-                    protein_dict[hit_proteinID] = Protein(hit_proteinID,query,hsp_start,hsp_end,hit_bitscore)
-    return protein_dict
-
-
-
-def parseHMMreport_below_cutoff_hits(protein_types,Filepath,Thresholds,cut_score=10):
-    """
-    11.04.2023
-    Routine shall find hits that are below the  threshold but that are still significant
-    candidate hits are returned in a dictionary with proteinID as key and list as value
-    """
-    candidate_dict = {}
-    for hmmer_qresults in SearchIO.parse(Filepath,"hmmer3-text"):
-        query = hmmer_qresults.id
-        if query in protein_types:
-            hit_proteinID = ""
-            hit_bitscore = 0
-            hit_bias = 0
-            hit_evalue = 1
-            threshold = 10
-            if query in Thresholds:
-                threshold = Thresholds[query] #Upper limit
-                cutoff = threshold * 0.1 # Lower limit
-                
-                for hit in hmmer_qresults:
-                    if hit.bitscore<threshold and hit.bitscore > cutoff:
-                        hit_proteinID = hit.id
-                        hit_bitscore = hit.bitscore
-                        hit_bias = hit.bias
-                        hit_evalue = hit.evalue
-                        hsp_bitscore = 0
-                        hsp_start = 0
-                        hsp_end = 0
-                        for hsp in hit:#take highest scoring domain as coordinates
-                            if hsp_bitscore < hsp.bitscore:
-                                hsp_start = hsp.hit_start
-                                hsp_end = hsp.hit_end
-                                hsp_bitscore = hsp.bitscore
-                        candidate_dict[hit_proteinID] = [query,hsp_start,hsp_end,hsp_bitscore]
-    
-    return candidate_dict
 
 
 def parseGFFfile(Filepath, protein_dict):
@@ -356,33 +248,6 @@ def parseGFFfile(Filepath, protein_dict):
         error_message = f"\nError occurred: {str(e)}"
         print(f"\tWARNING: Skipped {faa_file} due to an error - {error_message}")
         return protein_dict
-    return protein_dict
-
-
-
-
-def getProteinSequence_deprecated(Filepath, protein_dict):
-    """
-    Deprecated because it uses the SeqIO package, which is slower than IO streaming
-    3.9.22
-    Adds the protein Sequence to the Protein Objects in a dictionary. ProteinIDs of the dictionary have
-    to match the header of the .faa file
-    
-    Args:
-        Filepath - fasta formatted amino acid sequence containing file
-        protein_dict - Dictionary with key proteinID and value Protein Objects
-    Return:
-        protein_dict (even though possibly not necessary)    
-    """
-    reader = None
-    try:
-        reader = open(Filepath, "r")
-        for record in SeqIO.parse(reader, "fasta"):
-            if record.id in protein_dict:
-                protein = protein_dict[record.id]
-                protein.protein_sequence = str(record.seq)
-    finally:
-        reader.close()
     return protein_dict
 
 
@@ -443,33 +308,6 @@ def getProteinSequence(Filepath, protein_dict):
     
     return protein_dict
 
-
-def grapProteinSequence(filepath, protein_dict):
-    """
-    Adds the protein sequence to the Protein Objects in a dictionary.
-    ProteinIDs of the dictionary have to match the header of the .faa file.
-    
-    Args:
-        filepath - fasta formatted amino acid sequence containing file
-        protein_dict - Dictionary with key proteinID and value Protein Objects
-    Return:
-        protein_dict (even though possibly not necessary)    
-    """
-    for protein_id in protein_dict.keys():
-        # Use awk to get the sequence until the next '>'
-        awk_command = f"awk '/>{protein_id}/ {{flag=1; next}} /^>/ {{flag=0}} flag {{print}}' {filepath}"
-        result = subprocess.run(awk_command, shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            output = result.stdout
-            # Remove all whitespace characters
-            sequence = ''.join(output.split())
-            protein_dict[protein_id].protein_sequence = sequence
-        else:
-            print(f"Protein ID {protein_id} not found in {filepath}")
-    
-    return protein_dict
-        
 
 def getLocustag(locustag_pattern,string):
     match = locustag_pattern.search(string)
