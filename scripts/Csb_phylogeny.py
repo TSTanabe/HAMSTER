@@ -163,7 +163,7 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict):
         
         
         if clade_identifier_set:
-            monophyly[frozenset(clade_identifier_set)] = [(keyword,domain)]
+            monophyly[frozenset(clade_identifier_set)] = [("l"+keyword,domain)]
 
     return monophyly    
 

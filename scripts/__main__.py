@@ -97,6 +97,7 @@ def parse_arguments(arguments):
 
     #Linclust parameters
     protein_cluster = parser.add_argument_group("sequence clustering parameters for mmseqs2")
+    protein_cluster.add_argument('-cluster-active', dest='protein_cluster_active', action='store_true', help='Cluster initial blastp hits with mmseqs2 cluster')
     protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
     protein_cluster.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
     protein_cluster.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
@@ -200,6 +201,9 @@ def initial_search(options):
     
     
 def cluster_sequences(options):
+    if not options.protein_cluster_active: # skip if not activated to cluster the sequences
+        return
+    
     #Groups sequences via linclust and updates the database with grouped identifiers
     Database.index_database(options.database_directory)
     

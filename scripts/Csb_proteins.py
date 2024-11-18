@@ -17,23 +17,35 @@ def csb_proteins_datasets(options):
     dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
-    print(dictionary)
+
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
     merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon,"m")
-    
+    #print("\nMerged\n\n")
+    #print(merged)
+    #print("\nSingles\n\n")
+    #print(singles)
     options.TP_merged = merged
     options.TP_singles = singles
     
 
 
 def training_data_fasta(options):
-
     
     training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
-    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
     
+    dicts = [options.TP_merged, options.TP_singles, options.TP_monophyla]
+    training_datasets = {}
+    
+    for d in dicts:
+        for key,value in d.items():
+            if key in training_datasets:
+                training_datasets[key] += value
+            else:
+                training_datasets[key] = value
+    
+    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
     #print(len(options.TP_merged))
     #print(len(options.TP_singles))
     #print(len(options.TP_monophyla))
@@ -265,48 +277,46 @@ def group_proteinID_sets(csb_proteinIDs_dict):
 
 
 def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
+    #epsilon is the acceptable dissimilarity to merge points
+    
     # Step 1: Extract the frozen sets (keys) from the dictionary
     cluster_columns = list(grouped_sets.keys())
     cluster_columns.sort(key=lambda fs: tuple(sorted(fs))) #sort the list to have consistent input order between runs
-    
+
     # Step 2: Calculate the Jaccard similarity matrix for the frozen sets
     similarity_matrix = Csb_cluster.calculate_similarity_matrix_jaccard(cluster_columns)
-    
     # Step 3: Apply DBSCAN to get the cluster labels based on the similarity matrix
     labels = Csb_cluster.apply_dbscan_on_similarity_matrix(similarity_matrix, eps=epsilon, min_samples=2)
     
     # Step 4: Create two dictionaries: one for merged groups and one for noise points
     merged_groups = {}
     noise_points = {}
-    
     # Step 5: Group sets by their DBSCAN label
-    for label in set(labels):  # Loop through unique labels
-        
-        # Handle noise points (label -1)
-        if label == -1:
-            
-            for idx, set_label in enumerate(labels):
-                if set_label == -1:
-                    modified_identifiers = [("s" + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
-                    noise_points[cluster_columns[idx]] = modified_identifiers
-            continue
-        
-        # For non-noise points, merge sets with the same label
+    visited_labels = set()
+    for idx, label in enumerate(labels):  # Loop through unique labels
         merged_set = set()  # Will contain the union of the sets
         merged_list = []  # Will contain the merged list of tuples
-
-        for idx, set_label in enumerate(labels):
-            if set_label == label:
-                # Merge the sets with the same label
-                merged_set = merged_set.union(cluster_columns[idx])  # Union of frozen sets
+        
+        if label == -1:
+            # Handle noise points (label -1)
+            modified_identifiers = [("s" + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
+            noise_points[cluster_columns[idx]] = modified_identifiers
+        elif not label in visited_labels:
+            # For non-noise points that were not already visited, merge sets with the same label
+        
+        
+            for idx2, set_label in enumerate(labels):
+                if set_label == label:
+                    # Merge the sets with the same label
+                    merged_set = merged_set.union(cluster_columns[idx2])  # Union of frozen sets
                 
-                # Extend merged_list, adding merge_extension to each identifier in the list
-                modified_identifiers = [(merge_extension + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
-                merged_list.extend(modified_identifiers)  # Merge with modified identifiers
+                    # Extend merged_list, adding merge_extension to each identifier in the list
+                    modified_identifiers = [(merge_extension + item[0], item[1]) for item in grouped_sets[cluster_columns[idx2]]]
+                    merged_list.extend(modified_identifiers)  # Merge with modified identifiers
+                    visited_labels.add(set_label)
 
-
-        # Store the merged set (converted to frozenset to make it a valid dictionary key)
-        merged_groups[frozenset(merged_set)] = merged_list
+            # Store the merged set (converted to frozenset to make it a valid dictionary key)
+            merged_groups[frozenset(merged_set)] = merged_list
     
     # Return both the merged groups and the noise points
     return merged_groups, noise_points

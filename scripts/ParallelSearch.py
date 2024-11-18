@@ -593,22 +593,22 @@ def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff,
                 pident >= identity_cutoff and
                 bsr >= bsr_cutoff):
                 outfile.write(line)  # Write the row to the output file
-            else:
-                # Determine which criteria failed
-                failed_criteria = []
-                if evalue > evalue_cutoff:
-                    failed_criteria.append(f"evalue ({evalue} > {evalue_cutoff})")
-                if bitscore < score_cutoff:
-                    failed_criteria.append(f"bitscore ({bitscore} < {score_cutoff})")
-                if coverage < coverage_cutoff:
-                    failed_criteria.append(f"coverage ({coverage:.2f} < {coverage_cutoff})")
-                if pident < identity_cutoff:
-                    failed_criteria.append(f"pident ({pident} < {identity_cutoff})")
-                if bsr < bsr_cutoff:
-                    failed_criteria.append(f"bsr ({bsr:.2f} < {bsr_cutoff})")
+            #else:
+            #    # Determine which criteria failed
+            #    failed_criteria = []
+            #    if evalue > evalue_cutoff:
+            #        failed_criteria.append(f"evalue ({evalue} > {evalue_cutoff})")
+            #    if bitscore < score_cutoff:
+            #        failed_criteria.append(f"bitscore ({bitscore} < {score_cutoff})")
+            #    if coverage < coverage_cutoff:
+            #        failed_criteria.append(f"coverage ({coverage:.2f} < {coverage_cutoff})")
+            #    if pident < identity_cutoff:
+            #        failed_criteria.append(f"pident ({pident} < {identity_cutoff})")
+            #    if bsr < bsr_cutoff:
+            #        failed_criteria.append(f"bsr ({bsr:.2f} < {bsr_cutoff})")
 
-                print(f"Row skipped due to: {', '.join(failed_criteria)}")
-                print(f"Row details: {line.strip()}")
+            #    print(f"Row skipped due to: {', '.join(failed_criteria)}")
+            #    print(f"Row details: {line.strip()}")
 
     return output_file    
 
