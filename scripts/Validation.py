@@ -358,7 +358,9 @@ def cutoffs(true_positives,true_negatives,report_filepath):
                 break #MCC there is no better MCC without more TP
             if noise_cutoff > bitscore:
                 noise_cutoff = bitscore
-    hit_id_distribution = [true_positive_dict.copy(), false_positive_dict.copy(), false_negative_dict.copy()] #distribution of hit ids at optimum MCC   
+    
+    false_positive_dict_filtered = {key: value for key, value in false_positive_dict.items() if value >= optimized_cutoff}
+    hit_id_distribution = [true_positive_dict.copy(), false_positive_dict_filtered.copy(), false_negative_dict.copy()] #distribution of hit ids at optimum MCC   
     return optimized_cutoff,trusted_cutoff,noise_cutoff,MCC,matrix, hit_id_distribution
 
 
