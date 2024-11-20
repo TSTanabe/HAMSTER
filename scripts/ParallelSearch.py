@@ -290,9 +290,14 @@ def process_parallel_bulk_parse(args_tuple):
         #Parse the hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
         
+        #Remove multidomain proteins if they are not allowed
+        if not options.multidomain_allowed:
+            protein_dict = remove_multi_domain_proteins(protein_dict)
+        
         #if options sagt, dass es einzelgenome sind, dann die genomID aus den keys und den protein identifiern entfernen
         if not options.glob_gff:
             protein_dict = clean_dict_keys_and_protein_ids(protein_dict, genomeID)
+        
         #Complete the hit information
         ParseReports.parseGFFfile(gff_file,protein_dict)
         ParseReports.getProteinSequence(faa_file,protein_dict)
@@ -441,6 +446,16 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
     return protein_dict
 
 
+
+
+def remove_multi_domain_proteins(input_dict):
+    #returns only the key:protein pairs that have not more than 1 domain
+    return {
+        key: protein
+        for key, protein in input_dict.items()
+        if len(protein.domains.values()) <= 1
+    }
+
 def clean_dict_keys_and_protein_ids(input_dict, genomeID):
     prefix = genomeID + '___'
     updated_dict = {}
@@ -457,6 +472,11 @@ def clean_dict_keys_and_protein_ids(input_dict, genomeID):
         updated_dict[new_key] = protein
     
     return updated_dict
+
+
+
+
+
 ################################################################################################        
 ################################## Filter blast hit report #####################################
 ################################################################################################
