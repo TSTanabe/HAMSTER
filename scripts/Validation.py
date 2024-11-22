@@ -54,7 +54,7 @@ def parallel_cross_validation(options):
     args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
 
     #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores, initializer=init_worker, 
+    with Pool(processes=options.cores, initializer=init_validation_worker, 
               initargs=(all_seq_number, alignment_files, files_number)) as pool:
         
         #starts the workers
@@ -70,7 +70,7 @@ def parallel_cross_validation(options):
 def process_cross_folds(args_tuple):
     # This process is running in parallel
     # Prepare the folds and HMMs
-    alignment_file, options, index = args
+    alignment_file, options, index = args_tuple
     
     # Use global variables initialized by the worker
     all_sequence_number = global_all_seq_number
