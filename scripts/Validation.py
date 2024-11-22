@@ -5,7 +5,6 @@ import subprocess
 import sqlite3
 
 from multiprocessing import Pool, Manager
-from Bio import SeqIO
 
 
 def create_hmms_from_msas(directory, ending="fasta_aln", extension="hmm_cv", cores=1):
@@ -24,25 +23,39 @@ def create_hmms_from_msas(directory, ending="fasta_aln", extension="hmm_cv", cor
         subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+##############################################################################
+####################  Validation procedure start  ############################
+##############################################################################
+
+
+def init_validation_worker(all_seq_number, alignment_files, files_number):
+    global global_all_seq_number
+    global global_alignment_files
+    global global_files_number
+    
+    # Assign values to global variables
+    global_all_seq_number = all_seq_number
+    global_alignment_files = alignment_files
+    global_files_number = files_number
+    
+    
+    
 def parallel_cross_validation(options):
     #Main cross validation routine
+    print("Initilizing cross-validation")
     
-    All_seq_number = count_sequences_in_fasta(options)
-    
+    #Prepare shared data
+    all_seq_number = count_sequences_in_fasta(options)
     alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
     alignment_files = list(alignment_dict.keys())
     files_number = len(alignment_files)
     
-    
-    #prepare the arguments
-    args_list = []
-    for index,alignment_file in enumerate(alignment_files):
-        
-        args_list.append([alignment_file, All_seq_number, options, index, files_number])
-        #TODO als globale variablen gestalten um speicher und Zeit einzusparen
-    
+    #Prepare task-specific arguments
+    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+
     #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores*6) as pool:
+    with Pool(processes=options.cores, initializer=init_worker, 
+              initargs=(all_seq_number, alignment_files, files_number)) as pool:
         
         #starts the workers
         pool.map(process_cross_folds,args_list)
@@ -52,11 +65,17 @@ def parallel_cross_validation(options):
     return
     
 
+    
+    
 def process_cross_folds(args_tuple):
     # This process is running in parallel
     # Prepare the folds and HMMs
+    alignment_file, options, index = args
     
-    alignment_file, all_sequence_number, options, index, limit = args_tuple
+    # Use global variables initialized by the worker
+    all_sequence_number = global_all_seq_number
+    limit = global_files_number-1
+        
     sequence_faa_file = options.sequence_faa_file #File with all sequences to be searched
     cross_validation_directory = options.cross_validation_directory
     
@@ -134,33 +153,6 @@ def get_alignment_files(directory):
 
 
 
-def create_cross_validation_sets_deprecated(alignment_file, output_directory, ending=".cv", num_folds=5):
-    # Check if the output directory exists, if not, create it
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-
-    # Read the alignment file
-    sequences = []
-    record_ids = []
-    for record in SeqIO.parse(alignment_file, "fasta"):
-        sequences.append(str(record.seq))
-        record_ids.append(record.id)
-
-    num_sequences = len(sequences)
-    fold_size = num_sequences // num_folds
-
-    # Create custom cross-validation folds
-    for fold in range(num_folds):
-        start_idx = fold * fold_size
-        end_idx = (fold + 1) * fold_size
-        train_sequences = sequences[:start_idx] + sequences[end_idx:]
-        train_record_ids = record_ids[:start_idx] + record_ids[end_idx:]
-        train_file = os.path.join(output_directory, f"training_data_{fold}{ending}")
-
-        with open(train_file, "w") as train_f:
-            for record_id, sequence in zip(train_record_ids, train_sequences):
-                train_f.write(f">{record_id}\n{sequence}\n")
-                
 def create_cross_validation_sets(alignment_file, output_directory, ending=".cv", num_folds=5):
     # Check if the output directory exists, if not, create it
     if not os.path.exists(output_directory):
@@ -550,7 +542,7 @@ def hit_id_reports(cv_directory, database, data):
     #print(hit_scores)       
     # Fetch and print gene vicinity information for the current dictionary
     for dict_label in ['TP', 'FP', 'FN']:
-        gene_vicinity_dictionary = fetch_neighbouring_genes_with_domains2(database, list(key_counts[dict_label].keys()))
+        gene_vicinity_dictionary = fetch_neighbouring_genes_with_domains(database, list(key_counts[dict_label].keys()))
         
         # Prepare data for the report
         sorted_data = []
@@ -576,7 +568,7 @@ def hit_id_reports(cv_directory, database, data):
 
 
 
-def fetch_neighbouring_genes_with_domains2(database, protein_ids):
+def fetch_neighbouring_genes_with_domains(database, protein_ids):
     """
     Fetches neighboring genes for a list of proteinIDs based on clusterID and gene order,
     and returns the neighboring genes with their domains. For proteinIDs without clusterID,
