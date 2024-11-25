@@ -33,7 +33,7 @@ def csb_proteins_datasets(options):
 
 def training_data_fasta(options):
     
-    training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla}
+    training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla, **options.superfamily}
     
     dicts = [options.TP_merged, options.TP_singles, options.TP_monophyla]
     training_datasets = {}
@@ -285,12 +285,14 @@ def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
 
     # Step 2: Calculate the Jaccard similarity matrix for the frozen sets
     similarity_matrix = Csb_cluster.calculate_similarity_matrix_jaccard(cluster_columns)
+    
     # Step 3: Apply DBSCAN to get the cluster labels based on the similarity matrix
     labels = Csb_cluster.apply_dbscan_on_similarity_matrix(similarity_matrix, eps=epsilon, min_samples=2)
     
     # Step 4: Create two dictionaries: one for merged groups and one for noise points
     merged_groups = {}
     noise_points = {}
+    
     # Step 5: Group sets by their DBSCAN label
     visited_labels = set()
     for idx, label in enumerate(labels):  # Loop through unique labels

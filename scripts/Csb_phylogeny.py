@@ -2,6 +2,7 @@
 
 import sqlite3
 import os
+import subprocess
 
 from . import Alignment
 
@@ -23,8 +24,11 @@ def csb_phylogeny_datasets(options):
     domain_family_dict = get_domain_key_list_pairs(training_datasets)
 
     #fetch the proteins for each 
-    fetch_protein_family_to_fasta(options, domain_family_dict)
+    fetch_protein_type_to_fasta(options, domain_family_dict)
     
+    query_length_dict = get_sequence_legth(options.self_query)
+    fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.phylogeny_directory) #for the phylogeny and as TN set
+
     #align the protein family
     family_alignment_files = Alignment.initial_alignments(options, options.phylogeny_directory)
     
@@ -32,11 +36,19 @@ def csb_phylogeny_datasets(options):
     tree_files = Alignment.calculate_phylogeny_parallel(options, family_alignment_files) #creates .tree files in the phylogeny directory
     
     #Find the Last Common Ancestors (LCA) for each potential training set and write the fasta file
-    monophylums = get_last_common_ancestor_fasta(options,training_datasets,tree_files)
+    monophylums = get_last_common_ancestor_fasta(options,training_datasets,tree_files,'lca','l')
+    
+    superfamily_monophylums = get_last_common_ancestor_fasta(options,training_datasets,tree_files,'superfamily','u')
     
     options.TP_monophyla = monophylums
+    options.superfamily = superfamily_monophylums
 
-    
+def csb_phylogeny_target_sets(options):
+    training_datasets = {**options.TP_merged, **options.TP_singles}
+    domain_family_dict = get_domain_key_list_pairs(training_datasets)
+    query_length_dict = get_sequence_legth(options.self_query)
+    target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,1) #for the phylogeny and as TN set
+    return target_files #dictionary with domain => target file with TP and TN
         
 def get_domain_key_list_pairs(input_dict, output_dict=None):
     # If no output_dict is provided, initialize a new empty dictionary
@@ -55,9 +67,10 @@ def get_domain_key_list_pairs(input_dict, output_dict=None):
     return output_dict
 
     
-def fetch_protein_family_to_fasta(options, domain_keyword_dict):
-#TODO dieses fetch nimmt weitaus mehr als erwartet, wahrscheinlich weil hier nicht auf die proteinID geprüft wird sondern nur nach csb und protein typ gefetchd wird.
-# Es werden auf jeden Fall viel zu viele sequenzen geholt, ich weiß nur nicht warum
+def fetch_protein_type_to_fasta(options, domain_keyword_dict):
+#Fetches the TP proteinsIDs of one type regardless of the csb to combine csbs with a mixed distribution across the tree
+
+
     with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
 
@@ -71,8 +84,7 @@ def fetch_protein_family_to_fasta(options, domain_keyword_dict):
                 SELECT DISTINCT P.proteinID, P.sequence
                 FROM Proteins P
                 JOIN Domains D ON P.proteinID = D.proteinID
-                JOIN Clusters C ON P.clusterID = C.clusterID
-                JOIN Keywords K ON C.clusterID = K.clusterID
+                JOIN Keywords K ON P.clusterID = K.clusterID
                 WHERE D.domain = ? AND K.keyword IN ({})
             '''.format(','.join('?' * len(keywords)))
             # Execute the query with the domain and the list of keywords
@@ -109,6 +121,7 @@ def fetch_protein_family_to_fasta(options, domain_keyword_dict):
 
 
 
+
 def find_lca_and_monophyly(protein_ids, tree_file):
     """
     Given a phylogenetic tree and a set of protein identifiers, 
@@ -116,45 +129,55 @@ def find_lca_and_monophyly(protein_ids, tree_file):
     checks if the clade is monophyletic, and returns relevant information.
     
     Args:
-    - tree: A Bio.Phylo tree object.
     - protein_ids: A list of protein identifiers (as present in the tree tips).
+    - tree_file: Path to the Newick file containing the tree.
     
     Returns:
     - LCA: The last common ancestor of the given proteins.
     - is_monophylum: True if the clade is monophyletic, False otherwise.
     - included_identifiers: If not monophyletic, returns all included protein identifiers in the LCA clade.
     """
+    # Load the phylogenetic tree
     tree = Phylo.read(tree_file, 'newick')
     
-    # Find the LCA of the given protein identifiers
+    # Get all terminal names (tree tip identifiers)
+    tree_tip_names = {tip.name for tip in tree.get_terminals()}
+    
+    # Filter protein_ids to include only those present in the tree
+    filtered_protein_ids = [pid for pid in protein_ids if pid in tree_tip_names]
+    
+    # If no valid protein IDs remain after filtering, return early
+    if not filtered_protein_ids:
+        print(f"Warning: None of the provided protein IDs are in the tree.")
+        return None, None
+
+    # Find the LCA of the filtered protein identifiers
     try:
-        # Attempt to find the LCA of the given protein identifiers
-        lca = tree.common_ancestor(protein_ids)
+        lca = tree.common_ancestor(filtered_protein_ids)
     except Exception as e:
-        # Print the tree file and error message if an exception occurs
         print(f"Error finding LCA in tree file: {tree_file}")
         print(f"Original error: {e}")
-        return None, None, None
+        return None, None
     
     # Check if the clade is monophyletic
-    is_monophylum = tree.is_monophyletic(protein_ids)
+    is_monophylum = tree.is_monophyletic(filtered_protein_ids)
     
     if is_monophylum:
-        return lca, set()  # LCA, monophylum status, and no need for included identifiers
+        return lca, set()  # LCA and no additional identifiers needed
     else:
         # Get all the identifiers in the LCA clade if it's not monophyletic
         included_identifiers = {tip.name for tip in lca.get_terminals()}
         return lca, included_identifiers
 
 
-def get_last_common_ancestor_fasta(options,grouped,trees_dict):
+def get_last_common_ancestor_fasta(options,grouped,trees_dict,tree_prefix,key_prefix):
     monophyly = {}
     for proteinID_frozenset, keyword_domain_pairs in grouped.items():
         
         #define domain, key and tree
         keyword, domain = keyword_domain_pairs[0]
         domain = domain.split('_')[-1]
-        tree = trees_dict['lca_'+domain] #Treefiles have keys with lca_{domain}, because .faa files were marked for the HMM
+        tree = trees_dict[tree_prefix+'_'+domain] #Treefiles have keys with lca_{domain}, because .faa files were marked for the HMM
         
         #get the monophyletic group
         lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
@@ -163,13 +186,169 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict):
         
         
         if clade_identifier_set:
-            monophyly[frozenset(clade_identifier_set)] = [("l"+keyword,domain)]
+            monophyly[frozenset(clade_identifier_set)] = [(key_prefix+keyword,domain)]
 
     return monophyly    
 
 
 
 
+#########################################################################################################        
+##################################### Hits sorted by query hit ##########################################
+#########################################################################################################
 
+
+
+def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict,directory,deviation=0.5):
+    output_files = {}
+    with sqlite3.connect(options.database_directory) as con:
+        cur = con.cursor()
+
+        for domain, query_length in domain_keyword_dict.items():
+            
+            #Get the proteinIDs set
+            proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length,deviation) #gets the proteinIDs of all hits for a query. Not the best hit but any hit is taken
+            proteinIDs = {string.strip() for string in proteinIDs}
+            #Adjust the identifiers from glob to match the database
+            if options.glob_gff:
+                #Glob was provided genomeID was not added before concat, get the genomeID and add it to the set
+                proteinIDs = {f"{string.split('___', 1)[0]}-{string}" for string in proteinIDs} #comprehension that gets the string upt ot the first ___ and than adds it to the the same string with a '-'
+            else:
+                proteinIDs = {string.replace('___', '-', 1) for string in proteinIDs} #comprehension for all globs that already have an added genomeID, then replace the first ___ by '-' to match the proteinID in DB      
+                
+            # Use a parameterized query to check for the domain and the keywords
+            query = '''
+                SELECT DISTINCT P.proteinID, P.sequence
+                FROM Proteins P
+                WHERE P.proteinID IN ({})
+            '''.format(','.join('?' * len(proteinIDs)))
+
+            # Execute the query with the proteinIDs unpacked as parameters
+            cur.execute(query, tuple(proteinIDs))
+
+            proteins = cur.fetchall()
+
+            # Write the results to the domain-specific FASTA file
+            # Create the filename for this domain's output file
+            #this leaves only the protein type not the cluster number
+            name = domain.split('_')[-1]
+            filename = f"superfamily_{name}.faa"
+            output_fasta_path = os.path.join(directory, filename)
+            
+            # Use a set to track already written proteinIDs
+            written_proteins = set()
+            if os.path.exists(output_fasta_path):
+                # Open the existing file and extract protein IDs
+                with open(output_fasta_path, 'r') as fasta_file:
+                    for line in fasta_file:
+                        if line.startswith('>'):
+                            # Extract protein ID from the FASTA header line (assuming ID is everything after '>')
+                            protein_id = line[1:].strip().split()[0]  # Assuming ID is the first part after '>'
+                            written_proteins.add(protein_id)
+
+            #Append with the fetched sequences
+            with open(output_fasta_path, 'a') as fasta_file:
+                for proteinID, sequence in proteins:
+                    if proteinID not in written_proteins:
+                        fasta_file.write(f'>{proteinID}\n{sequence}\n')
+                        written_proteins.add(proteinID)
+            # Add to output dictionary
+            output_files[name] = output_fasta_path
+
+    return output_files  
+                        
+def get_domain_superfamily_proteinIDs(blast_table, domain, query_length, tolerance=0.5):
+    """
+    Filters protein IDs based on length constraints relative to the query length.
+
+    Parameters:
+        blast_table (str): Path to the BLAST table file.
+        domain (str): Domain to grep in the BLAST table.
+        query_length (float): The length of the query.
+        tolerance (float): Allowed length deviation as a fraction (default is 0.5, i.e., ±50%).
+
+    Returns:
+        set: A set of protein IDs that satisfy the length constraint.
+    """
+    proteinIDs = set()
+
+    # Run the grep command to find lines containing the domain
+    result = subprocess.run(['grep', domain, blast_table], stdout=subprocess.PIPE, text=True)
+    lines = result.stdout.splitlines()  # Split output into lines
+
+    # Length bounds
+    lower_bound = (1 - tolerance) * query_length
+    upper_bound = (1 + tolerance) * query_length
+
+    for line in lines:
+        columns = line.split('\t')  # Assuming columns are tab-separated
+        if columns:
+            try:
+                # Extract relevant columns
+                hit_proteinID = columns[0]
+                hsp_start = int(float(columns[4]))
+                hsp_end = int(float(columns[5]))
+
+                # Calculate hit length
+                hit_length = hsp_end - hsp_start
+
+                # Check if hit length is within bounds
+                if lower_bound <= hit_length <= upper_bound:
+                    proteinIDs.add(hit_proteinID)
+
+            except (ValueError, IndexError):
+                # Skip lines with parsing errors
+                print(f"Skipping line due to parsing error: {line}")
+                continue
+
+    return proteinIDs
+
+    
+def get_sequence_legth(file_path):
+    #get the sequence length per query name without the numbering. If multiple queries have the same
+    #name, then take the average
+    
+    sequence_data = {}  # Dictionary to store lengths per identifier
+    sequence_counts = {}  # Dictionary to track counts of sequences per identifier
+    
+    with open(file_path, 'r') as fasta_file:
+        current_id = None
+        current_sequence = []
+        
+        for line in fasta_file:
+            line = line.strip()
+            if line.startswith(">"):
+                # Process previous sequence if any
+                if current_id:
+                    sequence_length = len("".join(current_sequence))
+                    if current_id in sequence_data:
+                        sequence_data[current_id] += sequence_length
+                        sequence_counts[current_id] += 1
+                    else:
+                        sequence_data[current_id] = sequence_length
+                        sequence_counts[current_id] = 1
+                
+                # Extract the identifier, considering only the part before "___"
+                current_id = line[1:].split('___')[1]
+                current_sequence = []  # Reset sequence for the new identifier
+            else:
+                current_sequence.append(line)
+        
+        # Process the last sequence in the file
+        if current_id:
+            sequence_length = len("".join(current_sequence))
+            if current_id in sequence_data:
+                sequence_data[current_id] += sequence_length
+                sequence_counts[current_id] += 1
+            else:
+                sequence_data[current_id] = sequence_length
+                sequence_counts[current_id] = 1
+    
+    # Calculate average length for identifiers with multiple sequences
+    averaged_data = {}
+    for key in sequence_data:
+        averaged_data[key] = sequence_data[key] / sequence_counts[key]
+    
+    return averaged_data   
 
 

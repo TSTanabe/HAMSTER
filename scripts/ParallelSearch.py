@@ -109,6 +109,7 @@ def initial_glob_search(options):
     query_length_dict = get_sequence_legth(options.self_query)
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report)
     blast_results_table = filter_blast_table(blast_results_table, options.evalue, options.thrs_score, options.searchcoverage, options.minseqid, options.thrs_bsr, query_length_dict, selfblast_scores_dict)
+    options.glob_table = blast_results_table
 
 
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
@@ -650,4 +651,7 @@ def self_blast_query(options):
     writeQueryHitsSequenceFasta(options.fasta_initial_hit_directory, protein_dict)
     
     return report
-    
+
+
+
+                        

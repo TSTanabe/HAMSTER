@@ -45,7 +45,8 @@ def parallel_cross_validation(options):
     print("Initilizing cross-validation")
     
     #Prepare shared data
-    all_seq_number = count_sequences_in_fasta(options)
+    #all_seq_number = count_sequences_in_fasta(options)
+    all_seq_number = fetch_db_seq_count(options.database_directory)
     alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
     alignment_files = list(alignment_dict.keys())
     files_number = len(alignment_files)
@@ -75,8 +76,10 @@ def process_cross_folds(args_tuple):
     # Use global variables initialized by the worker
     all_sequence_number = global_all_seq_number
     limit = global_files_number-1
+    
+    
         
-    sequence_faa_file = options.sequence_faa_file #File with all sequences to be searched
+
     cross_validation_directory = options.cross_validation_directory
     
     # Generate the cross-validation directory
@@ -92,6 +95,12 @@ def process_cross_folds(args_tuple):
     # Generate the cross-validation folds for the HMMs
     create_hmms_from_msas(cv_directory, "cv")
     cv_hmms = [os.path.join(cv_directory, filename) for filename in os.listdir(cv_directory) if filename.endswith(".hmm_cv")]
+    
+    #Get the target file
+    name = cv_subfolder_name.split('_')[-1]
+    sequence_faa_file = options.sequence_faa_file[name] #File with all sequences to be searched    
+    
+    
     
     # Search with the HMMs
     for hmm in cv_hmms:  # Perform the hmmsearch for each fold
@@ -645,10 +654,35 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids):
 
 
 
+#######################################################################
+##################    Count TP + TN in DB      ########################
+#######################################################################
 
 
 
+def fetch_db_seq_count(database):
+    """
+    Fetches the count of unique protein sequences from the SQLite database.
 
+    Args:
+        database (str): Path to the SQLite database.
+
+    Returns:
+        int: The number of unique sequences in the database (excluding 'QUERY' genomeID).
+    """
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+        
+        # Query to count distinct proteins excluding genomeID 'QUERY'
+        query = """
+                SELECT COUNT(DISTINCT Proteins.proteinID)
+                FROM Proteins
+                WHERE NOT Proteins.genomeID = ?
+            """
+        cur.execute(query, ('QUERY',))
+        seq_count = cur.fetchone()[0]
+
+    return seq_count
 
 
 

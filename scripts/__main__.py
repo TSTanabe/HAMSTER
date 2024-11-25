@@ -47,7 +47,7 @@ class Options:
         self.redundancy_hash = dict()
         
 
-        self.sequence_faa_file = None #filepath to all sequences fasta file
+        self.sequence_faa_file = None #dictionary to the target files for the validation
         self.reports = dict()
         self.relaxed_reports = dict()
         self.standard_cutoff_report_file = None
@@ -230,6 +230,7 @@ def generate_csb_sequence_fasta(options):
         Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
     else:
     	options.TP_monophyla = {}
+    	options.superfamiy = {}
     Csb_proteins.training_data_fasta(options) # generates the fasta files
 
 def model_alignment(options):
@@ -241,9 +242,9 @@ def cross_validation(options):
     Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
-    if options.sequence_faa_file is None or not os.path.exists(options.sequence_faa_file):
-        options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
-    
+    #options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
+    options.sequence_faa_file = Csb_phylogeny.csb_phylogeny_target_sets(options)
+    print(options.sequence_faa_file)
     Validation.parallel_cross_validation(options)
 
 
