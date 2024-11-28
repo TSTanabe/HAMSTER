@@ -61,6 +61,7 @@ class Options:
         self.self_query = None #Query fasta like concatenated fasta
         self.self_seqs = None #Query sequences
 
+        self.MCC_threshold = 0.8 #TODO move this to options, below this threshold the HMMs are not validated to save runtime
 
 def parse_arguments(arguments):
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
@@ -232,19 +233,22 @@ def generate_csb_sequence_fasta(options):
     	options.TP_monophyla = {}
     	options.superfamiy = {}
     Csb_proteins.training_data_fasta(options) # generates the fasta files
-
+    Csb_phylogeny.csb_phylogeny_target_sets(options)
+    Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa")
+    
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)
 
 
 def cross_validation(options):
-
+    
     Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
-    #options.sequence_faa_file = Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #File with all sequences to be searched
-    options.sequence_faa_file = Csb_phylogeny.csb_phylogeny_target_sets(options)
-    print(options.sequence_faa_file)
+    options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
+    options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)
+    print(options.targeted_sequence_faa_file_dict)
+    
     Validation.parallel_cross_validation(options)
 
 
@@ -263,7 +267,7 @@ def report_cv_performance(options):
 
 
 
-    
+   
     
             
 

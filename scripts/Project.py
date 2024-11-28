@@ -52,7 +52,7 @@ def prepare_result_space(options,project="project"):
         options.database_directory = options.result_files_directory+"/database.db"
         options.fasta_initial_hit_directory = options.result_files_directory+"/Hit_list"
         options.fasta_output_directory = options.result_files_directory+"/Sequences"
-        options.fasta_alignment_directory = options.result_files_directory+"/Alignments"        
+        options.fasta_alignment_directory = options.result_files_directory+"/Initial_validation"        
         options.Hidden_markov_model_directory = options.result_files_directory+"/Hidden_markov_models"
         options.cross_validation_directory = options.result_files_directory+"/Cross_validation"
         options.phylogeny_directory = options.result_files_directory+"/Protein_Phylogeny"
@@ -89,7 +89,7 @@ def prepare_result_space(options,project="project"):
         os.mkdir(options.fasta_initial_hit_directory)
         options.fasta_output_directory = options.result_files_directory+"/Sequences"
         os.mkdir(options.fasta_output_directory)
-        options.fasta_alignment_directory = options.result_files_directory+"/Alignments"
+        options.fasta_alignment_directory = options.result_files_directory+"/Initial_validation"
         os.mkdir(options.fasta_alignment_directory)
         options.Hidden_markov_model_directory = options.result_files_directory+"/Hidden_markov_models"
         os.mkdir(options.Hidden_markov_model_directory)
@@ -136,8 +136,8 @@ def isProjectFolder(options):
         if not os.path.isdir(options.result_files_directory+"/Sequences"):
             print("No sequence directory found. Creating new project folder.")
             return 0
-        if not os.path.isdir(options.result_files_directory+"/Alignments"):
-            print("No alignment directory found. Creating new project folder.")
+        if not os.path.isdir(options.result_files_directory+"/Initial_validation"):
+            print("No initial validation directory found. Creating new project folder.")
             return 0
         if not os.path.isdir(options.result_files_directory+"/Hit_list"):
             print("No hit directory found. Creating new project folder.")
@@ -151,6 +151,21 @@ def isProjectFolder(options):
         if not os.path.isdir(options.result_files_directory+"/Collinear_syntenic_blocks"):
             print("No collinear syntenic block directory found. Creating new project folder.")
             return 0
+        
+        #Check for temporary files
+        if os.path.isfile(options.result_files_directory+"/self_blast.faa"):
+            options.self_query = options.result_files_directory+"/self_blast.faa"
+        else:
+            print("No internal query file self_blast.faa. Creating new project folder")
+            return 0
+            
+        #Check for the blast result table and define it if possible
+        if options.glob_table is None:
+            for file_name in os.listdir(options.result_files_directory):
+                if file_name.startswith("filtered_"):
+                    options.glob_table = os.path.join(options.result_files_directory, file_name)
+                    break  # Stop searching once a match is found
+
     except Exception as e:
         raise Exception(f"An error occurred: {e}")
 

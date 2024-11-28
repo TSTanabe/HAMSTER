@@ -22,10 +22,184 @@ def create_hmms_from_msas(directory, ending="fasta_aln", extension="hmm_cv", cor
         # Run the hmmbuild command, redirecting stdout and stderr to null to suppress output
         subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def get_target_sets(directory):
+    """
+    Finds all files in the given directory that start with 'superfamily_' and end with '.faa'.
+    Stores the file paths in a dictionary with keys as the filename without the prefix and extension.
+    
+    Parameters:
+        directory (str): The directory to search for files.
 
-##############################################################################
-####################  Validation procedure start  ############################
-##############################################################################
+    Returns:
+        dict: A dictionary with keys as modified filenames and values as file paths.
+    """
+    result = {}
+    
+    for file_name in os.listdir(directory):
+        if file_name.startswith("superfamily_") and file_name.endswith(".faa"):
+            # Remove 'superfamily_' prefix and '.faa' extension to form the key
+            key = file_name[len("superfamily_"):-len(".faa")]
+            # Construct the full path and store in the dictionary
+            result[key] = os.path.join(directory, file_name)
+    
+    return result
+    
+####################################################################################
+####################  Initial validation procedure start  ##########################
+####################################################################################
+
+def initial_process_folds(args_tuple):
+    # This process is running in parallel
+    # It test the full HMM against a single test target and calculates the confusion matrix
+    # It returns the name of the HMM + the MCC + cutoffs + confusion matrix from the validation of the full model
+    
+    # Prepare the folds and HMMs
+    alignment_file, options, index = args_tuple
+    
+    # Use global variables initialized by the worker
+    all_sequence_number = global_all_seq_number
+    limit = global_files_number-1
+    
+    
+        
+
+    initial_validation_directory = options.fasta_alignment_directory #Uses the currently unused fasta_alignment_directory
+    
+    # Generate the cross-validation directory
+    hv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
+    hv_directory = os.path.join(initial_validation_directory, hv_subfolder_name)
+    os.makedirs(hv_directory, exist_ok=True)
+    
+    print(f"Initial validation of HMM {index} of {limit} file {hv_subfolder_name}")
+    if os.path.exists(os.path.join(hv_directory, f"{hv_subfolder_name}_hv_matrices.txt")):
+        return None  # This was already finished return to next HMM validation
+    
+    
+    # Get the HMM for the initial search
+    hmm = options.Hidden_markov_model_directory+f"/{hv_subfolder_name}.hmm"
+    
+    # Get the target file
+    name = hv_subfolder_name.split('_')[-1]
+    
+    # Use the key from the dictionary if it exists; otherwise, use the fallback
+    sequence_faa_file = options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
+
+    # Define the outputfile
+    report_name = os.path.splitext(os.path.basename(alignment_file))[0]
+    output = f"{hv_directory}/{report_name}.report"
+    
+    # Search with the HMMs
+    HMMsearch(hmm, sequence_faa_file, output, 1)
+    
+    # Locate the single report
+    hv_report = next((os.path.join(hv_directory, filename) 
+                      for filename in os.listdir(hv_directory) 
+                      if filename.endswith(".report")), None)
+
+    # Check if the report exists
+    if hv_report:
+        # Make a report for the cutoffs
+        model_values = []
+        model_hit_distribution = []
+        
+        # Get the TP seq IDs and save in a set   
+        TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
+        TN = all_sequence_number - len(TP_seqIDs)
+        
+        # Calculate strict values for cutoffs
+        optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution = cutoffs(TP_seqIDs, TN, hv_report)
+        model_hit_distribution.append(hit_id_distribution)  # Store hit distribution
+        model_values.append([optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix])
+
+    
+        strict_report = calculate_performance_and_sum_matrices(model_values)  # Returns a tuple
+        
+        # Write down the matrices and cutoffs in the CV subfolder
+        with open(os.path.join(hv_directory, f"{hv_subfolder_name}_thresholds.txt"), 'w') as writer:
+            writer.write(f"{hv_subfolder_name}\t{strict_report[2]}\t{strict_report[3]}\t{strict_report[4]}\n")
+        
+        with open(os.path.join(hv_directory, f"{hv_subfolder_name}_MCC.txt"), 'w') as writer:
+            fold_matrix = strict_report[1]
+            writer.write(f"{hv_subfolder_name}\t{MCC}\n")
+    
+    
+        #More informative output of positive and negative hits
+        hit_id_reports(hv_directory, options.database_directory, model_hit_distribution)
+    
+    return None
+
+
+
+def process_MCC_files(directory, file_ending):
+    """
+    Recursively finds all files with a specified ending, concatenates their content, 
+    splits into the first and last column, and filters the entries to return a dictionary.
+
+    Parameters:
+        directory (str): Path to the root directory to search.
+        file_ending (str): File extension to look for (e.g., ".txt").
+
+    Returns:
+        dict: A dictionary with the first column (name) as keys and the last column (float) as values.
+    """
+    result_dict = {}
+
+    # Recursively find all files with the specified ending
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(file_ending):
+                file_path = os.path.join(root, file)
+
+                # Process each file
+                with open(file_path, 'r') as f:
+                    for line in f:
+                        # Split line into columns, assuming tab-separated
+                        columns = line.strip().split('\t')
+                        if len(columns) >= 2:  # Ensure there are at least two columns
+                            name = columns[0].strip()  # First column (name)
+                            try:
+                                value = float(columns[-1].strip())  # Last column (float)
+                                result_dict[name] = value  # Add to dictionary
+                            except ValueError:
+                                # Skip lines where the last column is not a float
+                                print(f"Skipping line due to invalid float value: {line.strip()}")
+
+    return result_dict
+
+def filter_dict_by_value(d, threshold):
+    """
+    Removes all key-value pairs from a dictionary where the values are below a given threshold.
+
+    Parameters:
+    d (dict): The dictionary to filter.
+    threshold (float): The threshold value. Key-value pairs with values below this will be removed.
+
+    Returns:
+    dict: A new dictionary with only the key-value pairs meeting the threshold criteria.
+    """
+    return {key: value for key, value in d.items() if isinstance(value, (int, float)) and value >= threshold}
+
+    
+def filter_filepaths(filepaths, name_dict):
+    """
+    Removes file paths from a list if the filename (without extension) is not in the keys of the given dictionary.
+
+    Parameters:
+    filepaths (list): A list of file paths to filter.
+    name_dict (dict): A dictionary whose keys will be used to determine whether to keep a file path.
+
+    Returns:
+    list: A filtered list of file paths.
+    """
+    valid_names = set(name_dict.keys())
+    filtered_filepaths = [
+        filepath for filepath in filepaths
+        if os.path.splitext(os.path.basename(filepath))[0] in valid_names
+    ]
+    return filtered_filepaths
+####################################################################################
+####################  Cross Validation procedure start  ############################
+####################################################################################
 
 
 def init_validation_worker(all_seq_number, alignment_files, files_number):
@@ -45,24 +219,42 @@ def parallel_cross_validation(options):
     print("Initilizing cross-validation")
     
     #Prepare shared data
-    #all_seq_number = count_sequences_in_fasta(options)
     all_seq_number = fetch_db_seq_count(options.database_directory)
     alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
     alignment_files = list(alignment_dict.keys())
     files_number = len(alignment_files)
-    
+    print("Cutoff and performance validation without folds")
     #Prepare task-specific arguments
     args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
 
+    # Make the inital validation of full hmms and assign cutoffs
+    with Pool(processes=options.cores, initializer=init_validation_worker, 
+              initargs=(all_seq_number, alignment_files, files_number)) as pool:
+        
+        #starts the workers
+        pool.map(initial_process_folds,args_list)
+
+    print("Filter by overall performance and prepare for cross-validation")
+    # Filter out the HMMs with a performance below threshold
+    initial_HMM_validation_MCC_dict = process_MCC_files(options.fasta_alignment_directory,"_MCC.txt")
+    initial_HMM_validation_MCC_dict = filter_dict_by_value(initial_HMM_validation_MCC_dict,options.MCC_threshold)
+    
+    alignment_files = filter_filepaths(alignment_files, initial_HMM_validation_MCC_dict)
+    files_number = len(alignment_files)
+    
+    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+
+    print("Cross-validation initilized")
     #Makes the cross validation and assigns the cutoff values 
     with Pool(processes=options.cores, initializer=init_validation_worker, 
               initargs=(all_seq_number, alignment_files, files_number)) as pool:
         
         #starts the workers
         pool.map(process_cross_folds,args_list)
-        
-
     print(f"Processed all validations.")
+
+
+
     return
     
 
@@ -86,7 +278,7 @@ def process_cross_folds(args_tuple):
     cv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
     cv_directory = os.path.join(cross_validation_directory, cv_subfolder_name)
     
-    print(f"Validation of HMM {index} of {limit} file {cv_subfolder_name}")
+    print(f"Cross-validation of HMM {index} of {limit} file {cv_subfolder_name}")
     if os.path.exists(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt")):
         return None  # This was already finished return to next HMM validation
     
@@ -98,7 +290,7 @@ def process_cross_folds(args_tuple):
     
     #Get the target file
     name = cv_subfolder_name.split('_')[-1]
-    sequence_faa_file = options.sequence_faa_file[name] #File with all sequences to be searched    
+    sequence_faa_file = options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
     
     
     
@@ -219,6 +411,7 @@ def extract_record_ids_from_alignment(alignment_file):
 
 def count_sequences_in_fasta(options):
     """
+    CURRENTLY NOT IN USE
     Counts the number of sequences in a FASTA file. If the specified FASTA file does not exist,
     it will look for 'sequences.faa' in the cv_directory and use it if available.
     
