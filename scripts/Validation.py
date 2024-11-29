@@ -7,6 +7,70 @@ import sqlite3
 from multiprocessing import Pool, Manager
 
 
+
+
+
+def parallel_cross_validation(options):
+    #####
+    # MAIN VALIDATION ROUTINE
+    #####
+    print("Initilizing cross-validation")
+    
+    #Prepare shared data
+    all_seq_number = fetch_db_seq_count(options.database_directory)
+    alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
+    alignment_files = list(alignment_dict.keys())
+    files_number = len(alignment_files)
+    print("Cutoff and performance validation without folds")
+    #Prepare task-specific arguments
+    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+
+    # Make the inital validation of full hmms and assign cutoffs
+    with Pool(processes=options.cores, initializer=init_validation_worker, 
+              initargs=(all_seq_number, alignment_files, files_number)) as pool:
+        
+        #starts the workers
+        pool.map(initial_process_folds,args_list)
+    
+    if options.cross_validation_deactivated: # if deactivated skip the cross validation
+        return
+        
+    print("Filter by overall performance and prepare for cross-validation")
+    
+    
+    # Filter out the HMMs with a performance below threshold
+    initial_HMM_validation_MCC_dict = process_MCC_files(options.fasta_alignment_directory,"_MCC.txt")
+    initial_HMM_validation_MCC_dict = filter_dict_by_value(initial_HMM_validation_MCC_dict,options.MCC_threshold)
+    
+    alignment_files = filter_filepaths(alignment_files, initial_HMM_validation_MCC_dict)
+    files_number = len(alignment_files)
+    
+    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+
+    print("Cross-validation initilized")
+    #Makes the cross validation and assigns the cutoff values 
+    with Pool(processes=options.cores, initializer=init_validation_worker, 
+              initargs=(all_seq_number, alignment_files, files_number)) as pool:
+        
+        #starts the workers
+        pool.map(process_cross_folds,args_list)
+    print(f"Processed all validations.")
+
+
+
+    return
+
+def init_validation_worker(all_seq_number, alignment_files, files_number):
+    global global_all_seq_number
+    global global_alignment_files
+    global global_files_number
+    
+    # Assign values to global variables
+    global_all_seq_number = all_seq_number
+    global_alignment_files = alignment_files
+    global_files_number = files_number
+    
+    
 def create_hmms_from_msas(directory, ending="fasta_aln", extension="hmm_cv", cores=1):
     # Get a list of all MSA files with the specified ending in the directory
     msa_files = [f for f in os.listdir(directory) if f.endswith(ending)]
@@ -120,7 +184,7 @@ def initial_process_folds(args_tuple):
         
         with open(os.path.join(hv_directory, f"{hv_subfolder_name}_MCC.txt"), 'w') as writer:
             fold_matrix = strict_report[1]
-            writer.write(f"{hv_subfolder_name}\t{MCC}\n")
+            writer.write(f"{hv_subfolder_name}\t{MCC}\t{matrix}\n")
     
     
         #More informative output of positive and negative hits
@@ -158,7 +222,7 @@ def process_MCC_files(directory, file_ending):
                         if len(columns) >= 2:  # Ensure there are at least two columns
                             name = columns[0].strip()  # First column (name)
                             try:
-                                value = float(columns[-1].strip())  # Last column (float)
+                                value = float(columns[1].strip())  # Last column (float)
                                 result_dict[name] = value  # Add to dictionary
                             except ValueError:
                                 # Skip lines where the last column is not a float
@@ -197,65 +261,13 @@ def filter_filepaths(filepaths, name_dict):
         if os.path.splitext(os.path.basename(filepath))[0] in valid_names
     ]
     return filtered_filepaths
+    
 ####################################################################################
 ####################  Cross Validation procedure start  ############################
 ####################################################################################
 
 
-def init_validation_worker(all_seq_number, alignment_files, files_number):
-    global global_all_seq_number
-    global global_alignment_files
-    global global_files_number
-    
-    # Assign values to global variables
-    global_all_seq_number = all_seq_number
-    global_alignment_files = alignment_files
-    global_files_number = files_number
-    
-    
-    
-def parallel_cross_validation(options):
-    #Main cross validation routine
-    print("Initilizing cross-validation")
-    
-    #Prepare shared data
-    all_seq_number = fetch_db_seq_count(options.database_directory)
-    alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
-    alignment_files = list(alignment_dict.keys())
-    files_number = len(alignment_files)
-    print("Cutoff and performance validation without folds")
-    #Prepare task-specific arguments
-    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
 
-    # Make the inital validation of full hmms and assign cutoffs
-    with Pool(processes=options.cores, initializer=init_validation_worker, 
-              initargs=(all_seq_number, alignment_files, files_number)) as pool:
-        
-        #starts the workers
-        pool.map(initial_process_folds,args_list)
-
-    print("Filter by overall performance and prepare for cross-validation")
-    # Filter out the HMMs with a performance below threshold
-    initial_HMM_validation_MCC_dict = process_MCC_files(options.fasta_alignment_directory,"_MCC.txt")
-    initial_HMM_validation_MCC_dict = filter_dict_by_value(initial_HMM_validation_MCC_dict,options.MCC_threshold)
-    
-    alignment_files = filter_filepaths(alignment_files, initial_HMM_validation_MCC_dict)
-    files_number = len(alignment_files)
-    
-    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
-
-    print("Cross-validation initilized")
-    #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores, initializer=init_validation_worker, 
-              initargs=(all_seq_number, alignment_files, files_number)) as pool:
-        
-        #starts the workers
-        pool.map(process_cross_folds,args_list)
-    print(f"Processed all validations.")
-
-
-
-    return
     
 
     
@@ -328,6 +340,10 @@ def process_cross_folds(args_tuple):
     #More informative output of positive and negative hits
     hit_id_reports(cv_directory, options.database_directory, model_hit_distribution)
     
+    #Remove the temporary models and reports
+    [os.remove(os.path.join(cv_directory, file)) for file in os.listdir(cv_directory) if file.startswith("training_data_")]
+
+        
     return None
 
     

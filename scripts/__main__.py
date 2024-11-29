@@ -78,13 +78,16 @@ def parse_arguments(arguments):
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
     resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run') # project folder TODO print the directory that is used for reconfirmation with the user
     resources.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Filepath to existing database')
+   
     
     resources.add_argument('-glob_faa', dest='glob_faa', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Predefined concatenated fasta file')
     resources.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated gff file')
     resources.add_argument('-glob_blast_table', dest='glob_table', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated blast result table')
     resources.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing results from glob before entering into database')
     resources.add_argument('-no_glob', dest='glob_search', action='store_false', help='Do not concatenated fasta file for search')
-        
+    resources.add_argument('-cv-off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')    
+    
+    
     search = parser.add_argument_group("Optional search parameters for diamond")
     search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
@@ -96,7 +99,7 @@ def parse_arguments(arguments):
 
 
 
-    #Linclust parameters
+    #Cluster parameters
     protein_cluster = parser.add_argument_group("Sequence clustering parameters for mmseqs2")
     protein_cluster.add_argument('-cluster-active', dest='protein_cluster_active', action='store_true', help='Cluster initial blastp hits with mmseqs2 cluster')
     protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
@@ -105,7 +108,7 @@ def parse_arguments(arguments):
 
 
     
-    genecluster = parser.add_argument_group("Optional gene cluster parameters")
+    genecluster = parser.add_argument_group("Optional gene cluster prediction parameters")
     genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes')
     genecluster.add_argument('-p', dest= 'patterns_file' , type=myUtil.file_path, default=__location__+"/src/Patterns", metavar='<filepath>', help='Filepath to patterns file')
     
@@ -254,13 +257,18 @@ def cross_validation(options):
 
        
 def report_cv_performance(options):
-    print(f"Saving the HMMs to {options.Hidden_markov_model_directory}")
+    #Initial validation
+    print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
+    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_MCC.txt', options.cross_validation_directory, "_ini_performance_matrices.txt")
+    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_thresholds.txt', options.cross_validation_directory, "_ini_cutoffs.txt")
+    
+
+    #cross validation
+    print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
     options.reports = Reports.parse_matrices_to_report(options.cross_validation_directory,"_cv_matrices.txt")
     
-    print(f"Saving the performance values to {options.Hidden_markov_model_directory}")
     options.standard_performance_report_file = Reports.create_performance_file(options,options.reports,options.Hidden_markov_model_directory,"/cutoff_performance.txt")
     
-    print(f"Saving the cutoff values to {options.Hidden_markov_model_directory}")
     options.strict_cutoff_report_file = Reports.concatenate_cv_cutoff_files(options.cross_validation_directory, "_cv_thresholds.txt", options.Hidden_markov_model_directory+"/strict_cutoffs.txt")
 
 

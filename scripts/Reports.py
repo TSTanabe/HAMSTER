@@ -204,3 +204,45 @@ def print_report(filepath):
                     output_file.write(f"protein IDs\t {last_part}: {leading_parts_set}")
 
 
+def concat_and_sort_files(input_dir, file_extension, output_dir, output_filename="concatenated_sorted.tsv"):
+    """
+    Recursively concatenates all files with the given extension in a directory and its subdirectories,
+    sorts the resulting file by the first and second columns, and saves it to the output directory.
+
+    Parameters:
+        input_dir (str): Directory to search for files.
+        file_extension (str): File extension to filter (e.g., ".txt").
+        output_dir (str): Directory to save the concatenated sorted file.
+        output_filename (str): Name of the output file. Default is 'concatenated_sorted.tsv'.
+
+    Returns:
+        str: Path to the resulting output file.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Collect all matching files recursively
+    files_to_concat = []
+    for root, _, files in os.walk(input_dir):
+        for file in files:
+            if file.endswith(file_extension):
+                files_to_concat.append(os.path.join(root, file))
+
+    if not files_to_concat:
+        raise ValueError(f"No files with extension '{file_extension}' found in directory: {input_dir}")
+
+    # Read all lines from the matching files
+    all_lines = []
+    for file in files_to_concat:
+        with open(file, 'r') as f:
+            all_lines.extend(f.readlines())
+
+    # Sort lines by the first and second columns
+    sorted_lines = sorted(all_lines, key=lambda line: tuple(line.split("\t")[:2]))
+
+    # Write the sorted lines to the output file
+    output_file_path = os.path.join(output_dir, output_filename)
+    with open(output_file_path, 'w') as f:
+        f.writelines(sorted_lines)
+
+    return output_file_path
