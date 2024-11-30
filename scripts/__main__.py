@@ -244,7 +244,10 @@ def model_alignment(options):
 
 
 def cross_validation(options):
-    
+    options.TP_merged = None
+    options.TP_singles = None
+    options.TP_monophyla = None
+    options.TP_superfamily = None
     Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     

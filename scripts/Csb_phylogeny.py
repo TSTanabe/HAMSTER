@@ -199,63 +199,71 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict,tree_prefix,key_pr
 
 
 
-def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict,directory,deviation=0.5):
+def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict, directory, deviation=0.5):
+
     output_files = {}
     with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
 
+        # Retrieve the SQLite variable limit dynamically
+        cur.execute("PRAGMA max_variable_number;")
+        result = cur.fetchone()
+        sqlimit = result[0] if result else 999  # Fallback to 999
+
+
         for domain, query_length in domain_keyword_dict.items():
-            
-            #Get the proteinIDs set
-            proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length,deviation) #gets the proteinIDs of all hits for a query. Not the best hit but any hit is taken
+            # Get the proteinIDs set
+            proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length, deviation)
             proteinIDs = {string.strip() for string in proteinIDs}
-            #Adjust the identifiers from glob to match the database
+
+            # Adjust the identifiers from glob to match the database
             if options.glob_gff:
-                #Glob was provided genomeID was not added before concat, get the genomeID and add it to the set
-                proteinIDs = {f"{string.split('___', 1)[0]}-{string}" for string in proteinIDs} #comprehension that gets the string upt ot the first ___ and than adds it to the the same string with a '-'
+                proteinIDs = {f"{string.split('___', 1)[0]}-{string}" for string in proteinIDs}
             else:
-                proteinIDs = {string.replace('___', '-', 1) for string in proteinIDs} #comprehension for all globs that already have an added genomeID, then replace the first ___ by '-' to match the proteinID in DB      
+                proteinIDs = {string.replace('___', '-', 1) for string in proteinIDs}
+
+            # Prepare to fetch in chunks based on the SQLite limit
+            proteins = []
+            proteinIDs = list(proteinIDs)  # Convert set to list for chunking
+            for i in range(0, len(proteinIDs), sqlimit):
+                chunk = proteinIDs[i:i + sqlimit]
                 
-            # Use a parameterized query to check for the domain and the keywords
-            query = '''
-                SELECT DISTINCT P.proteinID, P.sequence
-                FROM Proteins P
-                WHERE P.proteinID IN ({})
-            '''.format(','.join('?' * len(proteinIDs)))
-
-            # Execute the query with the proteinIDs unpacked as parameters
-            cur.execute(query, tuple(proteinIDs))
-
-            proteins = cur.fetchall()
+                # Use a parameterized query for each chunk
+                query = '''
+                    SELECT DISTINCT P.proteinID, P.sequence
+                    FROM Proteins P
+                    WHERE P.proteinID IN ({})
+                '''.format(','.join('?' * len(chunk)))
+                
+                cur.execute(query, tuple(chunk))
+                proteins.extend(cur.fetchall())
 
             # Write the results to the domain-specific FASTA file
-            # Create the filename for this domain's output file
-            #this leaves only the protein type not the cluster number
             name = domain.split('_')[-1]
             filename = f"superfamily_{name}.faa"
             output_fasta_path = os.path.join(directory, filename)
-            
+
             # Use a set to track already written proteinIDs
             written_proteins = set()
             if os.path.exists(output_fasta_path):
-                # Open the existing file and extract protein IDs
                 with open(output_fasta_path, 'r') as fasta_file:
                     for line in fasta_file:
                         if line.startswith('>'):
-                            # Extract protein ID from the FASTA header line (assuming ID is everything after '>')
-                            protein_id = line[1:].strip().split()[0]  # Assuming ID is the first part after '>'
+                            protein_id = line[1:].strip().split()[0]
                             written_proteins.add(protein_id)
 
-            #Append with the fetched sequences
+            # Append the fetched sequences
             with open(output_fasta_path, 'a') as fasta_file:
                 for proteinID, sequence in proteins:
                     if proteinID not in written_proteins:
                         fasta_file.write(f'>{proteinID}\n{sequence}\n')
                         written_proteins.add(proteinID)
+
             # Add to output dictionary
             output_files[name] = output_fasta_path
 
-    return output_files  
+    return output_files
+
                         
 def get_domain_superfamily_proteinIDs(blast_table, domain, query_length, tolerance=0.5):
     """
