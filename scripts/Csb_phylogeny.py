@@ -170,25 +170,31 @@ def find_lca_and_monophyly(protein_ids, tree_file):
         return lca, included_identifiers
 
 
-def get_last_common_ancestor_fasta(options,grouped,trees_dict,tree_prefix,key_prefix):
+def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix, key_prefix):
     monophyly = {}
     for proteinID_frozenset, keyword_domain_pairs in grouped.items():
+        try:
+            # Define domain, key, and tree
+            keyword, domain = keyword_domain_pairs[0]
+            domain = domain.split('_')[-1]
+            tree_key = tree_prefix + '_' + domain
+            
+            # Attempt to get the tree from the dictionary
+            tree = trees_dict[tree_key]  # Throws KeyError if tree_key is missing
+            
+            # Get the monophyletic group
+            lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
+            
+            # Check distance to the original group
+            if clade_identifier_set:
+                monophyly[frozenset(clade_identifier_set)] = [(key_prefix + keyword, domain)]
         
-        #define domain, key and tree
-        keyword, domain = keyword_domain_pairs[0]
-        domain = domain.split('_')[-1]
-        tree = trees_dict[tree_prefix+'_'+domain] #Treefiles have keys with lca_{domain}, because .faa files were marked for the HMM
-        
-        #get the monophyletic group
-        lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
-        
-        #check distance to the original group
-        
-        
-        if clade_identifier_set:
-            monophyly[frozenset(clade_identifier_set)] = [(key_prefix+keyword,domain)]
+        except KeyError:
+            # Handle the missing tree
+            print(f"Warning: Tree for key '{tree_key}' not found. Skipping.")
+            continue  # Skip this iteration and proceed with the next one
 
-    return monophyly    
+    return monophyly 
 
 
 
@@ -200,8 +206,9 @@ def get_last_common_ancestor_fasta(options,grouped,trees_dict,tree_prefix,key_pr
 
 
 def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict, directory, deviation=0.5):
-
     output_files = {}
+    max_seqs = options.max_seqs  # Maximum allowed sequences
+
     with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
 
@@ -210,8 +217,10 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
         result = cur.fetchone()
         sqlimit = result[0] if result else 999  # Fallback to 999
 
+        for domain, query_length in domain_keyword_dict.items():  # Outer loop
+            # Flag to indicate if the inner loop was broken
+            skip_domain = False
 
-        for domain, query_length in domain_keyword_dict.items():
             # Get the proteinIDs set
             proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length, deviation)
             proteinIDs = {string.strip() for string in proteinIDs}
@@ -224,8 +233,8 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
 
             # Prepare to fetch in chunks based on the SQLite limit
             proteins = []
-            proteinIDs = list(proteinIDs)  # Convert set to list for chunking
-            for i in range(0, len(proteinIDs), sqlimit):
+            total_sequences = 0  # Counter to track the number of sequences fetched
+            for i in range(0, len(proteinIDs), sqlimit):  # Inner loop
                 chunk = proteinIDs[i:i + sqlimit]
                 
                 # Use a parameterized query for each chunk
@@ -236,7 +245,21 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
                 '''.format(','.join('?' * len(chunk)))
                 
                 cur.execute(query, tuple(chunk))
-                proteins.extend(cur.fetchall())
+                fetched = cur.fetchall()
+
+                proteins.extend(fetched)
+                total_sequences += len(fetched)
+
+                # Stop fetching if the sequence limit is reached
+                if total_sequences >= max_seqs:
+                    proteins = proteins[:max_seqs]  # Trim to max allowed sequences
+                    skip_domain = True  # Set flag to skip further processing
+                    break  # Exit the inner loop
+
+            # Skip processing and file writing for this domain if limit was reached
+            if skip_domain:
+                print(f"Warning: Skipping domain {domain} because max sequence limit was reached.")
+                continue  # Skip the current iteration of the outer loop
 
             # Write the results to the domain-specific FASTA file
             name = domain.split('_')[-1]
@@ -253,13 +276,13 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
                             written_proteins.add(protein_id)
 
             # Append the fetched sequences
-            with open(output_fasta_path, 'a') as fasta_file:
+            with open(output_fasta_path, 'w') as fasta_file:  # 'w' to overwrite the file
                 for proteinID, sequence in proteins:
                     if proteinID not in written_proteins:
                         fasta_file.write(f'>{proteinID}\n{sequence}\n')
                         written_proteins.add(proteinID)
 
-            # Add to output dictionary
+            # Add file to the output dictionary
             output_files[name] = output_fasta_path
 
     return output_files

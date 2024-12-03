@@ -12,12 +12,19 @@ def csb_proteins_datasets(options):
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
-    #Remove non-query proteins from the sets
+    
+    #Remove domains that are excluded by user options
+    
+    
     #Fetch for each csb id all the domains in the csb that are query domains
     dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
 
+    dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
+    dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
+
+    
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
@@ -412,6 +419,48 @@ def fetch_all_proteins(database, filepath):
     return filepath
     
     
+def filter_dictionary_by_inclusion_domains(input_dict, include_list):
+    """
+    Filters a dictionary to retain only entries with keys that match domains in a given list.
+    If the domain list is None or empty, the original dictionary is returned.
 
+    Args:
+        input_dict (dict): The dictionary with keys as (keyword, domain) tuples and values as sets of proteinIDs.
+        domain_list (list): A list of domains to retain. If None or empty, no filtering is performed.
 
+    Returns:
+        dict: A filtered dictionary with only the specified domains retained, or the original dictionary.
+    """
+    if not domain_list:  # Check if domain_list is None or empty
+        return input_dict
 
+    # Use dictionary comprehension to filter the dictionary
+    filtered_dict = {
+        key: value
+        for key, value in input_dict.items()
+        if key[1] in domain_list  # Check if the domain is in the provided list
+    }
+    return filtered_dict
+
+def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
+    """
+    Filters a dictionary to exclude entries with keys that match domains in a given list.
+    If the exclude list is None or empty, the original dictionary is returned.
+
+    Args:
+        input_dict (dict): The dictionary with keys as (keyword, domain) tuples and values as sets of proteinIDs.
+        exclude_list (list): A list of domains to exclude. If None or empty, no filtering is performed.
+
+    Returns:
+        dict: A filtered dictionary with specified domains excluded, or the original dictionary.
+    """
+    if not exclude_list:  # Check if exclude_list is None or empty
+        return input_dict
+
+    # Use dictionary comprehension to exclude the specified domains
+    filtered_dict = {
+        key: value
+        for key, value in input_dict.items()
+        if key[1] not in exclude_list  # Exclude keys where domain is in the exclude list
+    }
+    return filtered_dict

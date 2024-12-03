@@ -125,8 +125,10 @@ def parse_arguments(arguments):
 
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 5000, metavar='<int>', help='Max. number of sequences that are aligned')
     alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
-    
+    alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
+    alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
     
     if len(arguments) == 0: # Print help if no arguments were provided
         parser.print_help()
@@ -138,7 +140,6 @@ def parse_arguments(arguments):
     validate_options(options)
     
     return options
-    
     
 def validate_options(options):
     # Check if a database file exists
@@ -238,16 +239,18 @@ def generate_csb_sequence_fasta(options):
     Csb_proteins.training_data_fasta(options) # generates the fasta files
     Csb_phylogeny.csb_phylogeny_target_sets(options)
     Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa")
-    
+
+    options.TP_merged = None
+    options.TP_singles = None
+    options.TP_monophyla = None
+    options.TP_superfamily = None
+        
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)
 
 
 def cross_validation(options):
-    options.TP_merged = None
-    options.TP_singles = None
-    options.TP_monophyla = None
-    options.TP_superfamily = None
+
     Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
