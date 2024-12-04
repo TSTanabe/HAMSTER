@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+#from datetime import datetime
 
 from . import Project
 from . import Queue
@@ -62,7 +63,11 @@ class Options:
         self.self_seqs = None #Query sequences
 
         self.MCC_threshold = 0.8 #TODO move this to options, below this threshold the HMMs are not validated to save runtime
-
+        
+        self.deconcat_flag = 0 #Memorize if a deconcatenation was done
+        self.glob_flag = 0 #Memorize if a concatenation was done
+        
+        
 def parse_arguments(arguments):
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
     
@@ -74,6 +79,7 @@ def parse_arguments(arguments):
 
     resources = parser.add_argument_group("Optional parameters")
     resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='Start at stage')
+    resources.add_argument('-x', dest='end', type=int, default = 9, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='End at stage')
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
     resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run') # project folder TODO print the directory that is used for reconfirmation with the user
@@ -175,17 +181,19 @@ def fasta_preparation(options):
         #create separated files
         Translation.deconcat(options)
         Queue.queue_files(options)
+        options.deconcat_flag = 1
     else:
 
         #Unpacks and translates fasta
         Translation.parallel_translation(options.fasta_file_directory, options.cores)
         Translation.parallel_transcription(options.fasta_file_directory, options.cores)
 
-        #concat to to globfile 
+        #concat to to globfile if search results are not already provided
         Queue.queue_files(options)
         if not options.glob_table:
             print(f"Generating glob file")
-            Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier   
+            Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier
+            options.glob_flag = 1   
     Translation.create_selfquery_file(options)
 
 def initial_search(options):
@@ -202,8 +210,10 @@ def initial_search(options):
         #Process all files separately
         ParallelSearch.initial_genomize_search(options)
 
-    
-    
+    if options.deconcat_flag: #deconcatenation was done but is not needed anymore
+        myUtil.remove_directory(options.fasta_file_directory)#remove the deconcatenated files
+    elif options.glob_flag:
+        os.remove(options.glob_faa)
     
 def cluster_sequences(options):
     if not options.protein_cluster_active: # skip if not activated to cluster the sequences
@@ -300,14 +310,14 @@ def main(args=None):
     Project.prepare_result_space(options)
     
     
-    if options.stage <= 2:
+    if options.stage <= 2 and options.end >= 2:
         myUtil.print_header("\nProkaryotic gene recognition and translation via prodigal")
         fasta_preparation(options)
         
 
     
 #2    
-    if options.stage <= 2:
+    if options.stage <= 2 and options.end >= 2:
         myUtil.print_header("\nSearching for homologoues sequences")
         initial_search(options)
         
@@ -316,23 +326,23 @@ def main(args=None):
     #cluster with mmseqs the divergent_output_file
     #Info: this resulted in an error when only a single genome was used. linclust did this error and dumped the core. the tsv file was not created and subsequent errors occured therefore
 
-    if options.stage <= 3:
+    if options.stage <= 3 and options.end >= 3:
         myUtil.print_header("\nClustering sequences by similarity")
         cluster_sequences(options)
     
 #4    
     #csb naming
-    if options.stage <= 4:
+    if options.stage <= 4 and options.end >= 4:
         myUtil.print_header("\nSearching for collinear syntenic blocks")
         csb_finder(options)
 #5
-    if options.stage <= 5:
+    if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\nPreparing training data fasta files")
         generate_csb_sequence_fasta(options)   
 
 #6    
     #align
-    if options.stage <= 6:
+    if options.stage <= 6 and options.end >= 6:
         myUtil.print_header("\nAligning sequences")
         model_alignment(options)
         
@@ -340,13 +350,13 @@ def main(args=None):
 #7        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
-    if options.stage <= 7:
+    if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\nPerforming cross valdation procedure")
         cross_validation(options)
 
 #8  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
-    if options.stage <= 8:
+    if options.stage <= 8 and options.end >= 8:
         report_cv_performance(options)
     
     

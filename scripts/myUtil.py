@@ -196,3 +196,26 @@ def find_executable(executable):
     
     raise FileNotFoundError(f"{executable} executable not found in system PATH or local bin directory.")
 
+def remove_directory(directory_path):
+    """
+    Removes a directory and all its contents.
+
+    Args:
+        directory_path (str): The path of the directory to remove.
+
+    Returns:
+        None
+    """
+    if os.path.exists(directory_path):  # Check if the directory exists
+        # Iterate over all files and subdirectories and remove them
+        for root, dirs, files in os.walk(directory_path, topdown=False):
+            for file in files:
+                file_path = os.path.join(root, file)
+                os.remove(file_path)  # Remove file
+            for dir in dirs:
+                dir_path = os.path.join(root, dir)
+                os.rmdir(dir_path)  # Remove empty subdirectory
+        os.rmdir(directory_path)  # Remove the main directory itself
+        print(f"Removed directory and all its contents: {directory_path}")
+    else:
+        print(f"Directory does not exist: {directory_path}")

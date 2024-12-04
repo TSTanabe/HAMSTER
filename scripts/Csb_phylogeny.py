@@ -231,6 +231,9 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
             else:
                 proteinIDs = {string.replace('___', '-', 1) for string in proteinIDs}
 
+            # Convert proteinIDs set to a list for slicing
+            proteinIDs = list(proteinIDs)
+
             # Prepare to fetch in chunks based on the SQLite limit
             proteins = []
             total_sequences = 0  # Counter to track the number of sequences fetched
@@ -276,7 +279,7 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
                             written_proteins.add(protein_id)
 
             # Append the fetched sequences
-            with open(output_fasta_path, 'w') as fasta_file:  # 'w' to overwrite the file
+            with open(output_fasta_path, 'a') as fasta_file:  # 'w' to overwrite the file
                 for proteinID, sequence in proteins:
                     if proteinID not in written_proteins:
                         fasta_file.write(f'>{proteinID}\n{sequence}\n')

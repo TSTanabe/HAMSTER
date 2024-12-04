@@ -431,14 +431,14 @@ def filter_dictionary_by_inclusion_domains(input_dict, include_list):
     Returns:
         dict: A filtered dictionary with only the specified domains retained, or the original dictionary.
     """
-    if not domain_list:  # Check if domain_list is None or empty
+    if not include_list:  # Check if domain_list is None or empty
         return input_dict
 
     # Use dictionary comprehension to filter the dictionary
     filtered_dict = {
         key: value
         for key, value in input_dict.items()
-        if key[1] in domain_list  # Check if the domain is in the provided list
+        if key[1] in include_list  # Check if the domain is in the provided list
     }
     return filtered_dict
 
