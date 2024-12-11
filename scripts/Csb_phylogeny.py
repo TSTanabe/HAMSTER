@@ -27,7 +27,7 @@ def csb_phylogeny_datasets(options):
     fetch_protein_type_to_fasta(options, domain_family_dict)
     
     query_length_dict = get_sequence_legth(options.self_query)
-    fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.phylogeny_directory) #for the phylogeny and as TN set
+    fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.phylogeny_directory,options.max_seqs) #for the phylogeny and as TN set
 
     #align the protein family
     family_alignment_files = Alignment.initial_alignments(options, options.phylogeny_directory)
@@ -47,7 +47,7 @@ def csb_phylogeny_target_sets(options):
     training_datasets = {**options.TP_merged, **options.TP_singles}
     domain_family_dict = get_domain_key_list_pairs(training_datasets)
     query_length_dict = get_sequence_legth(options.self_query)
-    target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,1) #for the phylogeny and as TN set
+    target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,0,1) #for the phylogeny and as TN set
     return target_files #dictionary with domain => target file with TP and TN
         
 def get_domain_key_list_pairs(input_dict, output_dict=None):
@@ -205,9 +205,8 @@ def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix, ke
 
 
 
-def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict, directory, deviation=0.5):
+def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict, directory, max_seqs, deviation=0.5):
     output_files = {}
-    max_seqs = options.max_seqs  # Maximum allowed sequences
 
     with sqlite3.connect(options.database_directory) as con:
         cur = con.cursor()
@@ -253,8 +252,8 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
                 proteins.extend(fetched)
                 total_sequences += len(fetched)
 
-                # Stop fetching if the sequence limit is reached
-                if total_sequences >= max_seqs:
+                # Stop fetching if the sequence limit is reached, never stop if max_seqs is equal 0
+                if max_seqs > 0 and total_sequences >= max_seqs:
                     proteins = proteins[:max_seqs]  # Trim to max allowed sequences
                     skip_domain = True  # Set flag to skip further processing
                     break  # Exit the inner loop
