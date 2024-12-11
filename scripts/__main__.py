@@ -275,8 +275,8 @@ def cross_validation(options):
 def report_cv_performance(options):
     #Initial validation
     print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
-    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_MCC.txt', options.cross_validation_directory, "_ini_performance_matrices.txt")
-    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_thresholds.txt', options.cross_validation_directory, "_ini_cutoffs.txt")
+    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_MCC.txt', options.Hidden_markov_model_directory, "_ini_performance_matrices.txt")
+    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_thresholds.txt', options.Hidden_markov_model_directory, "_ini_cutoffs.txt")
     
 
     #cross validation
