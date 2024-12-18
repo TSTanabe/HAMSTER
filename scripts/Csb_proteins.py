@@ -12,15 +12,16 @@ def csb_proteins_datasets(options):
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
+    options.csb_dictionary = csb_dictionary # save the patterns for later use
     
-    #Remove domains that are excluded by user options
     
     
     #Fetch for each csb id all the domains in the csb that are query domains
     dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
-
+    
+    #Remove domains that are excluded by user options
     dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
     dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
 
@@ -35,7 +36,8 @@ def csb_proteins_datasets(options):
     #print(singles)
     options.TP_merged = merged
     options.TP_singles = singles
-    
+    print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_csb_groups_1")
+    print_grouping_report("Unique csb groupes that include distinct proteins groups",merged,options.Csb_directory+"/Singles_csb_groups_1")
 
 
 def training_data_fasta(options):
@@ -53,6 +55,9 @@ def training_data_fasta(options):
                 training_datasets[key] = value
     
     merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
+    print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_phylogenetic_groups_2")
+    print_grouping_report("Unique csb groupes that include distinct proteins groups",merged,options.Csb_directory+"/Singles_csb_groups_2")
+
     #print(len(options.TP_merged))
     #print(len(options.TP_singles))
     #print(len(options.TP_monophyla))
@@ -330,6 +335,26 @@ def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
     # Return both the merged groups and the noise points
     return merged_groups, noise_points
 
+def print_grouping_report(description, group, output):
+    """
+    Writes a description followed by a linewise print of the group dictionary values to the output file,
+    separating lines by a blank line.
+
+    :param description: A string containing the description to be printed.
+    :param group: A dictionary where the values are lists or other iterables.
+    :param output: The file object to write the report to.
+    """
+    with open(output, 'w') as file:
+        # Write the description to the file
+        file.write(f"{description}\n\n")
+
+        # Iterate over the group dictionary
+        for key, values in group.items():
+            # Write the key and values to the file
+            file.write(f"Group: {key}\n")
+            for value in values:
+                file.write(f"{value}\n")
+            file.write("\n")  # Add a blank line between groups
 
 
 
@@ -358,6 +383,11 @@ def fetch_protein_to_fasta(options, grouped, prefix=""):
             # Convert frozenset to a tuple for the SQL IN clause
             proteinID_tuple = tuple(proteinID_frozenset)
             
+            #Do not fetch if the minimal number of sequences is not reached
+            if len(proteinID_tuple) < options.min_seqs:
+                print(f"Info: Less than {options.min_seqs} with {keyword_domain_pairs}. Skipping this set.")
+                continue
+                
             # Fetch protein sequences for the given protein IDs
             query = """
                 SELECT proteinID, sequence

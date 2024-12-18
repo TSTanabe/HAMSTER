@@ -35,7 +35,7 @@ def parallel_cross_validation(options):
     if options.cross_validation_deactivated: # if deactivated skip the cross validation
         return
         
-    print("Filter by overall performance and prepare for cross-validation")
+    print(f"Filter HMMs by performance MCC >{options.MCC_threshold} and prepare for cross-validation")
     
     
     # Filter out the HMMs with a performance below threshold
@@ -855,7 +855,7 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids):
             neighbors_dict[protein_id] = neighbors
         else:
             # Handle proteins without a cluster (just return the protein itself)
-            neighbors_dict[protein_id] = [f"no_domain_{protein_id}"]
+            neighbors_dict[protein_id] = [f"singleton_{protein_id}"]
 
     return neighbors_dict
 

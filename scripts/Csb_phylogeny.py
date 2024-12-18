@@ -3,7 +3,7 @@
 import sqlite3
 import os
 import subprocess
-
+import multiprocessing
 from . import Alignment
 
 from Bio import Phylo
@@ -120,6 +120,36 @@ def fetch_protein_type_to_fasta(options, domain_keyword_dict):
 
 
 
+#################################################################################
+############  Finding lca in phylogenetic trees  ################################
+#################################################################################
+
+
+def get_last_common_ancestor_fasta_depcecated(options, grouped, trees_dict, tree_prefix, key_prefix):
+    monophyly = {}
+    for proteinID_frozenset, keyword_domain_pairs in grouped.items():
+        try:
+            # Define domain, key, and tree
+            keyword, domain = keyword_domain_pairs[0]
+            domain = domain.split('_')[-1]
+            tree_key = tree_prefix + '_' + domain
+            
+            # Attempt to get the tree from the dictionary
+            tree = trees_dict[tree_key]  # Throws KeyError if tree_key is missing
+            
+            # Get the monophyletic group
+            lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
+            
+            # Check distance to the original group
+            if clade_identifier_set:
+                monophyly[frozenset(clade_identifier_set)] = [(key_prefix + keyword, domain)]
+        
+        except KeyError:
+            # Handle the missing tree
+            print(f"Warning: Tree for key '{tree_key}' not found. Skipping.")
+            continue  # Skip this iteration and proceed with the next one
+
+    return monophyly 
 
 
 def find_lca_and_monophyly(protein_ids, tree_file):
@@ -170,33 +200,190 @@ def find_lca_and_monophyly(protein_ids, tree_file):
         return lca, included_identifiers
 
 
-def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix, key_prefix):
-    monophyly = {}
-    for proteinID_frozenset, keyword_domain_pairs in grouped.items():
-        try:
-            # Define domain, key, and tree
-            keyword, domain = keyword_domain_pairs[0]
-            domain = domain.split('_')[-1]
-            tree_key = tree_prefix + '_' + domain
-            
-            # Attempt to get the tree from the dictionary
-            tree = trees_dict[tree_key]  # Throws KeyError if tree_key is missing
-            
-            # Get the monophyletic group
-            lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
-            
-            # Check distance to the original group
-            if clade_identifier_set:
-                monophyly[frozenset(clade_identifier_set)] = [(key_prefix + keyword, domain)]
+
+
+
+
+def fetch_neighbouring_domains(database, protein_ids):
+    """
+    Fetches neighboring domains for a list of proteinIDs based on clusterID and gene order,
+    and returns a dictionary where each proteinID is a key, and the value is a set of 
+    neighboring domains (including the domain of the protein itself).
+
+    Args:
+        database (str): Pathway to the database file.
+        protein_ids (list): List of proteinIDs to fetch neighbors for.
+
+    Returns:
+        dict: A dictionary where each key is a proteinID, and the value is a set of 
+              domains of neighboring genes in the same cluster or just the domain of the 
+              proteinID if it has no cluster.
+    """
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+
+        # Fetch all proteins and their domains in the same clusters as the input protein_ids
+        query = f"""
+        SELECT 
+            p.proteinID, p.clusterID, d.domain
+        FROM Proteins p
+        LEFT JOIN Domains d ON p.proteinID = d.proteinID
+        WHERE p.proteinID IN ({','.join('?' * len(protein_ids))})
+           OR p.clusterID IN (
+                SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({','.join('?' * len(protein_ids))})
+           )
+        """
         
-        except KeyError:
-            # Handle the missing tree
-            print(f"Warning: Tree for key '{tree_key}' not found. Skipping.")
-            continue  # Skip this iteration and proceed with the next one
+        # Execute the query with the protein_ids list
+        cur.execute(query, protein_ids + protein_ids)  # Pass protein_ids twice for both conditions
+        protein_results = cur.fetchall()
+    
+    # Organize results by cluster and by proteinID
+    cluster_dict = {}
+    protein_cluster_map = {}  # Map each protein to its cluster
+    domain_map = {}           # Map each protein to its domain
 
-    return monophyly 
+    for protein_id, cluster_id, domain in protein_results:
+        domain_str = domain if domain else "no_domain"  # Handle missing domain
+        domain_map[protein_id] = domain_str
 
+        if cluster_id is not None:  # Only process if a cluster exists
+            if cluster_id not in cluster_dict:
+                cluster_dict[cluster_id] = set()
+            cluster_dict[cluster_id].add(domain_str)
+            protein_cluster_map[protein_id] = cluster_id
+        else:
+            # Handle proteins without clusters separately in the result later
+            protein_cluster_map[protein_id] = None
 
+    # Prepare the final dictionary with proteinID as the key and neighboring domains as a set
+    neighbors_dict = {}
+    for protein_id in protein_ids:
+        cluster_id = protein_cluster_map.get(protein_id)
+        
+        # Handle proteins with a cluster
+        if cluster_id:
+            neighbors_dict[protein_id] = cluster_dict[cluster_id]
+        else:
+            # Handle proteins without a cluster (just return the domain of the protein itself)
+            neighbors_dict[protein_id] = {domain_map[protein_id]}
+
+    return neighbors_dict
+
+    
+def compare_vicinity(unique_to_clade_ids, combined_set_domains, database, accepted_difference):
+    """
+    Compares the vicinity of each neighboring set to the combined set of domains.
+    If the difference is above the accepted threshold, the key is added to a set.
+
+    Args:
+        unique_to_clade_ids (set): A set of unique identifiers in the clade.
+        combined_set_domains (set): The combined set of domains from the input group.
+        database: The database to fetch neighboring domains.
+        accepted_difference (float): The threshold for the difference (0 <= accepted_difference <= 1).
+
+    Returns:
+        set: A set of keys from `neighbors_dict` where the difference exceeds the threshold.
+    """
+    # Fetch neighboring domains for the unique identifiers
+    neighbors_dict = fetch_neighbouring_domains(database, list(unique_to_clade_ids))
+
+    # Initialize the set for keys exceeding the difference threshold
+    keys_exceeding_threshold = set()
+
+    for key, neighborhood_domains in neighbors_dict.items():
+        # Compute the difference between the neighborhood set and the combined set
+        intersection = len(neighborhood_domains.intersection(combined_set_domains))
+        union = len(neighborhood_domains.union(combined_set_domains))
+        jaccard_distance = 1 - (intersection / union if union != 0 else 0)
+
+        # Check if the difference exceeds the accepted threshold
+        if jaccard_distance > accepted_difference:
+            keys_exceeding_threshold.add(key)
+
+    return keys_exceeding_threshold
+
+def get_lca_worker_task(args):
+    """
+    Worker function to process one proteinID_frozenset and its associated keyword_domain_pairs.
+    Args:
+        args: A tuple containing (proteinID_frozenset, keyword_domain_pairs, trees_dict, tree_prefix, key_prefix, csb_dictionary)
+    Returns:
+        tuple: The resulting monophyly entry and its associated filtered monophylum.
+    """
+    proteinID_frozenset, keyword_domain_pairs, trees_dict, tree_prefix, key_prefix, csb_dictionary, database, accepted_difference = args
+
+    try:
+        # Initialize monophyly
+        monophyly = {}
+
+        # Get the first keyword and domain
+        keyword, domain = keyword_domain_pairs[0]
+        domain = domain.split('_')[-1]
+        tree_key = tree_prefix + '_' + domain
+
+        # Attempt to get the tree
+        tree = trees_dict.get(tree_key)
+        if not tree:
+            return None  # Skip if tree is missing
+
+        # Get the monophyletic group
+        lca, clade_identifier_set = find_lca_and_monophyly(proteinID_frozenset, tree)
+
+        if clade_identifier_set:
+            monophyly[frozenset(clade_identifier_set)] = [(key_prefix + keyword, domain)]
+        else:
+            return {},{} #if no addition was found and set is already monophylum, return emtpy dicts
+
+        # Identify unique sequences in the clade
+        unique_to_clade_ids = clade_identifier_set.difference(proteinID_frozenset)
+
+        # Combine vicinity sets
+        combined_set = set()
+        for keyword, _ in keyword_domain_pairs:
+            if keyword in csb_dictionary:
+                combined_set.update(csb_dictionary[keyword])
+
+        # Compare the vicinity of unique sequences
+        filtered_proteinID_set = compare_vicinity(unique_to_clade_ids, combined_set, database, accepted_difference)
+        
+        key = frozenset(proteinID_frozenset.union(filtered_proteinID_set))
+        monophyly[key] = [(key_prefix + keyword, domain)]
+        
+        return monophyly
+
+    except Exception as e:
+        print(f"Error processing {proteinID_frozenset}: {e}")
+        return None
+        
+        
+        
+def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix, key_prefix):
+    """
+    Main function to process grouped data in parallel using multiprocessing.
+    """
+    # Extract necessary data to avoid passing the bulky `options` object
+    csb_dictionary = options.csb_dictionary
+
+    # Prepare arguments for the worker function
+    worker_args = [
+        (proteinID_frozenset, keyword_domain_pairs, trees_dict, tree_prefix, key_prefix, csb_dictionary, options.database_directory,0.5)
+        for proteinID_frozenset, keyword_domain_pairs in grouped.items()
+    ]
+
+    # Use multiprocessing to fork the outer loop
+    monophyly_results = []
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        results = pool.map(get_lca_worker_task, worker_args)
+
+    # Collect results from workers
+    monophyly = {}
+    for result in results:
+        if result:
+            worker_monophyly = result
+            monophyly.update(worker_monophyly)
+
+    return monophyly
 
 
 #########################################################################################################        

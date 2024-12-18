@@ -131,7 +131,7 @@ def parse_arguments(arguments):
 
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 5000, metavar='<int>', help='Max. number of sequences that are aligned')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 15000, metavar='<int>', help='Max. number of sequences that are aligned')
     alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
     alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
     alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
@@ -229,8 +229,8 @@ def cluster_sequences(options):
 def csb_finder(options):
 
     Csb_cluster.csb_prediction(options)
+    
     csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
-    #print(csb_gene_cluster_dict)
     Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) #remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
     Database.update_keywords(options.database_directory,csb_gene_cluster_dict) #assigns the names of the keywords to the clusters
@@ -247,13 +247,13 @@ def generate_csb_sequence_fasta(options):
     	options.TP_monophyla = {}
     	options.superfamiy = {}
     Csb_proteins.training_data_fasta(options) # generates the fasta files
-    Csb_phylogeny.csb_phylogeny_target_sets(options)
-    Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa")
+    Csb_phylogeny.csb_phylogeny_target_sets(options) #Target file for each HMM excluding seqs already below threshold
+    Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
 
     options.TP_merged = None
     options.TP_singles = None
     options.TP_monophyla = None
-    options.TP_superfamily = None
+    options.superfamily = None
         
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)
