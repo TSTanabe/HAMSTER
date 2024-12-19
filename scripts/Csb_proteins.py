@@ -37,7 +37,7 @@ def csb_proteins_datasets(options):
     options.TP_merged = merged
     options.TP_singles = singles
     print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_csb_groups_1")
-    print_grouping_report("Unique csb groupes that include distinct proteins groups",merged,options.Csb_directory+"/Singles_csb_groups_1")
+    print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_1")
 
 
 def training_data_fasta(options):
@@ -56,7 +56,7 @@ def training_data_fasta(options):
     
     merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
     print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_phylogenetic_groups_2")
-    print_grouping_report("Unique csb groupes that include distinct proteins groups",merged,options.Csb_directory+"/Singles_csb_groups_2")
+    print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_2")
 
     #print(len(options.TP_merged))
     #print(len(options.TP_singles))
