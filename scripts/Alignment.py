@@ -70,16 +70,6 @@ def align_tcs(options,):
             
 def initial_alignments(options, fasta_output_directory):
 
-    directory_to_clean = fasta_output_directory
-
-    # Clean up preexisting alignments
-    if os.path.exists(directory_to_clean): #TODO make this an option and also clean the treefiles if they exist
-        for filename in os.listdir(directory_to_clean):
-            if filename.endswith(".fasta_aln"):
-                file_path = os.path.join(directory_to_clean, filename)
-                os.remove(file_path)
-                
-    print(fasta_output_directory)            
     filepaths = make_alignments(options, fasta_output_directory)
     
 
@@ -111,9 +101,9 @@ def make_alignments(options,fasta_output_directory):
         base_name = os.path.splitext(os.path.basename(fasta_file))[0] # Extract the filename without the .faa extension
         output_fasta = os.path.join(input_dir, f"{base_name}.faa_aln") # Create the output filename with .aln extension in the same directory as the input file
 
-        if os.path.exists(output_fasta):
+        if os.path.isfile(output_fasta):
+            print(f"Skipping. {output_fasta} already exists")
             continue
-                    
         #Align with default mafft
         align_fasta_with_mafft(fasta_file, output_fasta, options.cores)
     
@@ -170,8 +160,10 @@ def align_fasta_with_mafft(input_fasta, output_fasta, cores=2):
             subprocess.run([mafft, "--thread", str(cores), "--auto", input_fasta], stdout=output_file, stderr=subprocess.PIPE, check=True)
         print(f"Alignment complete: {input_fasta} -> {output_fasta}")
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred during MAFFT alignment: {e.stderr.decode('utf-8')}")
-        raise
+        error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
+        print(f"Error occurred during MAFFT alignment: {error_message}")
+        print(f"Skipping file {input_fasta} due to the error.")
+
     except FileNotFoundError:
         print("MAFFT executable not found. Please make sure MAFFT is installed and in your system's PATH.")
 
@@ -200,8 +192,9 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         ], check=True)
         #print(f"Trimming complete: {input_fasta} -> {output_alignment}")
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred during trimming with trimAl: {e.stderr.decode('utf-8')}")
-        raise
+        error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
+        print(f"Error occurred during trimming with trimAl: {error_message}")
+        print(f"Skipping file {input_fasta} due to the error.")
 
 
 
@@ -236,8 +229,9 @@ def run_fasttree_on_alignment(alignment_file, cores=2):
         print(f"VeryFastTree-avx2 complete: {alignment_file}")
         return output_tree_file
     except subprocess.CalledProcessError as e:
-        print(f"Error occurred during VeryFastTree-avx2: {e.stderr.decode('utf-8')}")
-        raise
+        error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
+        print(f"Error occurred during tVeryFastTree-avx2: {error_message}")
+        print(f"Skipping file {alignment_file} due to the error.")
     except FileNotFoundError:
         print("VeryFastTree-avx2 executable not found. Please make sure VeryFastTree-avx2 is installed and in your system's PATH or in the local bin directory.")
 

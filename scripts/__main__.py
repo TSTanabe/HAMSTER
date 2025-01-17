@@ -191,7 +191,7 @@ def fasta_preparation(options):
         #concat to to globfile if search results are not already provided
         Queue.queue_files(options)
         if not options.glob_table:
-            print(f"Generating glob file")
+            print(f"Generating glob faa file")
             Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier
             options.glob_flag = 1   
     Translation.create_selfquery_file(options)
@@ -240,12 +240,16 @@ def csb_finder(options):
 def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     Database.index_database(options.database_directory)
+    
+    print("Group training data sequences")
     Csb_proteins.csb_proteins_datasets(options) # groups training data
-    if options.csb_distinct_grouping:
+    if options.csb_distinct_grouping and os.path.isfile(options.glob_table):
         Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
     else:
-    	options.TP_monophyla = {}
-    	options.superfamiy = {}
+        options.TP_monophyla = {}
+        options.superfamily = {}
+    	    
+    print("Create fasta files for training data")
     Csb_proteins.training_data_fasta(options) # generates the fasta files
     Csb_phylogeny.csb_phylogeny_target_sets(options) #Target file for each HMM excluding seqs already below threshold
     Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
@@ -261,12 +265,12 @@ def model_alignment(options):
 
 def cross_validation(options):
 
-    Validation.create_hmms_from_msas(options.fasta_output_directory,"fasta_aln","hmm",options.cores) #create the full hmms for later use
+    Validation.create_hmms_from_msas(options.fasta_output_directory, options.Hidden_markov_model_directory, "fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
     options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)
-    print(options.targeted_sequence_faa_file_dict)
+    print(f"From {options.cross_validation_directory} the following target files were selected {options.targeted_sequence_faa_file_dict}")
     
     Validation.parallel_cross_validation(options)
 

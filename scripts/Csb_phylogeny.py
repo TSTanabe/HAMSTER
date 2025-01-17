@@ -47,7 +47,8 @@ def csb_phylogeny_target_sets(options):
     training_datasets = {**options.TP_merged, **options.TP_singles}
     domain_family_dict = get_domain_key_list_pairs(training_datasets)
     query_length_dict = get_sequence_legth(options.self_query)
-    target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,0,1) #for the phylogeny and as TN set
+    if not options.glob_table is None and os.path.isfile(options.glob_table):
+        target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,0,1) #for the phylogeny and as TN set
     return target_files #dictionary with domain => target file with TP and TN
         
 def get_domain_key_list_pairs(input_dict, output_dict=None):
@@ -404,9 +405,19 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
         sqlimit = result[0] if result else 999  # Fallback to 999
 
         for domain, query_length in domain_keyword_dict.items():  # Outer loop
-            # Flag to indicate if the inner loop was broken
-            skip_domain = False
-
+            # Write the results to the domain-specific FASTA file
+            name = domain.split('_')[-1]
+            filename = f"superfamily_{name}.faa"
+            output_fasta_path = os.path.join(directory, filename)
+            
+            #Skip if file exists
+            if os.path.isfile(output_fasta_path):
+                print(f" Skipping. File {output_fasta_path} already exists.")
+                continue
+            else:
+                print(f" {output_fasta_path} did not exist")
+            
+            
             # Get the proteinIDs set
             proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length, deviation)
             proteinIDs = {string.strip() for string in proteinIDs}
@@ -419,6 +430,9 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
 
             # Convert proteinIDs set to a list for slicing
             proteinIDs = list(proteinIDs)
+
+            # Flag to indicate if the inner loop was broken
+            skip_domain = False
 
             # Prepare to fetch in chunks based on the SQLite limit
             proteins = []
@@ -449,11 +463,6 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
             if skip_domain:
                 print(f"Warning: Skipping domain {domain} because max sequence limit was reached.")
                 continue  # Skip the current iteration of the outer loop
-
-            # Write the results to the domain-specific FASTA file
-            name = domain.split('_')[-1]
-            filename = f"superfamily_{name}.faa"
-            output_fasta_path = os.path.join(directory, filename)
 
             # Use a set to track already written proteinIDs
             written_proteins = set()

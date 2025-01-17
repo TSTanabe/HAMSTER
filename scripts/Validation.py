@@ -71,20 +71,30 @@ def init_validation_worker(all_seq_number, alignment_files, files_number):
     global_files_number = files_number
     
     
-def create_hmms_from_msas(directory, ending="fasta_aln", extension="hmm_cv", cores=1):
+def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="hmm_cv", cores=1):
+    # Ensure the target directory exists
+    os.makedirs(target_dir, exist_ok=True)
+
     # Get a list of all MSA files with the specified ending in the directory
     msa_files = [f for f in os.listdir(directory) if f.endswith(ending)]
 
     # Run hmmbuild on each MSA file
     for msa_file in msa_files:
         msa_path = os.path.join(directory, msa_file)
-        hmm_file = os.path.join(directory, msa_file.replace(ending, extension))
+        hmm_file = os.path.join(target_dir, msa_file.replace(ending, extension))
+
+        # Skip if the HMM file already exists in the target directory
+        if os.path.isfile(hmm_file):
+            print(f"HMM {hmm_file} already exists. Skipping...")
+            continue
 
         # Construct the hmmbuild command
         hmmbuild_cmd = f"hmmbuild --amino --cpu {cores} {hmm_file} {msa_path}"
-
-        # Run the hmmbuild command, redirecting stdout and stderr to null to suppress output
+        
+        # Run the hmmbuild command
+        print(f"Running hmmbuild for {msa_file} -> {hmm_file}")
         subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
 def get_target_sets(directory):
     """
@@ -128,19 +138,23 @@ def initial_process_folds(args_tuple):
         
 
     initial_validation_directory = options.fasta_alignment_directory #Uses the currently unused fasta_alignment_directory
-    
+
+
     # Generate the cross-validation directory
     hv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
     hv_directory = os.path.join(initial_validation_directory, hv_subfolder_name)
+    
+    # Get the HMM for the initial search
+    hmm = options.Hidden_markov_model_directory+f"/{hv_subfolder_name}.hmm"
+    
+    if not os.path.isfile(hmm):
+        return
     os.makedirs(hv_directory, exist_ok=True)
     
     print(f"Initial validation of HMM {index} of {limit} file {hv_subfolder_name}")
     if os.path.exists(os.path.join(hv_directory, f"{hv_subfolder_name}_hv_matrices.txt")):
         return None  # This was already finished return to next HMM validation
     
-    
-    # Get the HMM for the initial search
-    hmm = options.Hidden_markov_model_directory+f"/{hv_subfolder_name}.hmm"
     
     # Get the target file
     name = hv_subfolder_name.split('_')[-1]
@@ -297,7 +311,7 @@ def process_cross_folds(args_tuple):
     create_cross_validation_sets(alignment_file, cv_directory)  # make CV folds in subfolder    
     
     # Generate the cross-validation folds for the HMMs
-    create_hmms_from_msas(cv_directory, "cv")
+    create_hmms_from_msas(cv_directory,cv_directory, "cv")
     cv_hmms = [os.path.join(cv_directory, filename) for filename in os.listdir(cv_directory) if filename.endswith(".hmm_cv")]
     
     #Get the target file

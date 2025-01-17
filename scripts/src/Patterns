@@ -7,6 +7,9 @@ Rbs	L2	L3	L4	L5	L6	L14	L15	L16	L18	L22	L24	S3	S8	S10	S17	S19
 Sox	SoxX	SoxY	SoxZ	SoxA	SoxB	SoxC	SoxD
 SoxReg	SoxS	SoxR	SoxT
 oxDsr	oxDsrA	oxDsrB	oxDsrC	DsrE	DsrF	DsrH
+oxDsr2	oxDsrA	oxDsrB	oxDsrL
+oxDsr3	oxDsrA	oxDsrB
+oxDsrMK2	oxDsrM	oxDsrK
 sHdr	sHdrC1	sHdrB1	sHdrA	sHdrH	sHdrC2	sHdrB2
 sHdr	sHdrC1	sHdrB1	sHdrA	sHdrH	sEtfA	sEtfB
 sHdr	sHdrC1	sHdrB1	sHdrA	sHdrH	sHdrC2	sHdrB2	LbpA1	DsrE3B	LbpA2
@@ -27,6 +30,8 @@ Apr	oxAprA	oxAprB
 Dox	DoxD	DoxA	Tth
 Tus	TusB	TusC	TusD
 redDsr	redDsrA	redDsrB	redDsrD	redDsrN
+redDsr	redDsrA	redDsrB	redDsrD
+redDsr	redDsrA	redDsrB	redDsrN
 redDsr	redDsrA	redDsrB	redDsrC
 redDsr	redDsrA	redDsrB
 redDsrMK	redDsrM	redDsrK	redDsrC	redDsrN

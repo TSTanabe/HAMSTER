@@ -1,7 +1,7 @@
 #!/usr/bin/python
-
 import sqlite3
 import os
+from multiprocessing import Pool, Manager, Value, Lock
 
 from . import Csb_cluster
 
@@ -15,9 +15,9 @@ def csb_proteins_datasets(options):
     options.csb_dictionary = csb_dictionary # save the patterns for later use
     
     
-    
+    print("Fetch protein identifiers")
     #Fetch for each csb id all the domains in the csb that are query domains
-    dictionary = fetch_proteinIDs_dict(options.database_directory,csb_dictionary,options.min_seqs)
+    dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
     
@@ -101,7 +101,78 @@ def parse_csb_file_to_dict(file_path):
     return data_dict    
 
 
-def fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
+
+
+def process_keyword_domains(args):
+    """
+    Helper function to process a single keyword and its domains.
+    """
+    database, keyword, domains, min_seqs = args
+    result = {}
+
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+
+        # Prepare a query for exact matches
+        query_conditions = ' OR '.join(['Domains.domain = ?'] * len(domains))
+        query = f"""
+            SELECT DISTINCT Proteins.proteinID, Domains.domain
+            FROM Proteins
+            INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
+            INNER JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
+            WHERE ({query_conditions}) AND Keywords.keyword = ?;
+        """
+
+        # Execute the query
+        cur.execute(query, (*domains, keyword))
+        rows = cur.fetchall()
+
+        # Group results by (keyword, domain)
+        for proteinID, domain in rows:
+            key = (keyword, domain)
+            if key not in result:
+                result[key] = set()
+            result[key].add(proteinID)
+
+    # Apply filtering based on min_seqs
+    return result
+
+
+def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, num_workers=4):
+    """
+    Optimized version of fetch_proteinIDs_dict using multiprocessing to
+    parallelize the processing of csb_dictionary items, with ordered task printing.
+    """
+    # Prepare the arguments for the worker function
+    tasks = [
+        (database, keyword, domains, min_seqs)
+        for keyword, domains in csb_dictionary.items()
+        if keyword != 'default'
+    ]
+
+    total_tasks = len(tasks)
+
+    # Use multiprocessing to process the items in parallel
+    with Pool(processes=num_workers) as pool:
+        results = []
+        for i, result in enumerate(pool.imap(process_keyword_domains, tasks), start=1):
+            # Print task start in order
+            print(f"{i}/{total_tasks}...", end="\r")
+            results.append(result)
+
+    # Combine results from all workers
+    combined_dict = {}
+    for result in results:
+        for key, value in result.items():
+            if key not in combined_dict:
+                combined_dict[key] = set()
+            combined_dict[key].update(value)
+
+    print("\nTraining data complete.")
+    return combined_dict
+
+    
+def deprecated_fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
     """
     Fetches the results from the SQLite database based on domain and keyword, stores it in a dictionary.
 
