@@ -243,7 +243,7 @@ def generate_csb_sequence_fasta(options):
     
     print("Group training data sequences")
     Csb_proteins.csb_proteins_datasets(options) # groups training data
-    if options.csb_distinct_grouping and os.path.isfile(options.glob_table):
+    if options.csb_distinct_grouping and not options.glob_table is None and os.path.isfile(options.glob_table):
         Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
     else:
         options.TP_monophyla = {}
@@ -251,13 +251,12 @@ def generate_csb_sequence_fasta(options):
     	    
     print("Create fasta files for training data")
     Csb_proteins.training_data_fasta(options) # generates the fasta files
-    Csb_phylogeny.csb_phylogeny_target_sets(options) #Target file for each HMM excluding seqs already below threshold
-    Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
 
     options.TP_merged = None
     options.TP_singles = None
     options.TP_monophyla = None
     options.superfamily = None
+
         
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)
@@ -267,6 +266,10 @@ def cross_validation(options):
 
     Validation.create_hmms_from_msas(options.fasta_output_directory, options.Hidden_markov_model_directory, "fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
+    
+    Csb_proteins.fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory) #Target file for each HMM excluding seqs already below threshold
+    Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
+
     
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
     options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)

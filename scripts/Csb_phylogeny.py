@@ -44,11 +44,7 @@ def csb_phylogeny_datasets(options):
     options.superfamily = superfamily_monophylums
 
 def csb_phylogeny_target_sets(options):
-    training_datasets = {**options.TP_merged, **options.TP_singles}
-    domain_family_dict = get_domain_key_list_pairs(training_datasets)
-    query_length_dict = get_sequence_legth(options.self_query)
-    if not options.glob_table is None and os.path.isfile(options.glob_table):
-        target_files = fetch_protein_superfamily_to_fasta(options, options.glob_table, query_length_dict, options.cross_validation_directory,0,1) #for the phylogeny and as TN set
+    target_files = fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory)
     return target_files #dictionary with domain => target file with TP and TN
         
 def get_domain_key_list_pairs(input_dict, output_dict=None):
@@ -485,7 +481,6 @@ def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict
 
     return output_files
 
-                        
 def get_domain_superfamily_proteinIDs(blast_table, domain, query_length, tolerance=0.5):
     """
     Filters protein IDs based on length constraints relative to the query length.

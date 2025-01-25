@@ -172,59 +172,6 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
     return combined_dict
 
     
-def deprecated_fetch_proteinIDs_dict(database, csb_dictionary, min_seqs):
-    """
-    Fetches the results from the SQLite database based on domain and keyword, stores it in a dictionary.
-
-    Args:
-        database: Name of the SQLite database.
-        csb_dictionary: Dictionary where the key is 'csb' and the value is a set of domains.
-        min_seqs: Minimum number of sequences required to include in the result.
-
-    Returns:
-        A dictionary where the key is a tuple (keyword, domain) and the value is a set of protein IDs.
-    """
-    csb_proteinIDs_dict = {}  # (keyword, domain) => set of proteinIDs
-    
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-
-        # Iterate over the keywords and domains in the dictionary
-        for keyword, domains in csb_dictionary.items():
-            if keyword == 'default':
-                continue
-            
-            # Prepare a query using `LIKE` for pattern matching
-            query_conditions = ' OR '.join(['Domains.domain LIKE ?'] * len(domains))
-            query = f"""
-                SELECT DISTINCT Proteins.proteinID, Domains.domain
-                FROM Proteins
-                INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
-                INNER JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-                WHERE ({query_conditions}) AND Keywords.keyword = ?;
-            """
-
-            # Add wildcard patterns for LIKE (e.g., '%Hydrolase%')
-            like_domains = [f"%{domain}%" for domain in domains]
-
-            # Execute the query with the domains (with wildcards) and keyword as parameters
-            cur.execute(query, (*like_domains, keyword))
-            
-            rows = cur.fetchall()
-            #print(f"{query} {like_domains} {keyword}" + str(len(rows)))
-            # Group results by (keyword, domain) and apply filtering based on min_seqs
-            for proteinID, domain in rows:
-                key = (keyword, domain)
-                if key not in csb_proteinIDs_dict:
-                    csb_proteinIDs_dict[key] = set()
-                csb_proteinIDs_dict[key].add(proteinID)
-
-            # Apply filtering based on min_seqs
-            for key in list(csb_proteinIDs_dict.keys()):
-                if len(csb_proteinIDs_dict[key]) <= min_seqs:
-                    del csb_proteinIDs_dict[key]
-
-    return csb_proteinIDs_dict  # dict[(keyword, domain)] => set(proteinIDs)
 
 
 ######################################################################################################
@@ -484,7 +431,59 @@ def fetch_protein_to_fasta(options, grouped, prefix=""):
 
     
     
+def fetch_domains_superfamily_to_fasta(options, directory):
+    """
+    Fetches all proteins associated with each domain from the database and writes them to FASTA files.
 
+    Parameters:
+        options (object): Contains the database connection and other options.
+        directory (str): Target directory for the FASTA files.
+
+    Returns:
+        dict: Mapping of domain names to the generated FASTA file paths.
+    """
+    output_files = {}
+
+    with sqlite3.connect(options.database_directory) as con:
+        cur = con.cursor()
+
+        # Retrieve all distinct domains from the database
+        query = "SELECT DISTINCT domain FROM Domains"
+        cur.execute(query)
+        domains = [row[0] for row in cur.fetchall()]
+
+        for domain in domains:
+            # Create the output filename for the domain
+            name = domain.split('_')[-1]
+            filename = f"superfamily_{name}.faa"
+            output_fasta_path = os.path.join(directory, filename)
+
+            # Skip if the file already exists
+            if os.path.isfile(output_fasta_path):
+                print(f"Skipping. File {output_fasta_path} already exists.")
+                continue
+            else:
+                print(f"{output_fasta_path} did not exist")
+
+            # Fetch all proteins associated with this domain
+            query = '''
+                SELECT DISTINCT P.proteinID, P.sequence
+                FROM Proteins P
+                INNER JOIN Domains D ON P.proteinID = D.proteinID
+                WHERE D.domain = ?
+            '''
+            cur.execute(query, (domain,))
+            proteins = cur.fetchall()
+
+            # Write all sequences to the FASTA file
+            with open(output_fasta_path, 'w') as fasta_file:
+                for proteinID, sequence in proteins:
+                    fasta_file.write(f'>{proteinID}\n{sequence}\n')
+
+            # Add the file to the output dictionary
+            output_files[name] = output_fasta_path
+
+    return output_files
 
 
 

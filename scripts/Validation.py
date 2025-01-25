@@ -3,7 +3,7 @@
 import os
 import subprocess
 import sqlite3
-
+import time
 from multiprocessing import Pool, Manager
 
 
@@ -167,6 +167,7 @@ def initial_process_folds(args_tuple):
     output = f"{hv_directory}/{report_name}.report"
     
     # Search with the HMMs
+    
     HMMsearch(hmm, sequence_faa_file, output, 1)
     
     # Locate the single report
