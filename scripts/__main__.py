@@ -270,7 +270,7 @@ def cross_validation(options):
     Csb_proteins.fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory) #Target file for each HMM excluding seqs already below threshold
     Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
 
-    
+    print("Initialize target sequence sets")
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
     options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)
     print(f"From {options.cross_validation_directory} the following target files were selected {options.targeted_sequence_faa_file_dict}")

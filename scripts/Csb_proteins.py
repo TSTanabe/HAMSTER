@@ -501,6 +501,8 @@ def fetch_all_proteins(database, filepath):
         
         Output is a files with dir/sequence.faa
     """
+    if os.path.isfile(filepath):
+        return filepath
     with sqlite3.connect(database) as con:
         cur = con.cursor()
         

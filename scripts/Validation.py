@@ -17,7 +17,8 @@ def parallel_cross_validation(options):
     print("Initilizing cross-validation")
     
     #Prepare shared data
-    all_seq_number = fetch_db_seq_count(options.database_directory)
+    #all_seq_number = fetch_db_seq_count(options.database_directory)
+    all_seq_number = int(os.popen(f"grep -o '>' {options.sequence_faa_file} | wc -l").read().strip())
     alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
     alignment_files = list(alignment_dict.keys())
     files_number = len(alignment_files)
@@ -171,18 +172,20 @@ def initial_process_folds(args_tuple):
     HMMsearch(hmm, sequence_faa_file, output, 1)
     
     # Locate the single report
-    hv_report = next((os.path.join(hv_directory, filename) 
-                      for filename in os.listdir(hv_directory) 
-                      if filename.endswith(".report")), None)
-
+    #hv_report = next((os.path.join(hv_directory, filename) 
+    #                  for filename in os.listdir(hv_directory) 
+    #                  if filename.endswith(".report")), None)
+    hv_report = output
     # Check if the report exists
     if hv_report:
         # Make a report for the cutoffs
         model_values = []
         model_hit_distribution = []
         
-        # Get the TP seq IDs and save in a set   
+        # Get the TP seq IDs and save in a set
+        print(f"Alignment file {alignment_file}")
         TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
+        print(f"TPseqs {TP_seqIDs}")
         TN = all_sequence_number - len(TP_seqIDs)
         
         # Calculate strict values for cutoffs
@@ -477,7 +480,10 @@ def count_sequences_in_fasta(options):
     return num_sequences
     
 def HMMsearch(library, input_file, output_file, cores=1):
-
+    
+    if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
+        return
+        
     # Construct the hmmsearch command
     hmmsearch_cmd = f"hmmsearch --incdomT 10 --noali --domtblout {output_file} --cpu {cores} {library} {input_file}"
 
@@ -518,7 +524,6 @@ def cutoffs(true_positives,true_negatives,report_filepath):
     MCC = 0
     matrix = []
     
-
     with open(report_filepath, 'r') as file:
         for line in file:
             # Skip lines that start with '#'
@@ -559,6 +564,7 @@ def cutoffs(true_positives,true_negatives,report_filepath):
             #print(new_MCC, " > ", MCC)
             
             if new_MCC > MCC:
+                print(f"New MCC: {MCC}<{new_MCC}")
                 MCC = new_MCC
                 optimized_cutoff = bitscore
                 matrix = [TP,FP,FN,TN]
@@ -818,58 +824,58 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids):
               Each list entry contains the domains and the proteinID in the format 
               '_domain_proteinID'.
     """
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-
-        # Fetch all proteins and their domains in the same clusters as the input protein_ids
+    def execute_chunked_query(chunk_ids):
         query = f"""
         SELECT 
             p.proteinID, p.clusterID, p.genomeID, p.start, d.domain
         FROM Proteins p
         LEFT JOIN Domains d ON p.proteinID = d.proteinID
-        WHERE p.proteinID IN ({','.join('?' * len(protein_ids))})
+        WHERE p.proteinID IN ({','.join('?' * len(chunk_ids))})
            OR p.clusterID IN (
-                SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({','.join('?' * len(protein_ids))})
+                SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({','.join('?' * len(chunk_ids))})
            )
         ORDER BY p.clusterID, p.start
         """
-        
-        # Execute the query with the protein_ids list
-        cur.execute(query, protein_ids + protein_ids)  # Pass protein_ids twice for both conditions
-        protein_results = cur.fetchall()
-    
+        cur.execute(query, chunk_ids * 2)  # Pass the chunk IDs twice for both conditions
+        return cur.fetchall()
+
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+
+        # Define the chunk size to avoid exceeding SQLite's variable limit
+        chunk_size = 900  # Adjust this size to stay within SQLite's variable limit
+
+        # Execute the query in chunks and collect results
+        protein_results = []
+        for i in range(0, len(protein_ids), chunk_size):
+            chunk_ids = protein_ids[i:i + chunk_size]
+            protein_results.extend(execute_chunked_query(chunk_ids))
+
     # Organize results by cluster and by proteinID
     cluster_dict = {}
-    protein_cluster_map = {}  # Map each protein to its cluster
+    protein_cluster_map = {}
 
     for protein_id, cluster_id, genome_id, start, domain in protein_results:
         if cluster_id is not None:  # Only process if a cluster exists
             if cluster_id not in cluster_dict:
                 cluster_dict[cluster_id] = []
-            # If domain is None, set it to 'no_domain'
             domain_str = domain if domain else "no_domain"
             cluster_dict[cluster_id].append((protein_id, start, f"{domain_str}_{protein_id}"))
             protein_cluster_map[protein_id] = cluster_id
         else:
-            # Handle proteins without clusters separately in the result later
             protein_cluster_map[protein_id] = None
 
     # Prepare the final dictionary with proteinID as the key and neighboring genes sorted by start
     neighbors_dict = {}
     for protein_id in protein_ids:
         cluster_id = protein_cluster_map.get(protein_id)
-        
-        # Handle proteins with a cluster
+
         if cluster_id:
-            # Find all proteins in the same cluster
             cluster_proteins = cluster_dict[cluster_id]
-            # Sort proteins by start position
             sorted_proteins = sorted(cluster_proteins, key=lambda x: x[1])
-            # Create the neighbor list including the current protein's own entry
-            neighbors = [protein for pid, _, protein in sorted_proteins]
+            neighbors = [protein for _, _, protein in sorted_proteins]
             neighbors_dict[protein_id] = neighbors
         else:
-            # Handle proteins without a cluster (just return the protein itself)
             neighbors_dict[protein_id] = [f"singleton_{protein_id}"]
 
     return neighbors_dict
