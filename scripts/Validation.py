@@ -18,7 +18,7 @@ def parallel_cross_validation(options):
     
     #Prepare shared data
     #all_seq_number = fetch_db_seq_count(options.database_directory)
-    all_seq_number = int(os.popen(f"grep -o '>' {options.sequence_faa_file} | wc -l").read().strip())
+    all_seq_number = 14020824 #int(os.popen(f"grep -o '>' {options.sequence_faa_file} | wc -l").read().strip())
     alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
     alignment_files = list(alignment_dict.keys())
     files_number = len(alignment_files)
