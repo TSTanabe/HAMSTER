@@ -2,7 +2,11 @@
 
 
 import os
+import sys
 import heapq
+import sqlite3
+import pprint
+from . import Database
 from . import Csb_Mp_Algorithm
 from scipy.spatial import distance
 from sklearn.cluster import DBSCAN
@@ -31,7 +35,22 @@ def csb_prediction(options):
     reverse_pairs = find_reverse_pairs(computed_Instances_dict)
     computed_Instances_dict = merge_sets_for_pairs(computed_Instances_dict, reverse_pairs)
     
-    options.computed_Instances_dict = computed_Instances_dict
+    # Remove repetitive gene clusters
+    csb_remove_repetitives(computed_Instances_dict,options.min_csb_size)
+    
+    # Reduce redundancy in the keys
+    options.computed_Instances_dict = csb_collapse_to_longest_pattern(computed_Instances_dict)
+    
+    #options.computed_Instances_dict = computed_Instances_dict #replaced by the csb_collapse
+
+
+
+
+def csb_bitscore(options):
+    
+    pprint.pprint(options.computed_Instances_dict, sort_dicts=False, width=100)
+    sys.exit()
+    return csb_gene_cluster_dict
     
 def csb_jaccard(options):
     #convert the keys in computed_instances_dict into a list
@@ -359,6 +378,43 @@ def replicates(csb_gene_cluster_dict, redundancy_hash, filepath_redundant):
                 new_list.extend(redundant_dict[cluster_id])
         csb_gene_cluster_dict[key] = new_list
     return csb_gene_cluster_dict  # Return the updated dictionary
+
+
+######################################################################
+# Tertiary subroutines for filtering the computed_Instances_dict
+
+def csb_remove_repetitives(csb_dict, min_csb_size):
+    """
+    Removes entries from csb_dict where the number of unique genes in the key 
+    (tuple) is smaller than min_csb_size. This modifies the dictionary in place.
+
+    :param csb_dict: Dictionary with tuple keys representing CSB patterns.
+    :param min_csb_size: Minimum number of unique genes required in the key.
+    """
+    keys_to_remove = [k for k in csb_dict if len(set(k)) < min_csb_size]
+    for k in keys_to_remove:
+        del csb_dict[k]
+
+def csb_collapse_to_longest_pattern(input_dict):
+    # Step 1: Convert set values to sorted tuples (to make them hashable)
+    processed_dict = {key: tuple(sorted(value)) for key, value in input_dict.items()}
+
+    # Step 2: Group keys by their values
+    value_to_keys = {}
+    for key, value in processed_dict.items():
+        if value in value_to_keys:
+            value_to_keys[value].append(key)
+        else:
+            value_to_keys[value] = [key]
+
+    # Step 3: Select the longest key for each value
+    filtered_dict = {}
+    for value, keys in value_to_keys.items():
+        # Find the longest key by tuple length
+        longest_key = max(keys, key=len)
+        filtered_dict[longest_key] = set(value)  # Convert back to set for output consistency
+
+    return filtered_dict
 
 ######################################################################
 ################ For proteinID clustering ############################

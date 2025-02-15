@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import pprint
 #from datetime import datetime
 
 from . import Project
@@ -229,7 +230,7 @@ def cluster_sequences(options):
 def csb_finder(options):
 
     Csb_cluster.csb_prediction(options)
-    
+    Csb_cluster.csb_bitscore(options)
     csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
     Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) #remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
@@ -243,6 +244,8 @@ def generate_csb_sequence_fasta(options):
     
     print("Group training data sequences")
     Csb_proteins.csb_proteins_datasets(options) # groups training data
+    
+    
     if options.csb_distinct_grouping and not options.glob_table is None and os.path.isfile(options.glob_table):
         Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
     else:

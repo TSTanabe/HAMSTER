@@ -29,7 +29,7 @@ def csb_proteins_datasets(options):
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
-    merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon,"m")
+    merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon,"m") # reduce redundancy by merging sets that have identical proteinIDs (like the extension of an existing csb)
     #print("\nMerged\n\n")
     #print(merged)
     #print("\nSingles\n\n")
@@ -38,6 +38,10 @@ def csb_proteins_datasets(options):
     options.TP_singles = singles
     print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_csb_groups_1")
     print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_1")
+
+
+
+
 
 
 def training_data_fasta(options):
@@ -566,3 +570,30 @@ def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
         if key[1] not in exclude_list  # Exclude keys where domain is in the exclude list
     }
     return filtered_dict
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+# now i need a routine that calculates me the statistics of a training set and merges with a training set with a similar statistic but possibly different csb (like for the SQ)
+
+# innerhalb einer gruppe erstmal die scores in statistics umwandeln
+
+# pro domain typ
+
+# suche die keys in den dicts die diesen typ haben
+
+# den frozenkey iterieren, die scores aus der db holen und sammeln. dann mittelwet mediam quartile berechnen
+
+# speichern der werte mit dem domain typ. Das sagt mir welche Varianz erlaubt ist innerhalb dieses genclusters
+
+# rekrutiere die hits außerhalb des genclusters, die aber innerhalb dieser grenzen liegen in ein test datenset für einen phylogenetischen baum.
+
+    
