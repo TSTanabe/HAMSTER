@@ -17,6 +17,7 @@ from . import ParseSequenceLinclustReports
 from . import Csb_cluster
 from . import Csb_proteins
 from . import Csb_phylogeny
+from . import Csb_statistic
 
 from . import Alignment
 
@@ -230,8 +231,8 @@ def cluster_sequences(options):
 def csb_finder(options):
 
     Csb_cluster.csb_prediction(options)
-    Csb_cluster.csb_bitscore(options)
     csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
+
     Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) #remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
     Database.update_keywords(options.database_directory,csb_gene_cluster_dict) #assigns the names of the keywords to the clusters
@@ -242,23 +243,33 @@ def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     Database.index_database(options.database_directory)
     
-    print("Group training data sequences")
-    Csb_proteins.csb_proteins_datasets(options) # groups training data
+    score_limit_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
     
-    
-    if options.csb_distinct_grouping and not options.glob_table is None and os.path.isfile(options.glob_table):
-        Csb_phylogeny.csb_phylogeny_datasets(options) # phylogenetic grouped training data
-    else:
-        options.TP_monophyla = {}
-        options.superfamily = {}
-    	    
-    print("Create fasta files for training data")
-    Csb_proteins.training_data_fasta(options) # generates the fasta files
+    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options) # groups training data
 
-    options.TP_merged = None
-    options.TP_singles = None
-    options.TP_monophyla = None
-    options.superfamily = None
+    # Sammle Proteine aus den singulaeren, aber gruppierten Keywords
+    singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
+    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singular, options.fasta_output_directory)
+    
+    
+    # Sammle Proteine aus gruppierten Keywords
+    grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grpd")
+    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, grouped, options.fasta_output_directory)
+	   
+    # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
+    #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
+    
+    decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
+    decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
+    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory)
+
+    # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
+    decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory)
+
+
+
+
 
         
 def model_alignment(options):

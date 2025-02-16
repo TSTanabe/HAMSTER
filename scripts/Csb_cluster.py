@@ -46,11 +46,6 @@ def csb_prediction(options):
 
 
 
-def csb_bitscore(options):
-    
-    pprint.pprint(options.computed_Instances_dict, sort_dicts=False, width=100)
-    sys.exit()
-    return csb_gene_cluster_dict
     
 def csb_jaccard(options):
     #convert the keys in computed_instances_dict into a list
@@ -65,10 +60,11 @@ def csb_jaccard(options):
         return
     #Sorts the csb keywords to the geneclusters based on the present csb
     csb_gene_cluster_dict, grouped_csb_tuples = csb_index_to_gene_clusterID(cluster_dict,computed_Instances_key_list,options.computed_Instances_dict,options.csb_name_prefix,options.csb_name_suffix)
-    #adds the replicates again for saving
-    replicates(csb_gene_cluster_dict,options.redundancy_hash,options.redundant)
-    
     write_grouped_csb(options.csb_output_file,grouped_csb_tuples)
+
+    #adds the replicates again for saving
+    csb_gene_cluster_dict = replicates(csb_gene_cluster_dict,options.redundancy_hash,options.redundant)
+    
 
     return csb_gene_cluster_dict
     
@@ -364,6 +360,7 @@ def csb_index_to_gene_clusterID(cluster_dict,computed_Instances_key_list,compute
 
 def replicates(csb_gene_cluster_dict, redundancy_hash, filepath_redundant):
     redundant_dict = dict()
+    
     # Read cluster IDs from the redundant file
     with open(filepath_redundant, 'r') as file:
         for line in file:
@@ -371,12 +368,12 @@ def replicates(csb_gene_cluster_dict, redundancy_hash, filepath_redundant):
             first_clusterID = clusterIDs[0]
             redundant_dict[first_clusterID] = clusterIDs[1:]
     # Iterate through the csb_gene_cluster_dict and merge with redundant_dict
-    for key, lst in csb_gene_cluster_dict.items():
-        new_list = lst.copy()  # Create a copy to avoid modifying the original list
-        for cluster_id in lst:
-            if cluster_id in redundant_dict.keys():
-                new_list.extend(redundant_dict[cluster_id])
-        csb_gene_cluster_dict[key] = new_list
+    for key, cluster_ids in csb_gene_cluster_dict.items():
+        expanded_clusters = set(cluster_ids)  # Create a copy to avoid modifying the original list
+        for cluster_id in cluster_ids:
+            if cluster_id in redundant_dict:
+                expanded_clusters.update(redundant_dict[cluster_id]) 
+        csb_gene_cluster_dict[key] = expanded_clusters #remove doublicates
     return csb_gene_cluster_dict  # Return the updated dictionary
 
 

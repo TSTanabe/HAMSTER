@@ -1,31 +1,75 @@
 #!/usr/bin/python
 import sqlite3
 import os
+import multiprocessing
 from multiprocessing import Pool, Manager, Value, Lock
 
 from . import Csb_cluster
+import pprint
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
 def csb_proteins_datasets(options):
     
+    #Get the domain types as set per csb and predefined pattern
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     options.csb_dictionary = csb_dictionary # save the patterns for later use
     
-    
     print("Fetch protein identifiers")
     #Fetch for each csb id all the domains in the csb that are query domains
-    dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
+    
+    dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
+
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
     
     #Remove domains that are excluded by user options
     dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
+    
     dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
 
+    return dictionary
+
+
+
+def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
+    """
+    Kombiniert Protein-IDs basierend auf den gruppierten und ausgeschlossenen Keywords.
     
+    Args:
+        keyword_lists (dict): Dictionary mit gruppierten Keywords als Listen von Listen.
+        csb_proteins_dict (dict): Das Rückgabedictionary aus csb_proteins_datasets, 
+                                  das (keyword, domain) als Schlüssel und Protein-IDs als Werte enthält.
+        category (str): Kategorie der Keywords (z. B. "grouped" oder "excluded").
+    
+    Returns:
+        dict: Ein Dictionary mit kombinierten Protein-IDs pro Schlüsselgruppe.
+    """
+    combined_protein_sets = {}
+    
+    for domain, keyword_groups in keyword_lists.items():
+        for i, keyword_group in enumerate(keyword_groups):
+            protein_set = set()
+            for keyword in keyword_group:
+                key = (keyword, domain)
+                if key in csb_proteins_dict:
+                    protein_set.update(csb_proteins_dict[key])
+            if protein_set:  # Nur hinzufügen, wenn nicht leer
+                combined_protein_sets[f"{category}{i}_{domain}"] = protein_set
+    
+    return combined_protein_sets
+
+
+
+
+
+
+
+
+def csb_granular_datasets(options, dictionary):
+    #Currently not in use. Granular datasets have usually issues with false positives
     #Grouping routines to reduce redundancy in training datasets
     grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
     
@@ -386,7 +430,170 @@ def print_grouping_report(description, group, output):
 #################### Protein to fasta operations ##############################
 ###############################################################################
 
+
+def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, cores=4, chunk_size=900):
+    """
+    Forks off the fetching of sequences for each domain using multiprocessing.
+
+    Args:
+        database (str): Path to the SQLite database.
+        dataset_dict (dict): { domain: set(proteinIDs) }
+        output_directory (str): Directory where FASTA files will be stored.
+        chunk_size (int): Number of protein IDs to process per query batch.
+
+    Returns:
+        None
+    """
+    os.makedirs(output_directory, exist_ok=True)  # Ensure the output directory exists
+
+    # Create a list of arguments for multiprocessing
+    tasks = [
+        (database, domain, protein_ids, output_directory, chunk_size)
+        for domain, protein_ids in dataset_dict.items()
+        if protein_ids and not os.path.exists(os.path.join(output_directory, f"{domain}.faa"))
+    ]
+
+    # Use multiprocessing to run fetch_seq_to_fasta in parallel
+    with multiprocessing.Pool(processes=cores) as pool:
+        pool.starmap(fetch_seq_to_fasta, tasks)
+        
+        
+def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_size=900):
+    """
+    Fetch protein sequences from the database for a specific domain and save them into a FASTA file.
+    """
+    fasta_file_path = os.path.join(output_directory, f"{domain}.faa")
+
+    if not protein_ids or os.path.exists(fasta_file_path):
+        return  # Skip empty domains or if the file already exists
+
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+
+        with open(fasta_file_path, "w") as fasta_file:
+            protein_id_list = list(protein_ids)
+            for i in range(0, len(protein_id_list), chunk_size):
+                chunk = protein_id_list[i:i + chunk_size]
+
+                if not chunk:
+                    continue  # Ensure chunk is not empty
+                print(chunk)
+                # Convert all protein IDs to strings before passing to SQL
+                query = f"""
+                    SELECT proteinID, sequence FROM Proteins
+                    WHERE proteinID IN ({','.join(['?'] * len(chunk))});
+                """
+                
+                try:
+                    cur.execute(query, tuple(str(protein_id) for protein_id in chunk))
+                    rows = cur.fetchall()
+
+                    # Write sequences to the domain-specific FASTA file
+                    for protein_id, sequence in rows:
+                        fasta_file.write(f">{protein_id}\n{sequence}\n")
+                except sqlite3.InterfaceError as e:
+                    print(f"SQL Error in domain {domain}: {e}")  # Debugging message
+
+    print(f"FASTA file saved: {fasta_file_path}")
+
+
+
+
+def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit):
+    """
+    Fetch all protein IDs for a single domain that fall within the specified score limits.
+
+    Args:
+        database (str): Path to the SQLite database.
+        domain (str): The domain name.
+        lower_limit (float): Lower score limit.
+        upper_limit (float): Upper score limit.
+
+    Returns:
+        tuple: (domain, set(proteinIDs))
+    """
+    protein_ids = set()
+
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
+
+        # Query to fetch protein IDs within score limits for this domain
+        query = """
+            SELECT DISTINCT proteinID
+            FROM Domains
+            WHERE domain = ?
+            AND score BETWEEN ? AND ?;
+        """
+        cur.execute(query, (domain, lower_limit, upper_limit))
+        rows = cur.fetchall()
+
+        # Store results in a set
+        protein_ids = {row[0] for row in rows}
+
+    return domain, protein_ids
+
+
+def fetch_protein_ids_parallel(database, score_limit_dict, cores):
+    """
+    Fetch all protein IDs per domain in parallel using multiprocessing.
+
+    Args:
+        database (str): Path to the SQLite database.
+        score_limit_dict (dict): { domain: {'lower_limit': X, 'upper_limit': Y} }
+
+    Returns:
+        dict: { domain: set(proteinIDs) }
+    """
+    tasks = [
+        (database, domain, limits["lower_limit"], limits["upper_limit"])
+        for domain, limits in score_limit_dict.items()
+    ]
+
+    # Use multiprocessing to run fetch_protein_ids_for_domain in parallel
+    with multiprocessing.Pool(processes=cores) as pool:
+        results = pool.starmap(fetch_protein_ids_for_domain, tasks)
+
+    # Combine results into a dictionary
+    domain_protein_ids = {domain: protein_ids for domain, protein_ids in results}
+
+    return domain_protein_ids
+
+
+def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
+    """
+    Merge protein IDs from the grouped dataset into the protein_ids_by_domain dictionary (in place).
+    
+    Args:
+        protein_ids_by_domain (dict): { domain: set(proteinIDs) }
+        grouped_dict (dict): { "grpd0_domain": set(proteinIDs) } (Keys are prefixed strings)
+
+    Returns:
+        None (Modifies protein_ids_by_domain in place)
+    """
+    for grouped_key, protein_ids in grouped_dict.items():
+        # Extract domain by removing the prefix "grpd0_"
+        domain = grouped_key.replace("grpd0_", "", 1)
+
+        # If domain already exists, update it with new protein IDs
+        if domain in protein_ids_by_domain:
+            protein_ids_by_domain[domain].update(protein_ids)
+        else:
+            # If the domain doesn't exist, create a new entry with the protein IDs
+            protein_ids_by_domain[domain] = set(protein_ids)
+    return protein_ids_by_domain
+
+
+
+
+
+
+
+
+
+
+
 def fetch_protein_to_fasta(options, grouped, prefix=""):
+    #Currently not in use
     """
     Fetches protein sequences from the Proteins table for protein IDs in the grouped sets,
     and writes the sequences directly to a FASTA file.
