@@ -9,7 +9,7 @@ import pprint
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
-def csb_proteins_datasets(options):
+def csb_proteins_datasets(options, sglr_dict, grpd_dict):
     
     #Get the domain types as set per csb and predefined pattern
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
@@ -17,10 +17,14 @@ def csb_proteins_datasets(options):
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     options.csb_dictionary = csb_dictionary # save the patterns for later use
     
-    print("Fetch protein identifiers")
+    #print("Fetch protein identifiers")
     #Fetch for each csb id all the domains in the csb that are query domains
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     
+    if not options.sglr: #if not sglr is true, default sglr is false
+        csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
+        csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
+
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
@@ -62,7 +66,47 @@ def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
     return combined_protein_sets
 
 
+def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
+    """
+    Fetches proteinIDs from the SQLite database where the domain matches and genomeID is 'QUERY',
+    then adds them to the corresponding protein_set.
 
+    Args:
+        combined_protein_sets (dict): Dictionary containing protein sets per domain.
+        database_path (str): Path to the SQLite database.
+
+    Returns:
+        dict: Updated combined_protein_sets with additional proteinIDs from the database.
+    """
+    # Connect to the database
+    with sqlite3.connect(database_path) as conn:
+        cursor = conn.cursor()
+
+        for key in combined_protein_sets:
+            # Extract domain from the key (assuming format 'categoryX_domain')
+            parts = key.split("_")
+            if len(parts) < 2:
+                continue  # Skip malformed keys
+
+            domain = "_".join(parts[1:])  # Reconstruct domain in case it contains '_'
+
+            # Fetch proteinIDs where domain matches and genomeID is 'QUERY'
+            cursor.execute(
+                """
+                SELECT Proteins.proteinID 
+                FROM Proteins
+                INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
+                WHERE Domains.domain = ? AND Proteins.genomeID = 'QUERY'
+                """,
+                (domain,)
+            )
+
+
+            # Add fetched proteinIDs to the protein set
+            protein_ids = {row[0] for row in cursor.fetchall()}
+            combined_protein_sets[key].update(protein_ids)
+
+    return combined_protein_sets
 
 
 
@@ -431,7 +475,7 @@ def print_grouping_report(description, group, output):
 ###############################################################################
 
 
-def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, cores=4, chunk_size=900):
+def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=900):
     """
     Forks off the fetching of sequences for each domain using multiprocessing.
 
@@ -450,7 +494,7 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, cores
     tasks = [
         (database, domain, protein_ids, output_directory, chunk_size)
         for domain, protein_ids in dataset_dict.items()
-        if protein_ids and not os.path.exists(os.path.join(output_directory, f"{domain}.faa"))
+        if len(protein_ids) >= min_seq and len(protein_ids) <= max_seq and not os.path.exists(os.path.join(output_directory, f"{domain}.faa"))
     ]
 
     # Use multiprocessing to run fetch_seq_to_fasta in parallel
@@ -477,7 +521,6 @@ def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_si
 
                 if not chunk:
                     continue  # Ensure chunk is not empty
-                print(chunk)
                 # Convert all protein IDs to strings before passing to SQL
                 query = f"""
                     SELECT proteinID, sequence FROM Proteins
@@ -788,19 +831,5 @@ def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
     
     
     
-    
-# now i need a routine that calculates me the statistics of a training set and merges with a training set with a similar statistic but possibly different csb (like for the SQ)
-
-# innerhalb einer gruppe erstmal die scores in statistics umwandeln
-
-# pro domain typ
-
-# suche die keys in den dicts die diesen typ haben
-
-# den frozenkey iterieren, die scores aus der db holen und sammeln. dann mittelwet mediam quartile berechnen
-
-# speichern der werte mit dem domain typ. Das sagt mir welche Varianz erlaubt ist innerhalb dieses genclusters
-
-# rekrutiere die hits außerhalb des genclusters, die aber innerhalb dieser grenzen liegen in ein test datenset für einen phylogenetischen baum.
 
     

@@ -122,21 +122,22 @@ def parse_arguments(arguments):
     
     csb = parser.add_argument_group("Optional collinear synthenic block parameters")
     csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb')
-    csb.add_argument('-occurence', dest='occurence', type=int,default = 2, metavar='<int>', help='Min. number of csb occurs at least times')
+    csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least times')
     csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold')
     
-    csb.add_argument('-no_csb_distinct', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
-    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered')
-    
+    csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
+    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered') #Wir das noch genutzt?
+    csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
 
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 15000, metavar='<int>', help='Max. number of sequences that are aligned')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned')
     alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
     alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
     alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
+    
     
     if len(arguments) == 0: # Print help if no arguments were provided
         parser.print_help()
@@ -243,29 +244,36 @@ def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     Database.index_database(options.database_directory)
     
-    score_limit_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
-    
-    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options) # groups training data
+    score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
+    print("Fetching sequences for training datasets")
+    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict, grouped_keywords_dict) # groups training data
 
     # Sammle Proteine aus den singulaeren, aber gruppierten Keywords
-    singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
-    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singular, options.fasta_output_directory)
+    if options.sglr:
+        print("Processing dissimilar homologs with specific genomic context")
+        singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
+        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singular, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
+        singular = {}
     
     
     # Sammle Proteine aus gruppierten Keywords
+    print("Processing highly similar homologs with specific genomic context")
     grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grpd")
-    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, grouped, options.fasta_output_directory)
-	   
+    grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
+    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, grouped, options.fasta_output_directory, 10, options.max_seqs, options.cores)
+	
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
-    
-    decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
-    decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory)
+    if options.csb_distinct_grouping:
+        print("Including homologs without genomic context based on protein sequence phylogeny.")
+        decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
+        decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
+        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
 
-    # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-    decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
-    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory)
+        # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
+        print("Calculating phylogeny")
+        decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
 
 
 
@@ -277,7 +285,7 @@ def model_alignment(options):
 
 
 def cross_validation(options):
-
+    print("Initialize training data subsamples")
     Validation.create_hmms_from_msas(options.fasta_output_directory, options.Hidden_markov_model_directory, "fasta_aln","hmm",options.cores) #create the full hmms for later use
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
@@ -325,21 +333,21 @@ def report_cv_performance(options):
   
 def main(args=None):
 #1
-    myUtil.print_header("\nPreparing space for the results")
+    myUtil.print_header("\n 1. Preparing space for the results")
     Project.prepare_directory_structure(__location__)
     options = parse_arguments(args)
     Project.prepare_result_space(options)
     
     
     if options.stage <= 2 and options.end >= 2:
-        myUtil.print_header("\nProkaryotic gene recognition and translation via prodigal")
+        myUtil.print_header("\n 2. Prokaryotic gene recognition and translation via prodigal")
         fasta_preparation(options)
         
 
     
 #2    
     if options.stage <= 2 and options.end >= 2:
-        myUtil.print_header("\nSearching for homologoues sequences")
+        myUtil.print_header("\n Searching for homologoues sequences")
         initial_search(options)
         
 #3    
@@ -348,23 +356,23 @@ def main(args=None):
     #Info: this resulted in an error when only a single genome was used. linclust did this error and dumped the core. the tsv file was not created and subsequent errors occured therefore
 
     if options.stage <= 3 and options.end >= 3:
-        myUtil.print_header("\nClustering sequences by similarity")
+        myUtil.print_header("\n 3. Clustering sequences by similarity")
         cluster_sequences(options)
     
 #4    
     #csb naming
     if options.stage <= 4 and options.end >= 4:
-        myUtil.print_header("\nSearching for collinear syntenic blocks")
+        myUtil.print_header("\n 4. Searching for collinear syntenic blocks")
         csb_finder(options)
 #5
     if options.stage <= 5 and options.end >= 5:
-        myUtil.print_header("\nPreparing training data fasta files")
+        myUtil.print_header("\n 5. Preparing training data fasta files")
         generate_csb_sequence_fasta(options)   
 
 #6    
     #align
     if options.stage <= 6 and options.end >= 6:
-        myUtil.print_header("\nAligning sequences")
+        myUtil.print_header("\n 6. Aligning sequences")
         model_alignment(options)
         
     
@@ -372,7 +380,7 @@ def main(args=None):
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
     if options.stage <= 7 and options.end >= 7:
-        myUtil.print_header("\nPerforming cross valdation procedure")
+        myUtil.print_header("\n 7. Performing cross valdation procedure")
         cross_validation(options)
 
 #8  

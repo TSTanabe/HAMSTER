@@ -158,7 +158,7 @@ def find_lca_and_monophyly(protein_ids, tree_file):
 
 
 
-def fetch_neighbouring_domains(database, protein_ids):
+def fetch_neighbouring_domains_deprecated(database, protein_ids):
     """
     Fetches neighboring domains for a list of proteinIDs based on clusterID and gene order,
     and returns a dictionary where each proteinID is a key, and the value is a set of 
