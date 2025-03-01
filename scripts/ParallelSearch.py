@@ -1,5 +1,7 @@
 #!/usr/bin/python
+
 import os
+import csv
 import re
 
 from . import myUtil
@@ -96,32 +98,61 @@ def process_parallel_search(args_tuple):
 ################################################################################################
 
 def initial_glob_search(options):
-    print(f"Initilize diamond blastp search")
+    """
+    This function initializes and performs a DIAMOND BLASTp search,
+    filters the results, processes genome hits in parallel, and writes parsed data.
+    
+    Steps:
+    1. Perform self BLAST query to establish baseline.
+    2. If a BLAST table is not provided, run DIAMOND BLASTp.
+    3. Filter BLAST results based on e-value, sequence identity, and score thresholds.
+    4. Extract unique genome IDs from filtered hits and insert them into the database.
+    5. Batch process the genome hits in parallel using multiprocessing.
+    """
+    
+    print(f"Initilize DIAMOND BLASTp search")
+    
+    # Step 1: Perform self BLAST query to establish reference scores for blast score ratio
     self_blast_report = self_blast_query(options)
 
-
+    # Step 2: Run DIAMOND BLASp if no precomputed BLAST table is provided or exists
     blast_results_table = options.glob_table
-    if not blast_results_table: # If a blast table is not provided make the blastp
-        print(f"Start diamond blastp search")    
-        blast_results_table = DiamondSearch(options.glob_faa, options.query_file, options.cores, options.evalue, options.searchcoverage, options.minseqid, options.diamond_report_hits_limit, options.alignment_mode) #Diamond search the target fasta file
+    if not blast_results_table:
+        print(f"Running DIAMOND BLASTp search")    
+        blast_results_table = DiamondSearch(
+            options.glob_faa, options.query_file, options.cores, 
+            options.evalue, options.searchcoverage, options.minseqid, 
+            options.diamond_report_hits_limit, options.alignment_mode
+        )
     
-    print(f"Filter blastp results table")    
-    query_length_dict = get_sequence_legth(options.self_query)
-    selfblast_scores_dict = get_sequence_hits_scores(self_blast_report)
-    blast_results_table = filter_blast_table(blast_results_table, options.evalue, options.thrs_score, options.searchcoverage, options.minseqid, options.thrs_bsr, query_length_dict, selfblast_scores_dict)
+    # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
+    print("Filtering BLASTp results...")   
+    query_length_dict = get_sequence_legth(options.self_query) # Retrieve sequence lengths
+    selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
+    
+    blast_results_table = filter_blast_table(
+        blast_results_table, options.evalue, options.thrs_score, 
+        options.searchcoverage, options.minseqid, options.thrs_bsr, 
+        query_length_dict, selfblast_scores_dict
+    )
+    
+    # Store the filtered table in the options object
     options.glob_table = blast_results_table
 
-
+    # Step 4: Extract and store unique genome IDs
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     print(f"Found hits in {len(genomeIDs_set)} genomes")
+    
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
+    # Step 5: Process genome hits in parallel
     print("Parsing hits per genome")
     genomeID_batches = split_genomeIDs_into_batches(list(genomeIDs_set), options.cores-1) # batch sets of genomeIDs for each worker
     
     manager = Manager()
     data_queue = manager.Queue()
     counter = manager.Value('i', 0)
+    
     csb_patterns_diction,csb_pattern_names = Csb_finder.makePatternDict(options.patterns_file)
     score_threshold_diction = {} #empty because all have to be parsed
     
@@ -183,28 +214,6 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 
-def MMseqsSearch(path, query, cores, evalue, coverage, minseqid, alignment_mode=2):
-    #query is the static fasta file with the query sequences
-    #path is the assembly fasta file
-    
-    mmseqs = Alignment.find_executable("mmseqs")
-    
-    target_db_name=f"{path}.targetDB"
-    os.system(f'{mmseqs} createdb {path} {target_db_name} 1>/dev/null')
-    tmp = f"{path}.tmp"
-    
-    query_db_name=f"{query}.queryDB" #can be done during argument parsing if possible
-    os.system(f'{mmseqs} createdb {query} {query_db_name} 1>/dev/null')
-    
-    output_results=f"{path}.alndb"
-    output_results_tab=f"{path}.tab"
-
-    os.system(f'{mmseqs} search {query_db_name} {target_db_name} {output_results} {tmp} --threads {cores} --alignment-mode {alignment_mode} --min-seq-id {minseqid} -e {evalue} -c {coverage} 1>/dev/null') #attention cores is used here --min-seq-id {coverage}
-    os.system(f'{mmseqs} convertalis {query_db_name} {target_db_name} {output_results} {output_results_tab} --threads {cores} --format-output "target,query,evalue,bits,tstart,tend,pident" 1>/dev/null')
-    
-    #os.system(f'mmseqs rmdb {query_db_name}')
-    #os.system(f'mmseqs rmdb {target_db_name}')
-    return output_results_tab
     
 def collect_genomeIDs(report_path, div='___'):
     """
@@ -254,8 +263,10 @@ def split_genomeIDs_into_batches(genomeIDs_list, num_batches):
 
     return batches
     
-        
-######## Parsing routines ############
+############################################################################
+################# Bulk parsing routines ####################################
+############################################################################
+
 def process_parallel_bulk_parse_batch(args):
     """
     This function processes a batch of genomeIDs in parallel.
@@ -274,21 +285,40 @@ def process_parallel_bulk_parse_batch(args):
     
     # Process each genomeID in the batch
     for genomeID in genomeID_batch:
-        process_parallel_bulk_parse((data_queue, genomeID, options, diamond_blast_results_table, score_threshold_diction, csb_patterns_diction, csb_pattern_names, counter))
-
+        process_single_genome(
+            data_queue,
+            genomeID,
+            options,
+            diamond_blast_results_table,
+            score_threshold_diction,
+            csb_patterns_diction,
+            csb_pattern_names,
+            counter
+        )
    
-def process_parallel_bulk_parse(args_tuple):
+def process_single_genome(data_queue,genomeID,options,report,score_threshold_diction, csb_patterns_diction,csb_pattern_names,counter):
+    """
+    Processes a single genomeID, extracts hits, filters, and stores the results.
+
+    Args:
+        data_queue: Multiprocessing queue for passing results.
+        genomeID (str): The genome ID being processed.
+        options (object): Configuration options.
+        report (str): DIAMOND BLAST results table.
+        score_threshold_diction (dict): Score thresholds.
+        csb_patterns_diction (dict): CSB pattern dictionary.
+        csb_pattern_names (list): CSB pattern names.
+        counter (multiprocessing.Value): Shared counter for progress tracking.
+    """
+    protein_dict = {}
+    cluster_dict = {}
     
-    data_queue,genomeID,options,report,score_threshold_diction, csb_patterns_diction,csb_pattern_names,counter = args_tuple
-    #counter.value +=1
-    #print(f"Processed {counter.value} genomes by worker", end="\r")#
-    protein_dict = dict()
-    cluster_dict = dict()
     try:
+        # Unpack required files if necessary
         faa_file = myUtil.unpackgz(options.faa_files[genomeID])
         gff_file = myUtil.unpackgz(options.gff_files[genomeID])
         
-        #Parse the hits
+        #Parse BLAST report for protein hits
         protein_dict = parse_bulk_blastreport_genomize(genomeID,report,score_threshold_diction,options.thrs_score)
         
         #Remove multidomain proteins if they are not allowed
@@ -306,7 +336,10 @@ def process_parallel_bulk_parse(args_tuple):
         #Find the syntenic regions and insert to database
         cluster_dict = Csb_finder.find_syntenicblocks(genomeID,protein_dict,options.nucleotide_range)
         Csb_finder.name_syntenicblocks(csb_patterns_diction,csb_pattern_names,cluster_dict,1)
+        
+        # Store parsed data in multiprocessing queue
         data_queue.put((genomeID,protein_dict,cluster_dict))
+        
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"
         traceback_details = traceback.format_exc()
@@ -365,18 +398,17 @@ def submit_batches(protein_batch, cluster_batch, genomeID_set, options):
     Database.insert_database_clusters(options.database_directory, cluster_batch)
     
     #write initial hits fasta
-    writeQueryHitsSequenceFasta(options.fasta_initial_hit_directory, protein_batch)
+    write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_batch)
     
     # Append to the gene clusters file
     with open(options.gene_clusters_file, "a") as file:
         for clusterID, cluster in cluster_batch.items():
-            domains = cluster.get_domains()
+            domains = cluster.types
             file.write(clusterID + '\t' + '\t'.join(domains) + '\n')
 
 
-def writeQueryHitsSequenceFasta(directory, protein_dict):
-    # Sort proteins by domains
-    #Fetch operation from the database would be more stable but possibly slower
+def write_query_hit_sequence_fasta(directory, protein_dict):
+    
     sorted_proteins = sorted(protein_dict.values(), key=lambda x: x.get_domains())
     
     current_file_path = None
@@ -404,7 +436,60 @@ def writeQueryHitsSequenceFasta(directory, protein_dict):
         if current_file:
             current_file.close()
 
-def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
+def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=10):
+    """
+    Parses a BLAST report for a specific genomeID and extracts protein domain hits.
+
+    Args:
+        genome_id (str): The genome ID to filter hits.
+        filepath (str): Path to the BLAST report file.
+        thresholds (dict): Threshold values (currently unused in the function).
+        cut_score (int): Score threshold for filtering hits.
+
+    Returns:
+        dict: A dictionary mapping protein IDs to ParseReports.Protein objects.
+    """
+
+    protein_dict = {}
+
+    try:
+        # Efficiently filter relevant lines with grep
+        with subprocess.Popen(['grep', genome_id, filepath], stdout=subprocess.PIPE, text=True) as proc:
+            for line in proc.stdout:
+                columns = line.strip().split('\t')  # Assuming tab-separated format
+
+                if len(columns) < 6:  # Ensure enough columns exist
+                    continue
+
+                try:
+                    # Expected BLAST format: hit_id, query_id, e_value, bitscore, hsp_start, hsp_end
+                    hit_protein_id = columns[0]  # Protein identifier in BLAST
+                    query_id = columns[1]  # Query sequence ID
+                    hit_bitscore = int(float(columns[3]))  # Bitscore as integer
+                    hsp_start = int(columns[4])  # Start position
+                    hsp_end = int(columns[5])  # End position
+
+                    # If protein already exists, add domain info
+                    if hit_protein_id in protein_dict:
+                        protein_dict[hit_protein_id].add_domain(query_id, hsp_start, hsp_end, hit_bitscore)
+                    else:
+                        # Create new protein object
+                        protein_dict[hit_protein_id] = ParseReports.Protein(
+                            hit_protein_id, query_id, hsp_start, hsp_end, hit_bitscore, genome_id
+                        )
+
+                except ValueError as ve:
+                    print(f"\tWARNING: Skipped malformed line in {filepath}: {line.strip()} (ValueError: {ve})")
+                    continue
+
+    except Exception as e:
+        print(f"\nERROR: Failed to parse {filepath} for genome {genome_id}")
+        print(f"Exception: {str(e)}")
+        print(f"Traceback:\n{traceback.format_exc()}")
+
+    return protein_dict
+    
+def parse_bulk_blastreport_genomize_deprecated(genomeID,filepath,thresholds,cut_score=10):
     #
     # Parse a hit table with sseqid qseqid evalue bitscore sstart send pident
     # First use grep to get all lines with the genomeID. Requisite: GENOMEID has to be part of the Hit identifier
@@ -413,7 +498,7 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
     
     protein_dict = {}
 
-    result = subprocess.run(['grep', genomeID, Filepath], stdout=subprocess.PIPE, text=True)
+    result = subprocess.run(['grep', genomeID, filepath], stdout=subprocess.PIPE, text=True)
     
     lines = result.stdout.splitlines()  # Split output into lines
 
@@ -429,8 +514,8 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
                 hit_proteinID = columns[0]
                 query = columns[1]
                 hit_bitscore = int(float(columns[3]))
-                hsp_start = int(float(columns[4]))
-                hsp_end = int(float(columns[5]))
+                hsp_start = int(columns[4])
+                hsp_end = int(columns[5])
                 
                 if hit_proteinID in protein_dict:
                     protein = protein_dict[hit_proteinID]
@@ -440,7 +525,7 @@ def parse_bulk_blastreport_genomize(genomeID,Filepath,Thresholds,cut_score=10):
             except Exception as e:
                 error_message = f"\nError occurred: {str(e)}"
                 traceback_details = traceback.format_exc()
-                print(f"\tWARNING: Skipped {Filepath} due to an error - {error_message}")
+                print(f"\tWARNING: Skipped {filepath} due to an error - {error_message}")
                 print(f"\tTraceback details:\n{traceback_details}")
                 continue
                 
@@ -557,10 +642,10 @@ def get_sequence_hits_scores(blast_file):
     return selfblast_scores
     
         
-def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff, identity_cutoff, bsr_cutoff, sequence_lengths, selfblast_scores):
+def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff, identity_cutoff, bsr_cutoff, sequence_lengths, selfblast_scores, buffer_size=10000):
     """
     Filters a BLASTP table based on given criteria including Blast Score Ratio (BSR),
-    and writes the results to a new file.
+    and writes the results to a new file using buffered writing to optimize RAM usage.
 
     :param blast_file: Path to the BLASTP table file.
     :param evalue_cutoff: Maximum allowable e-value.
@@ -570,68 +655,70 @@ def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff,
     :param bsr_cutoff: Minimum required Blast Score Ratio (BSR).
     :param sequence_lengths: Dictionary of sequence lengths for qseqid.
     :param selfblast_scores: Dictionary of self-blast scores for each query (qseqid).
+    :param buffer_size: Number of rows to store in memory before writing to disk.
     :return: Path to the filtered output file.
     """
-    # Determine the output file name and path
-    directory, filename = os.path.split(blast_file)
-    output_file = os.path.join(directory, f"filtered_{filename}")
-    
-    with open(blast_file, 'r') as infile, open(output_file, 'w') as outfile:
 
-        # Process each row in the input file
-        for line in infile:
-            row = line.strip().split('\t')
-            sseqid, qseqid, evalue, bitscore, sstart, send, pident = row
+    # Determine the output file path
+    output_file = os.path.join(os.path.dirname(blast_file), f"filtered_{os.path.basename(blast_file)}")
 
-            # Convert necessary fields to numeric values
-            evalue = float(evalue)
-            bitscore = float(bitscore)
-            sstart = int(sstart)
-            send = int(send)
-            pident = float(pident)
+    # Open input and output files using CSV reader/writer
+    with open(blast_file, 'r') as infile, open(output_file, 'w', newline='') as outfile:
+        reader = csv.reader(infile, delimiter='\t')
+        writer = csv.writer(outfile, delimiter='\t')
 
-            # Calculate coverage
-            query_length = sequence_lengths.get(qseqid, 0)
-            if query_length == 0:
-                outfile.write(line)  # Write the row to the output file
-                continue  # Skip if qseqid has no known sequence length
+        buffer = []  # Buffer to store valid rows
 
-            alignment_length = abs(send - sstart) + 1
-            coverage = alignment_length / query_length
+        # Process each row efficiently
+        for row in reader:
+            try:
+                sseqid, qseqid, evalue, bitscore, sstart, send, pident = row[:7]
 
-            # Calculate Blast Score Ratio (BSR)
-            selfblast_score = selfblast_scores.get(qseqid, 0)
-            if selfblast_score == 0:
-                outfile.write(line)  # Write the row to the output file
-                continue  # Skip if qseqid has no self-blast score
+                # Convert necessary values only when needed
+                evalue = float(evalue)
+                bitscore = float(bitscore)
+                pident = float(pident)
+                sstart, send = int(sstart), int(send)
 
-            bsr = bitscore / selfblast_score
+                # Fetch precomputed query length and self-blast score
+                query_length = sequence_lengths.get(qseqid)
+                selfblast_score = selfblast_scores.get(qseqid)
 
-            # Check cutoffs
-            if (evalue <= evalue_cutoff and
-                bitscore >= score_cutoff and
-                coverage >= coverage_cutoff and
-                pident >= identity_cutoff and
-                bsr >= bsr_cutoff):
-                outfile.write(line)  # Write the row to the output file
-            #else:
-            #    # Determine which criteria failed
-            #    failed_criteria = []
-            #    if evalue > evalue_cutoff:
-            #        failed_criteria.append(f"evalue ({evalue} > {evalue_cutoff})")
-            #    if bitscore < score_cutoff:
-            #        failed_criteria.append(f"bitscore ({bitscore} < {score_cutoff})")
-            #    if coverage < coverage_cutoff:
-            #        failed_criteria.append(f"coverage ({coverage:.2f} < {coverage_cutoff})")
-            #    if pident < identity_cutoff:
-            #        failed_criteria.append(f"pident ({pident} < {identity_cutoff})")
-            #    if bsr < bsr_cutoff:
-            #        failed_criteria.append(f"bsr ({bsr:.2f} < {bsr_cutoff})")
+                # Pre-filter based on missing values
+                if not query_length or not selfblast_score:
+                    buffer.append(row)
+                else:
+                    # Compute alignment length and coverage
+                    alignment_length = abs(send - sstart) + 1
+                    coverage = alignment_length / query_length
 
-            #    print(f"Row skipped due to: {', '.join(failed_criteria)}")
-            #    print(f"Row details: {line.strip()}")
+                    # Compute Blast Score Ratio (BSR)
+                    bsr = bitscore / selfblast_score
 
-    return output_file    
+                    # Apply all filtering criteria
+                    if (
+                        evalue <= evalue_cutoff and
+                        bitscore >= score_cutoff and
+                        coverage >= coverage_cutoff and
+                        pident >= identity_cutoff and
+                        bsr >= bsr_cutoff
+                    ):
+                        buffer.append(row)
+
+                # **Write buffer to disk when it reaches buffer_size**
+                if len(buffer) >= buffer_size:
+                    writer.writerows(buffer)
+                    buffer.clear()  # Reset buffer
+
+            except ValueError as ve:
+                print(f"Skipping malformed row: {row} (ValueError: {ve})")
+                continue  # Skip invalid rows gracefully
+
+        # Final flush: Write any remaining data in the buffer
+        if buffer:
+            writer.writerows(buffer)
+
+    return output_file  
 
     
 ################################################################################################        
@@ -648,7 +735,7 @@ def self_blast_query(options):
     
     Database.insert_database_genomeIDs(options.database_directory, {"QUERY"})
     Database.insert_database_proteins(options.database_directory, protein_dict)
-    writeQueryHitsSequenceFasta(options.fasta_initial_hit_directory, protein_dict)
+    write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_dict)
     
     return report
 

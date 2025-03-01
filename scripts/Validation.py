@@ -1,12 +1,16 @@
 #!/usr/bin/python
 
-import os
-import subprocess
-import sqlite3
-import time
-import csv
-from multiprocessing import Pool, Manager
 
+
+import csv
+import heapq
+import os
+import sqlite3
+import subprocess
+
+from collections import defaultdict
+from multiprocessing import Pool, Manager
+import numpy as np
 
 
 
@@ -18,22 +22,19 @@ def parallel_cross_validation(options):
     print("Initilizing cross-validation")
     
     #Prepare shared data
-    #all_seq_number = fetch_db_seq_count(options.database_directory)
     all_seq_number = count_fasta_headers(options.sequence_faa_file)
-    alignment_dict = get_alignment_files(options.fasta_output_directory)  #aligned_seqs => unaligned_seqs filepaths for keys and values
-    alignment_files = list(alignment_dict.keys())
+    alignment_files = [os.path.join(options.fasta_output_directory, f) for f in os.listdir(options.fasta_output_directory) if f.endswith(".fasta_aln")]
     files_number = len(alignment_files)
+    
     print("Cutoff and performance validation without folds")
 
     #Prepare task-specific arguments
-    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+    #TODO only include the ones that are in the included and exlude the ones that are excluded by options
+    args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
 
-    # Make the inital validation of full hmms and assign cutoffs
-    with Pool(processes=options.cores, initializer=init_validation_worker, 
-              initargs=(all_seq_number, alignment_files, files_number)) as pool:
-        
-        #starts the workers
-        pool.map(initial_process_folds,args_list)
+    # Initial validation of full HMMs and assigning cutoffs
+    with Pool(processes=options.cores) as pool:
+        pool.starmap(initial_process_folds, args_list)
     
     if options.cross_validation_deactivated: # if deactivated skip the cross validation
         return
@@ -48,31 +49,18 @@ def parallel_cross_validation(options):
     alignment_files = filter_filepaths(alignment_files, initial_HMM_validation_MCC_dict)
     files_number = len(alignment_files)
     
-    args_list = [(alignment_file, options, index) for index, alignment_file in enumerate(alignment_files)]
+    args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
 
     print("Cross-validation initilized")
     #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores, initializer=init_validation_worker, 
-              initargs=(all_seq_number, alignment_files, files_number)) as pool:
+    with Pool(processes=options.cores) as pool:
         
         #starts the workers
-        pool.map(process_cross_folds,args_list)
+        pool.starmap(process_cross_folds,args_list)
     print(f"Processed all validations.")
-
-
 
     return
 
-def init_validation_worker(all_seq_number, alignment_files, files_number):
-    global global_all_seq_number
-    global global_alignment_files
-    global global_files_number
-    
-    # Assign values to global variables
-    global_all_seq_number = all_seq_number
-    global_alignment_files = alignment_files
-    global_files_number = files_number
-    
     
 def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="hmm_cv", cores=1):
     # Ensure the target directory exists
@@ -129,7 +117,7 @@ def get_target_sets(directory):
 ####################  Initial validation procedure start  ##########################
 ####################################################################################
 
-def initial_process_folds(args_tuple):
+def initial_process_folds(alignment_file, options, all_sequence_number, files_number):
     """
     Runs in parallel to test the full HMM against a single test target.
     Calculates the confusion matrix and returns:
@@ -140,11 +128,7 @@ def initial_process_folds(args_tuple):
     """
     
     # Unpacking arguments
-    alignment_file, options, index = args_tuple
-    
-    # Initilize global variables
-    all_sequence_number = global_all_seq_number
-    limit = global_files_number-1
+    #alignment_file, options, all_sequence_number, files_number = args_tuple
 
     # Define directory and file paths
     initial_validation_directory = options.fasta_alignment_directory 
@@ -159,10 +143,10 @@ def initial_process_folds(args_tuple):
     
     os.makedirs(hv_directory, exist_ok=True)
     
-    if os.path.exists(os.path.join(hv_directory, f"{hv_subfolder_name}_hv_matrices.txt")):
+    if os.path.exists(os.path.join(hv_directory, f"{hv_subfolder_name}_matrices.tsv")):
         return None  # This was already finished return to next HMM validation
     
-    print(f"Initial validation of HMM {index} of {limit} file {hv_subfolder_name}")    
+    print(f"Initial validation of HMM {hv_subfolder_name}")    
     
     # Determine target file
     name = hv_subfolder_name.split('_')[-1]
@@ -183,13 +167,12 @@ def initial_process_folds(args_tuple):
 
         
     # Extract true positives from the alignment file
-    print(f"Alignment file {alignment_file}")
     TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
     TN = all_sequence_number - len(TP_seqIDs)
         
     # Calculate cutoff thresholds and MCC
     optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution, all_matrices = cutoffs(TP_seqIDs, TN, hv_report)
-    print(f"Finished {alignment_file} cutoff: {optimized_cutoff} {trusted_cutoff}{noise_cutoff} and MCC: {MCC}")
+    print(f"Finished HMM {hv_subfolder_name} cutoffs: {optimized_cutoff} {trusted_cutoff} {noise_cutoff} and MCC: {MCC}")
     
     #Write down the matrices
     save_matrices_to_tsv(all_matrices, os.path.join(hv_directory, f"{hv_subfolder_name}_matrices.tsv"))
@@ -207,7 +190,8 @@ def initial_process_folds(args_tuple):
     
     
     #More informative output of positive and negative hits
-    hit_id_reports(hv_directory, options.database_directory, [hit_id_distribution])
+    if not options.hit_report_deactivated:
+        hit_id_reports(hv_directory, options.database_directory, [hit_id_distribution])
     
     return None
 
@@ -285,142 +269,158 @@ def filter_filepaths(filepaths, name_dict):
 ####################  Cross Validation procedure start  ############################
 ####################################################################################
 
-def process_cross_folds(args_tuple):
+def process_cross_folds(alignment_file, options, all_sequence_number, files_number):
     # This process is running in parallel
     # Prepare the folds and HMMs
-    alignment_file, options, index = args_tuple
-    
-    # Use global variables initialized by the worker
-    all_sequence_number = global_all_seq_number
-    limit = global_files_number-1
-    
-    
-        
-
-    cross_validation_directory = options.cross_validation_directory
-    
+    #alignment_file, options, all_sequence_number, files_number  = args_tuple
     # Generate the cross-validation directory
-    cv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
-    cv_directory = os.path.join(cross_validation_directory, cv_subfolder_name)
-    
-    print(f"Cross-validation of HMM {index} of {limit} file {cv_subfolder_name}")
-    if os.path.exists(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt")):
-        return None  # This was already finished return to next HMM validation
-    
-    create_cross_validation_sets(alignment_file, cv_directory)  # make CV folds in subfolder    
-    
-    # Generate the cross-validation folds for the HMMs
-    create_hmms_from_msas(cv_directory,cv_directory, "cv")
-    cv_hmms = [os.path.join(cv_directory, filename) for filename in os.listdir(cv_directory) if filename.endswith(".hmm_cv")]
-    
-    #Get the target file
-    name = cv_subfolder_name.split('_')[-1]
-    sequence_faa_file = options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
-    
-    
-    
-    # Search with the HMMs
-    for hmm in cv_hmms:  # Perform the hmmsearch for each fold
-        HMMsearch(hmm, sequence_faa_file, hmm + ".report", 1)
-    
-    cv_reports = [os.path.join(cv_directory, filename) for filename in os.listdir(cv_directory) if filename.endswith(".report")]
-    
-    # Make a report for the cutoffs
-    model_values = []
-    model_hit_distribution = []
-    
-    # Get the TP seq IDs and save in a set   
-    TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
-    TN = all_sequence_number - len(TP_seqIDs)
-    
-    for report in cv_reports:  # Read each of the reports from hmmsearch
-        # Calculate strict values for cutoffs, only exact matches with csb and sequence cluster count as TP
-        optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution, all_matrices = cutoffs(TP_seqIDs, TN, report)
-        model_hit_distribution.append(hit_id_distribution) # each hit_distribution is a list [TP_dict,FP_dict,FN_dict]
-        model_values.append([optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix])
-    
-    strict_report = calculate_performance_and_sum_matrices(model_values)  # Returns a tuple
-    
-    # Write down the matrices and cutoffs in the CV subfolder
-    with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_thresholds.txt"), 'w') as writer:
-        writer.write(f"{cv_subfolder_name}\t{strict_report[2]}\t{strict_report[3]}\t{strict_report[4]}\n")
-    
-    with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt"), 'w') as writer:
-        fold_matrix = strict_report[1]
-        writer.write('\n'.join(['\t'.join(map(str, row)) for row in fold_matrix]))
-    
-    
-    #More informative output of positive and negative hits
-    hit_id_reports(cv_directory, options.database_directory, model_hit_distribution)
-    
-    #Remove the temporary models and reports
-    [os.remove(os.path.join(cv_directory, file)) for file in os.listdir(cv_directory) if file.startswith("training_data_")]
+    cv_directory, cv_subfolder_name = setup_cross_validation_directory(alignment_file, options.cross_validation_directory)
 
-        
+
+    print(f"Cross-validation of HMM {cv_subfolder_name}")
+    # Check if the task was already completed
+    if os.path.exists(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt")):
+        return None
+
+
+    create_cross_validation_sets(alignment_file, cv_directory)
+    create_hmms_from_msas(cv_directory, cv_directory, "cv")
+    
+    # Retrieve the HMMs and target sequence files
+    cv_hmms = get_cv_hmms(cv_directory)
+    sequence_faa_file = get_target_sequence_file(cv_subfolder_name, options)
+    
+    # Run HMMsearch for each cross-validation model
+    run_hmmsearch_for_cv_hmms(cv_hmms, sequence_faa_file)
+    
+    # Retrieve reprots and calculate cutoffs
+    cv_reports = get_cv_reports(cv_directory)
+    process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_number, cv_directory, cv_subfolder_name, options.database_directory)
+
+    # Cleanup temporary files
+    cleanup_temp_files(cv_directory)
+    
+    
     return None
 
     
+### HELPER ROUTINES FOR PROCESS CROSS FOLDS
     
+def setup_cross_validation_directory(alignment_file, cross_validation_directory):
+    """Generates the cross-validation directory and returns its path."""
+    cv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
+    cv_directory = os.path.join(cross_validation_directory, cv_subfolder_name)
+    return cv_directory, cv_subfolder_name   
     
-    
-    
+def get_cv_hmms(cv_directory):
+    """Returns a list of all HMM files used in cross-validation."""
+    return [os.path.join(cv_directory, f) for f in os.listdir(cv_directory) if f.endswith(".hmm_cv")]
+
+def get_target_sequence_file(cv_subfolder_name, options):
+    """Determines the correct sequence file based on the alignment file name."""
+    name = cv_subfolder_name.split('_')[-1]
+    return options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
+
+def run_hmmsearch_for_cv_hmms(cv_hmms, sequence_faa_file):
+    """Executes HMMsearch for each cross-validation HMM model."""
+    for hmm in cv_hmms:
+        HMMsearch(hmm, sequence_faa_file, hmm + ".report", 1)
+
+def get_cv_reports(cv_directory):
+    """Retrieves all HMMsearch reports from the cross-validation directory."""
+    return [os.path.join(cv_directory, f) for f in os.listdir(cv_directory) if f.endswith(".report")]
             
 
+def process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_number, cv_directory, cv_subfolder_name, database_directory):
+    """Processes cutoffs from cross-validation reports, saves results, and generates hit reports."""
+    # Get true positive sequence IDs
+    TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
+    TN = all_sequence_number - len(TP_seqIDs)
 
-def get_alignment_files(directory):
-    alignment_faa_dict = {}
+    # Calculate cutoffs for each report
+    model_values = []
+    model_hit_distribution = []
 
-    for file_name in os.listdir(directory):
-        if file_name.endswith(".fasta_aln"):
-            alignment_file = os.path.join(directory, file_name)
-            faa_file = os.path.join(directory, file_name.replace(".fasta_aln", ".faa"))
+    for report in cv_reports:
+        optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution, all_matrices = cutoffs(TP_seqIDs, TN, report)
+        model_hit_distribution.append(hit_id_distribution)  # Save distribution
+        model_values.append([optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix])
 
-            # Check if the corresponding .faa file exists
-            if os.path.isfile(faa_file):
-                alignment_faa_dict[alignment_file] = faa_file
+    # Determine final performance metrics
+    strict_report = calculate_performance_and_sum_matrices(model_values)
 
-    return alignment_faa_dict #aligned_seqs => unaligned_seqs
+    # Save results to files
+    save_thresholds(cv_directory, cv_subfolder_name, strict_report)
+    save_matrices(cv_directory, cv_subfolder_name, strict_report[1])
 
+    # Generate detailed hit reports
+    # hit_id_reports(cv_directory, database_directory, model_hit_distribution)
 
+def save_thresholds(cv_directory, cv_subfolder_name, strict_report):
+    """Writes the calculated cutoff thresholds to a file."""
+    with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_thresholds.txt"), 'w') as writer:
+        writer.write(f"{cv_subfolder_name}\t{strict_report[2]}\t{strict_report[3]}\t{strict_report[4]}\n")
 
+def save_matrices(cv_directory, cv_subfolder_name, fold_matrix):
+    """Writes the confusion matrices to a file."""
+    with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt"), 'w') as writer:
+        writer.write('\n'.join(['\t'.join(map(str, row)) for row in fold_matrix]))
+
+def cleanup_temp_files(cv_directory):
+    """Removes temporary training data files from the cross-validation directory."""
+    for file in os.listdir(cv_directory):
+        if file.startswith("training_data_"):
+            os.remove(os.path.join(cv_directory, file))
+            
+            
+            
+## CROSS FOLD CREATION            
+            
 def create_cross_validation_sets(alignment_file, output_directory, ending=".cv", num_folds=5):
-    # Check if the output directory exists, if not, create it
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    # Read the alignment file manually
-    sequences = []
+    # **Change `sequences` to a dictionary**
+    sequences = {}
     record_ids = []
+
     with open(alignment_file, "r") as f:
         record_id = None
         sequence_lines = []
+        
         for line in f:
             line = line.strip()
             if line.startswith(">"):
                 if record_id is not None:
-                    sequences.append("".join(sequence_lines))
+                    sequences[record_id] = "".join(sequence_lines)
                     sequence_lines = []
-                record_id = line[1:]  # Remove the ">"
+                
+                record_id = line[1:]  # Remove '>'
                 record_ids.append(record_id)
             else:
                 sequence_lines.append(line)
+        
         if record_id is not None:
-            sequences.append("".join(sequence_lines))
+            sequences[record_id] = "".join(sequence_lines)
 
     num_sequences = len(sequences)
     fold_size = num_sequences // num_folds
 
-    # Create cross-validation folds
+    # **Rewriting fold generation using dictionary**
+    record_id_list = list(sequences.keys())  # Get record IDs in a list
+
     for fold in range(num_folds):
         start_idx = fold * fold_size
         end_idx = (fold + 1) * fold_size
-        train_sequences = sequences[:start_idx] + sequences[end_idx:]
-        train_record_ids = record_ids[:start_idx] + record_ids[end_idx:]
+        
+        train_record_ids = record_id_list[:start_idx] + record_id_list[end_idx:]  # Remove fold from training set
         train_file = os.path.join(output_directory, f"training_data_{fold}{ending}")
 
         with open(train_file, "w") as train_f:
-            for record_id, sequence in zip(train_record_ids, train_sequences):
-                train_f.write(f">{record_id}\n{sequence}\n")
+            for record_id in train_record_ids:
+                train_f.write(f">{record_id}\n{sequences[record_id]}\n")
+
+                
 
 def extract_record_ids_from_alignment(alignment_file):
     record_ids = set()
@@ -438,42 +438,6 @@ def extract_record_ids_from_alignment(alignment_file):
     return record_ids
 
 
-def count_sequences_in_fasta(options):
-    """
-    CURRENTLY NOT IN USE
-    Counts the number of sequences in a FASTA file. If the specified FASTA file does not exist,
-    it will look for 'sequences.faa' in the cv_directory and use it if available.
-    
-    Args:
-        fasta_file (str): Path to the FASTA file.
-        cv_directory (str): Path to the directory where 'sequences.faa' may exist.
-    
-    Returns:
-        int: Number of sequences in the FASTA file.
-    """
-    fasta_file = options.sequence_faa_file
-    cv_directory = options.cross_validation_directory
-
-    # Check if the provided fasta_file exists
-    if fasta_file is None or not os.path.exists(fasta_file):
-        # If the fasta_file does not exist, check if 'sequences.faa' exists in cv_directory
-        alt_fasta_file = os.path.join(cv_directory, 'sequences.faa')
-        if os.path.exists(alt_fasta_file):
-            print(f"FASTA file not found, using '{alt_fasta_file}' instead.")
-            fasta_file = alt_fasta_file
-            options.sequence_faa_file = fasta_file
-        else:
-            raise FileNotFoundError(f"Neither {fasta_file} nor 'sequences.faa' found in {cv_directory}")
-    
-    # Count the number of sequences in the selected FASTA file
-    num_sequences = 0
-    with open(fasta_file, 'r') as file:
-        for line in file:
-            if line.startswith('>'):
-                num_sequences += 1
-
-    return num_sequences
-    
 def HMMsearch(library, input_file, output_file, cores=1):
     
     if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
@@ -500,18 +464,13 @@ def calculateMetric(metric, TP, FP, FN, TN):
 
 
 def cutoffs(true_positives,true_negatives,report_filepath):
-    #vom höchsten an
-    #true positives shall be a datastructure with the seqIDs
-    #true negatives is an int
-    sum_TP = len(true_positives) #true_positives is a set, sum_TP is the total number of TP
-    true_positive_dict = {}
-    false_positive_dict = {}
-    false_negative_dict = {key: 0 for key in true_positives}
+    """
+    Calculate the cutoffs and the confusion matrix. Sort the proteinIDs into the categories TP,FP,FN,TN
+    """
     
-    TP = 0
-    FP = 0
-    FN = 0
-    TN = true_negatives # is an integer
+    # Initialize confusion matrix variables and identifier data structures
+    sum_TP = len(true_positives) #true_positives is a set, sum_TP is the total number of TP
+    TP, FP, FN, TN = 0, 0, 0, true_negatives
     
     trusted_cutoff = float("-inf")
     noise_cutoff = 10
@@ -522,55 +481,59 @@ def cutoffs(true_positives,true_negatives,report_filepath):
 
     true_positives_set = set(true_positives)
     processed_TPs = set()  # Speichert bereits verarbeitete TPs
-    
+
+    # Track hit occurrences and their lowest scores
+    true_positive_dict = defaultdict(float)
+    false_positive_dict = defaultdict(float)
+    false_negative_dict = {key: 0 for key in true_positives}
         
     with open(report_filepath, 'r') as file:
         
         for line in file:
-            # Skip lines that start with '#'
             if line.startswith('#'):
                 continue
 
             # Split the line by any whitespace, treating consecutive spaces as a single separator
             fields = line.strip().split()
-
-            # Extract the relevant fields (assuming 'hit.id' is in the first column and 'bitscore' in a specific column)
-            hit_id = fields[0]
-            bitscore = float(fields[13])  # domain for bitscore
+            hit_id, bitscore = fields[0], float(fields[13])
             
-                        
+            # Process true positives                        
             if hit_id in true_positives_set:
-                
                 if hit_id in processed_TPs:
-                    continue #skip if hits are double because of domains
+                    continue #skip doublicate hit
                 
                 TP += 1
                 true_positive_dict[hit_id] = bitscore # collect the positive hit identifiers set
                 processed_TPs.add(hit_id)  # Ensure TPs are only counted once
-                
-                if FP == 0:
-                    trusted_cutoff = bitscore
+
                 FN = sum_TP - TP #wenn tp die hit_ids speichert dann könnte man hier direkt die FN hit IDs rausfiltern über vergleiche von sets
                 
+                # Store last TP as trusted bitscore                
+                if FP == 0:
+                    trusted_cutoff = bitscore
                 
+                # Update false negative dict
                 if hit_id in false_negative_dict: #track the bitscores, TPs will be removed from here when better MCC is found
                     false_negative_dict[hit_id] = bitscore
+                    
+            # Process false positives
             else:
                 if hit_id in false_positive_dict:
-                    continue #skip if hits are double because of domains
+                    continue #skip doublicate hit
+                
                 FP += 1
                 false_positive_dict[hit_id] = bitscore # collect the false positive hit identifiers
-          
                 TN = true_negatives - FP
             
+            # Calculate matthews correlation coefficient            
             new_MCC = calculateMetric("MCC",TP,FP,FN,TN)
             #print(f"{TP},{FP},{FN},{TN} with hit_id {hit_id} as next positive hit")
             #print(new_MCC, " > ", MCC)
             
-            #Store the confusion matrix for later            
-            current_matrix = [TP, FP, FN, TN, bitscore, new_MCC]
-            all_matrices.append(current_matrix)
+            # Store the confusion matrix     
+            all_matrices.append([TP, FP, FN, TN, bitscore, new_MCC])
             
+            # Update MCC if improved
             if new_MCC > MCC:
                 MCC = new_MCC
                 optimized_cutoff = bitscore
@@ -578,77 +541,54 @@ def cutoffs(true_positives,true_negatives,report_filepath):
                 
                 # Remove all TPs at this point from the false_negative_dict thus scores can be recorded for all hits but only those in the
                 # below the threshold will be returned              
-                false_negative_dict = {k: v for k, v in false_negative_dict.items() if k not in set(true_positive_dict)}
+                false_negative_dict = {k: v for k, v in false_negative_dict.items() if k not in processed_TPs}
                 
-                if not FN == len(false_negative_dict.keys()): # This should never happen
-                    print(f"ERROR: Asynchrone false negative count and dictionary in the cutoff routine {FN}/{len(false_negative_dict.keys())}")
-
+                if FN != len(false_negative_dict): # This should never happen
+                    print(f"ERROR: Asynchrone false negative count and dictionary in the cutoff routine {FN}/{len(false_negative_dict)}")
+            
+            # Stop if all TPs are found
             if TP == sum_TP:
                 noise_cutoff = bitscore
                 break #MCC there is no better MCC without more TP
+                
             if noise_cutoff > bitscore:
                 noise_cutoff = bitscore
     
+    # Filter false positives above cutoff
     false_positive_dict_filtered = {key: value for key, value in false_positive_dict.items() if value >= optimized_cutoff}
-    hit_id_distribution = [true_positive_dict, false_positive_dict_filtered, false_negative_dict] #distribution of hit ids at optimum MCC   
+    
+    # Prepare hit id distribution for return
+    hit_id_distribution = [true_positive_dict, false_positive_dict_filtered, false_negative_dict] #distribution of hit ids at optimum MCC
+    
     return optimized_cutoff,trusted_cutoff,noise_cutoff,MCC,matrix, hit_id_distribution, all_matrices
 
 
-def failed_hits(true_positives, report_filepath, cutoff):
-    TP = set(true_positives)  # Copy the set to avoid modifying the original
-    FP = {}
-    
-    with open(report_filepath, 'r') as file:
-        for line in file:
-            # Skip lines that start with '#'
-            if line.startswith('#'):
-                continue
-
-            # Split the line into fields by whitespace
-            fields = line.strip().split()
-
-            # Assuming the ID is in the first column and bitscore in a specific column
-            hit_id = fields[0]
-            bitscore = float(fields[13])  # Adjust this index based on actual bitscore column
-
-            # If the bitscore is below the cutoff, stop processing
-            if bitscore < cutoff:
-                return FP, TP
-
-            # Process the hit
-            if hit_id in TP:
-                TP.discard(hit_id)
-            else:
-                # Count how many times each hit_id is added as FP
-                if hit_id in FP:
-                    FP[hit_id] += 1
-                else:
-                    FP[hit_id] = 1
-
-    return FP, TP  # Return the false positives with their counts and the remaining true positives (FN)
-
-
-
-                
-#from all fold. decide which is the highest trusted cutoff, the lowest noise cutoff and the optimized cutoff with the best MCC, if equal the lower cutoff. MCC is then the value for the model performance under these circumstances
 def calculate_performance_and_sum_matrices(cross_validation_folds):
+    """
+    Computes the best performance metrics from multiple cross-validation folds.
+
+    Args:
+        cross_validation_folds (list of tuples): Each tuple contains:
+            (optimized_cutoff, trusted_cutoff, noise_cutoff, mcc, confusion_matrix)
+
+    Returns:
+        tuple: (summed_confusion_matrix, all_folds_matrices, best_optimized_cutoff, 
+                highest_trusted_cutoff, lowest_noise_cutoff)
+    """
+
+    # Initilize
     highest_trusted_cutoff = float("-inf")
     lowest_noise_cutoff = float("inf")
     best_mcc = float("-inf")
     best_optimized_cutoff = None
     sum_matrix = [0, 0, 0, 0]
-    fold_matrices = list()
-    for fold_data in cross_validation_folds:
-        optimized_cutoff, trusted_cutoff, noise_cutoff, mcc, matrix = fold_data
-        
-        #List all matrices
+    fold_matrices = []
+    
+    for optimized_cutoff, trusted_cutoff, noise_cutoff, mcc, matrix in cross_validation_folds:
         fold_matrices.append(matrix)
         
         # Update highest trusted cutoff
         highest_trusted_cutoff = max(highest_trusted_cutoff, trusted_cutoff)
-
-        # Update lowest noise cutoff
-        #print(lowest_noise_cutoff," verglichen mit ", noise_cutoff)
         lowest_noise_cutoff = min(lowest_noise_cutoff, noise_cutoff)
 
         # Update best MCC and corresponding optimized cutoff
@@ -657,13 +597,9 @@ def calculate_performance_and_sum_matrices(cross_validation_folds):
             best_optimized_cutoff = optimized_cutoff
 
     # Ensure no value is infinite or negative
-    if highest_trusted_cutoff == float("-inf") or highest_trusted_cutoff < 0:
-        highest_trusted_cutoff = 10
-    if lowest_noise_cutoff == float("inf") or lowest_noise_cutoff < 0:
-        lowest_noise_cutoff = 10
-    if best_optimized_cutoff is None or best_optimized_cutoff < 0:
-        best_optimized_cutoff = 10
-
+    highest_trusted_cutoff = max(highest_trusted_cutoff, 10)
+    lowest_noise_cutoff = max(lowest_noise_cutoff, 10)
+    best_optimized_cutoff = best_optimized_cutoff if best_optimized_cutoff and best_optimized_cutoff > 0 else 10
     
     return (sum_matrix, fold_matrices, best_optimized_cutoff, highest_trusted_cutoff, lowest_noise_cutoff)
 
@@ -738,63 +674,32 @@ def hit_id_reports(cv_directory, database, data):
         None
     """
     # Initialize empty dictionaries to hold key occurrence counts for TP, FP, and FN
-    key_counts = {
-        'TP': {},
-        'FP': {},
-        'FN': {}
-    }
+    key_counts = {label: defaultdict(int) for label in ['TP', 'FP', 'FN']}
     
     # lowest hit score for each proteinID
-    hit_scores = {
-        'TP': {},
-        'FP': {},
-        'FN': {}
-    }
+    hit_scores = {label: defaultdict(lambda: float("inf")) for label in ['TP', 'FP', 'FN']}
 
-    # Iterate over the list of lists
-    for inner_list in data:
-        # Process TP, FP, FN dicts in a loop to avoid redundancy
-        for i, dict_label in enumerate(['TP', 'FP', 'FN']):
-            hit_dictionary = inner_list[i]
-            #print(f"\t{dict_label}\n")
-            # Update the overall count for TP, FP, or FN
-            for key, count in hit_dictionary.items():
-                
-                if key in key_counts[dict_label]:
-                    key_counts[dict_label][key] += 1
-                    #print(f"+1 {key}")
-                else:
-                    key_counts[dict_label][key] = 1
-                    #print(f"Initialized {key}")
-            #print(key_counts)            
-            #Now organize the hit score values
-            for hit, score in hit_dictionary.items():
-                if hit in hit_scores[dict_label]:
-                    if hit_scores[dict_label][hit] > score:
-                        hit_scores[dict_label][hit] = score
-                else:
-                    hit_scores[dict_label][hit] = score
-                
-    
+    # Process all TP, FP, FN in a single pass
+    for tp_dict, fp_dict, fn_dict in data:
+        for dict_label, hit_dict in zip(['TP', 'FP', 'FN'], [tp_dict, fp_dict, fn_dict]):
+            for hit, score in hit_dict.items():
+                key_counts[dict_label][hit] += 1
+                hit_scores[dict_label][hit] = min(hit_scores[dict_label][hit], score)  # Track lowest score
 
-    #print(hit_scores)       
-    # Fetch and print gene vicinity information for the current dictionary
+    # Batch-fetch gene vicinity information for all keys in one DB call per category
+    gene_vicinity = {label: fetch_neighbouring_genes_with_domains(database, list(key_counts[label].keys()))
+                     for label in ['TP', 'FP', 'FN']}
+
+    # Process each category once
     for dict_label in ['TP', 'FP', 'FN']:
-        gene_vicinity_dictionary = fetch_neighbouring_genes_with_domains(database, list(key_counts[dict_label].keys()))
-        
-        # Prepare data for the report
-        sorted_data = []
-                
-        # Sort the keys based on their score (from score_dict) and generate the report rows
         score_dict = hit_scores[dict_label]
-        for key in sorted(score_dict.keys(), key=lambda k: score_dict[k], reverse=True):
-            score = score_dict[key]  # The score from the inner_list[i] (TP_dict, FP_dict, FN_dict)
-            count = key_counts[dict_label].get(key, 0)  # The count of hits for this key
-            neighborhood = gene_vicinity_dictionary.get(key, "No data")  # The genomic neighborhood
-                    
-            # Append a tuple (key, score, count, neighborhood) to the sorted data
-            sorted_data.append((key, score, count, neighborhood))
-                
+        sorted_data = sorted(
+            ((key, score, key_counts[dict_label][key], gene_vicinity[dict_label].get(key, "No data")) 
+             for key, score in score_dict.items()),
+            key=lambda x: x[1],  # Sort by lowest score
+            reverse=True
+        )
+        
             # Write the sorted data to a file
         write_report_to_file(cv_directory, dict_label, sorted_data)
         write_report_to_iTolBinary(cv_directory, dict_label, sorted_data)
@@ -823,62 +728,69 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids):
               Each list entry contains the domains and the proteinID in the format 
               '_domain_proteinID'.
     """
-    def execute_chunked_query(chunk_ids):
-        query = f"""
-        SELECT 
-            p.proteinID, p.clusterID, p.genomeID, p.start, d.domain
-        FROM Proteins p
-        LEFT JOIN Domains d ON p.proteinID = d.proteinID
-        WHERE p.proteinID IN ({','.join('?' * len(chunk_ids))})
-           OR p.clusterID IN (
-                SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({','.join('?' * len(chunk_ids))})
-           )
-        ORDER BY p.clusterID, p.start
-        """
-        cur.execute(query, chunk_ids * 2)  # Pass the chunk IDs twice for both conditions
-        return cur.fetchall()
-
+    if not protein_ids:
+        return {}
+    
+    chunk_size = 900    
+    
     with sqlite3.connect(database) as con:
         cur = con.cursor()
-
-        # Define the chunk size to avoid exceeding SQLite's variable limit
-        chunk_size = 900  # Adjust this size to stay within SQLite's variable limit
-
-        # Execute the query in chunks and collect results
-        protein_results = []
+        cluster_ids = set()
+        
+        # Step 1: Fetch all relevant proteinID, clusterIDs (chunked)
         for i in range(0, len(protein_ids), chunk_size):
-            chunk_ids = protein_ids[i:i + chunk_size]
-            protein_results.extend(execute_chunked_query(chunk_ids))
+            chunk = protein_ids[i:i + chunk_size]
+            placeholders = ','.join('?' * len(chunk))
 
-    # Organize results by cluster and by proteinID
-    cluster_dict = {}
+            cur.execute(f"SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({placeholders})", chunk)
+            cluster_ids.update(row[0] for row in cur.fetchall() if row[0] is not None)
+            
+            
+            
+        # Step 2: Fetch all proteins that belong to these clusters (chunked)
+        protein_results = []
+        for i in range(0, len(cluster_ids), chunk_size):
+            chunk = list(cluster_ids)[i:i + chunk_size]  # Convert set to list for slicing
+            placeholders = ','.join('?' * len(chunk))
+
+            query = f"""
+            SELECT p.proteinID, p.clusterID, p.genomeID, p.start, COALESCE(d.domain, 'no_domain')
+            FROM Proteins p
+            LEFT JOIN Domains d ON p.proteinID = d.proteinID
+            WHERE p.clusterID IN ({placeholders})
+            ORDER BY p.clusterID, p.start
+            """
+            cur.execute(query, chunk)
+            protein_results.extend(cur.fetchall())
+
+
+    # Step 3: Organize results efficiently
+    cluster_dict = defaultdict(list)
     protein_cluster_map = {}
 
     for protein_id, cluster_id, genome_id, start, domain in protein_results:
-        if cluster_id is not None:  # Only process if a cluster exists
-            if cluster_id not in cluster_dict:
-                cluster_dict[cluster_id] = []
-            domain_str = domain if domain else "no_domain"
-            cluster_dict[cluster_id].append((protein_id, start, f"{domain_str}_{protein_id}"))
+        domain_entry = f"{domain}_{protein_id}"
+        if cluster_id:
+            cluster_dict[cluster_id].append((start, domain_entry))
             protein_cluster_map[protein_id] = cluster_id
         else:
-            protein_cluster_map[protein_id] = None
+            protein_cluster_map[protein_id] = None  # No cluster assigned
 
-    # Prepare the final dictionary with proteinID as the key and neighboring genes sorted by start
+    # Step 4: Sort by start position
+    for cluster_id in cluster_dict:
+        cluster_dict[cluster_id].sort()  # Sort by tuples first value: `start` position
+
+
+    # Step 5: Construct final output
     neighbors_dict = {}
     for protein_id in protein_ids:
         cluster_id = protein_cluster_map.get(protein_id)
-
         if cluster_id:
-            cluster_proteins = cluster_dict[cluster_id]
-            sorted_proteins = sorted(cluster_proteins, key=lambda x: x[1])
-            neighbors = [protein for _, _, protein in sorted_proteins]
-            neighbors_dict[protein_id] = neighbors
+            neighbors_dict[protein_id] = [protein for _, protein in cluster_dict[cluster_id]]
         else:
             neighbors_dict[protein_id] = [f"singleton_{protein_id}"]
 
     return neighbors_dict
-
 
 
 def save_matrices_to_tsv(all_matrices, output_filepath):
@@ -908,54 +820,4 @@ def save_matrices_to_tsv(all_matrices, output_filepath):
 
     return output_filepath
 
-#######################################################################
-##################    Count TP + TN in DB      ########################
-#######################################################################
-
-
-
-def fetch_db_seq_count(database):
-    """
-    Fetches the count of unique protein sequences from the SQLite database.
-
-    Args:
-        database (str): Path to the SQLite database.
-
-    Returns:
-        int: The number of unique sequences in the database (excluding 'QUERY' genomeID).
-    """
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-        
-        # Query to count distinct proteins excluding genomeID 'QUERY'
-        query = """
-                SELECT COUNT(DISTINCT Proteins.proteinID)
-                FROM Proteins
-                WHERE NOT Proteins.genomeID = ?
-            """
-        cur.execute(query, ('QUERY',))
-        seq_count = cur.fetchone()[0]
-
-    return seq_count
-
-
-
-
-
-
-
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     

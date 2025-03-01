@@ -317,18 +317,3 @@ def getLocustag(locustag_pattern,string):
         return ""
 
 
-
-
-
-
-
-
-
-#print("MAKE THRESHOLDS")
-#thrs = makeThresholdDict('ttest/Thresholds.txt')
-#print("PARSE HMM REPORTS")
-#diction = parseHMMreport("ptest/GCA_000006985.1_ASM698v1_genomic.HmmReport",thrs);
-#print("PARSE GFF FILE")
-#parseGFFfile("ptest/GCA_000006985.1_ASM698v1_genomic.gff",diction)
-#print("PARSE AA SEQUENCE")
-#getProteinSequence("ptest/GCA_000006985.1_ASM698v1_genomic.faa",diction)

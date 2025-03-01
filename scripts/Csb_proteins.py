@@ -5,11 +5,10 @@ import multiprocessing
 from multiprocessing import Pool, Manager, Value, Lock
 
 from . import Csb_cluster
-import pprint
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
-def csb_proteins_datasets(options, sglr_dict, grpd_dict):
+def csb_proteins_datasets(options, sglr_dict):
     
     #Get the domain types as set per csb and predefined pattern
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
@@ -307,20 +306,6 @@ def fetch_query_clusters(database, dictionary):
     return query_domains
 
     
-    
-
-def remove_non_query(dictionary,query_domains):    
-    #dictionary has the csb => set of domains
-    #query domains
-    # Loop through the dictionary and filter based on the domain in the key
-    selected_dictionary = dict()  # Dictionary to hold filtered results
-    for key, present_genes in dictionary.items():
-        common_genes = present_genes.intersection(query_domains)
-        if common_genes:
-            selected_dictionary[key] = common_genes
-    
-    return selected_dictionary   
-
 def remove_non_query_clusters(database, dictionary):
     """
     First selects the protein domain types that were assigned by the selfblast.

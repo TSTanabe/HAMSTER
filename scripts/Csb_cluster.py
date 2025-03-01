@@ -5,13 +5,11 @@ import os
 import sys
 import heapq
 import sqlite3
-import pprint
 from . import Database
 from . import Csb_Mp_Algorithm
 from scipy.spatial import distance
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import AgglomerativeClustering
-from itertools import combinations
 from collections import defaultdict
 
 

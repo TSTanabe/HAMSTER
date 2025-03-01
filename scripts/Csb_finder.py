@@ -48,12 +48,6 @@ class Cluster:
         
         return listing #returns list of keyword objects
 
-    def get_cluster_start(self):
-        return self.cluster_start
-
-    def get_cluster_end(self):
-        return self.cluster_end
-
        
     def get_clusterID(self):
         return self.clusterID
@@ -61,14 +55,6 @@ class Cluster:
     def get_genes(self):
         return self.genes    #genes list
         
-    def get_domains(self):
-        return self.types    #genes list
-        
-    def get_domain_set(self):
-        tmp = '-'.join(self.types)
-        s = set(tmp.split('-'))
-        return s    #domain set
-
     def get_domain_ends_list(self):
         tmp = []
         for typus in self.types:
@@ -85,46 +71,6 @@ class Cluster:
         s = tmp.split('-')
         return s    #domain list
         
-    def get_distance(self):
-        return self.distance
-        
-    def get_keywords_string_obj(self):
-        #better formated for database entry
-        listing = [self.clusterID]
-        for keyword in self.keywords:
-            a = keyword.get_keyword()
-            b = keyword.get_completeness()
-            c = keyword.get_csb()
-            listing.append(f"{a} {b} {c}")
-        return listing
-        
-    def get_cluster_list(self,separator):
-        """
-            Returns a list with keys completeness and csb each in one string
-        """
-        #not for database but column
-        keywords_string = ""
-        completeness_string = ""
-        csb_string = ""
-        
-        
-        listing = list(self.keywords_dict.values())
-        if listing:
-            element = listing.pop(0)
-            keywords_string += str(element.get_keyword())
-            completeness_string += str(element.get_completeness())
-            csb_string += str(element.get_csb())
-            
-        for element in listing:
-            keywords_string += separator
-            completeness_string += separator
-            csb_string += separator
-            keywords_string += str(element.get_keyword())
-            completeness_string += str(element.get_completeness())
-            csb_string += str(element.get_csb())
-        #print([keywords_string,completeness_string,csb_string])
-        return [self.get_clusterID(),keywords_string] # all keys (compl,csb) in einem string. ,completeness_string,csb_string
-	                                       # keys mit i =1 etc.
 	
 class Keyword:
     """
@@ -145,15 +91,6 @@ class Keyword:
         
     def get_completeness(self):
         return self.completeness
-        
-    def set_keyword(self,keyword):
-        self.keyword = keyword
-        
-    def set_csb(self,csb):
-        self.csb = csb
-        
-    def set_completeness(self,completeness):
-        self.completeness = completeness
         
 def check_order(test_list):
     #3.9.22

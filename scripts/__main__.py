@@ -52,11 +52,8 @@ class Options:
 
         self.sequence_faa_file = None #dictionary to the target files for the validation
         self.reports = dict()
-        self.relaxed_reports = dict()
         self.standard_cutoff_report_file = None
         self.standard_performance_report_file = None
-        self.relaxed_cutoff_report_file = None
-        self.relaxed_performance_report_file = None
         
         self.csb_name_prefix = "csb-" #prefix of clusterIDs determined by csb finder algorithm
         self.csb_name_suffix = "_" #suffix of clusterIDs determined by csb finder algorithm
@@ -93,14 +90,16 @@ def parse_arguments(arguments):
     resources.add_argument('-glob_blast_table', dest='glob_table', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated blast result table')
     resources.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing results from glob before entering into database')
     resources.add_argument('-no_glob', dest='glob_search', action='store_false', help='Do not concatenated fasta file for search')
-    resources.add_argument('-cv-off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')    
+    resources.add_argument('-cv-off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')
+    resources.add_argument('-rep-off', dest='hit_report_deactivated', action='store_true', help='Skip hit report')
     
     
     search = parser.add_argument_group("Optional search parameters for diamond")
-    search.add_argument('-evalue', dest='evalue', type=float, default = 0.1, metavar = '<float>', help='E-value cutoff [0,inf]')
-    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 10, metavar = '<int>', help='Score cutoff [0,inf]')
+    search.add_argument('-evalue', dest='evalue', type=float, default = 0.001, metavar = '<float>', help='E-value cutoff [0,inf]')
+    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]')
     search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
     search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
+    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
     search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]')
     search.add_argument('-allow_multidomain', dest='multidomain_allowed', action='store_true', help='Allow multiple query hits for each sequence')
     search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
@@ -108,11 +107,11 @@ def parse_arguments(arguments):
 
 
     #Cluster parameters
-    protein_cluster = parser.add_argument_group("Sequence clustering parameters for mmseqs2")
-    protein_cluster.add_argument('-cluster-active', dest='protein_cluster_active', action='store_true', help='Cluster initial blastp hits with mmseqs2 cluster')
-    protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
-    protein_cluster.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
-    protein_cluster.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
+    #protein_cluster = parser.add_argument_group("Sequence clustering parameters for mmseqs2")
+    #protein_cluster.add_argument('-cluster-active', dest='protein_cluster_active', action='store_true', help='Cluster initial blastp hits with mmseqs2 cluster')
+    #protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
+    #protein_cluster.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
+    #protein_cluster.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
 
 
     
@@ -219,6 +218,7 @@ def initial_search(options):
         os.remove(options.glob_faa)
     
 def cluster_sequences(options):
+    # Currently not in use
     if not options.protein_cluster_active: # skip if not activated to cluster the sequences
         return
     
@@ -246,7 +246,7 @@ def generate_csb_sequence_fasta(options):
     
     score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
     print("Fetching sequences for training datasets")
-    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict, grouped_keywords_dict) # groups training data
+    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data
 
     # Sammle Proteine aus den singulaeren, aber gruppierten Keywords
     if options.sglr:
@@ -274,7 +274,6 @@ def generate_csb_sequence_fasta(options):
         print("Calculating phylogeny")
         decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
         Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
-
 
 
 
@@ -346,8 +345,8 @@ def main(args=None):
 
     
 #2    
-    if options.stage <= 2 and options.end >= 2:
-        myUtil.print_header("\n Searching for homologoues sequences")
+    if options.stage <= 3 and options.end >= 3:
+        myUtil.print_header("\n 3. Searching for homologoues sequences")
         initial_search(options)
         
 #3    
@@ -355,9 +354,9 @@ def main(args=None):
     #cluster with mmseqs the divergent_output_file
     #Info: this resulted in an error when only a single genome was used. linclust did this error and dumped the core. the tsv file was not created and subsequent errors occured therefore
 
-    if options.stage <= 3 and options.end >= 3:
-        myUtil.print_header("\n 3. Clustering sequences by similarity")
-        cluster_sequences(options)
+    #if options.stage <= 3 and options.end >= 3:
+    #    myUtil.print_header("\n 3. Clustering sequences by similarity")
+    #    cluster_sequences(options)
     
 #4    
     #csb naming
