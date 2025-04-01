@@ -7,6 +7,7 @@ import heapq
 import os
 import sqlite3
 import subprocess
+import pickle
 
 from collections import defaultdict
 from multiprocessing import Pool, Manager
@@ -187,12 +188,14 @@ def initial_process_folds(alignment_file, options, all_sequence_number, files_nu
     with open(os.path.join(hv_directory, f"{hv_subfolder_name}_MCC.txt"), 'w') as writer:
         fold_matrix = strict_report[1]
         writer.write(f"{hv_subfolder_name}\t{MCC}\t{matrix}\n")
-    
-    
-    #More informative output of positive and negative hits
-    if not options.hit_report_deactivated:
-        hit_id_reports(hv_directory, options.database_directory, [hit_id_distribution])
-    
+
+    # Save the hit id distribution for later report
+    hit_id_distribution_file = os.path.join(hv_directory, f"{hv_subfolder_name}_hit_id_distribution.pkl")
+    with open(hit_id_distribution_file, 'wb') as f:
+        pickle.dump(hit_id_distribution, f)
+
+    print(f"Saved hit_id_distribution for {hv_subfolder_name} to {hit_id_distribution_file}")
+
     return None
 
 
@@ -610,187 +613,6 @@ def calculate_performance_and_sum_matrices(cross_validation_folds):
 #######################################################################
 
 
-
-def write_report_to_file(cv_directory, dict_label, sorted_data):
-    """
-    Writes the combined data (key, score, count, genomic neighborhood) to a file.
-    
-    Args:
-        cv_directory (str): Path to the directory where the report file will be saved.
-        dict_label (str): Label indicating the type of report (TP, FP, FN).
-        sorted_data (list): A list of tuples containing (key, score, count, genomic neighborhood).
-    
-    Returns:
-        None
-    """
-    # Create the file path
-    report_file = os.path.join(cv_directory, f"{dict_label}_hits.hit_report")
-    
-    # Write the report data to the file
-    with open(report_file, 'w') as f:
-        # Write the header
-        f.write("Key\tScore\tHits\tGenomic_Neighborhood\n")
-        
-        # Write each row of the sorted data
-        for key, score, count, neighborhood in sorted_data:
-            f.write(f"{key}\t{score}\t{count}\t{neighborhood}\n")
-
-
-
-def write_report_to_iTolBinary(cv_directory, dict_label, sorted_data):
-    # Create the file path
-    report_file = os.path.join(cv_directory, f"{dict_label}_iTolBinary.hit_report")
-    
-    # Prepare the header for the iTOL binary dataset
-    header = """DATASET_BINARY
-SEPARATOR COMMA
-DATASET_LABEL,Full Binary Dataset
-COLOR,#ff0000
-FIELD_SHAPES,1
-FIELD_LABELS,ID
-FIELD_COLORS,#ff0000
-DATA
-"""
-    
-    # Open the output file for writing
-    with open(report_file, 'w') as outfile:
-        outfile.write(header)
-        for key, score, count, neighborhood in sorted_data:
-            outfile.write(f"{key},1\n")
-
-
-
-def hit_id_reports(cv_directory, database, data):
-    """
-    Generates a report with the true positive, false positive, and false negative hits, 
-    and how often they were found through the cross-validation folds.
-    
-    Args:
-        cv_directory (str): Path to the cross-validation directory.
-        database (str): Path to the database file.
-        data (list): A list of lists, each containing TP_dict, FP_dict, FN_dict.
-    
-    Returns:
-        None
-    """
-    # Initialize empty dictionaries to hold key occurrence counts for TP, FP, and FN
-    key_counts = {label: defaultdict(int) for label in ['TP', 'FP', 'FN']}
-    
-    # lowest hit score for each proteinID
-    hit_scores = {label: defaultdict(lambda: float("inf")) for label in ['TP', 'FP', 'FN']}
-
-    # Process all TP, FP, FN in a single pass
-    for tp_dict, fp_dict, fn_dict in data:
-        for dict_label, hit_dict in zip(['TP', 'FP', 'FN'], [tp_dict, fp_dict, fn_dict]):
-            for hit, score in hit_dict.items():
-                key_counts[dict_label][hit] += 1
-                hit_scores[dict_label][hit] = min(hit_scores[dict_label][hit], score)  # Track lowest score
-
-    # Batch-fetch gene vicinity information for all keys in one DB call per category
-    gene_vicinity = {label: fetch_neighbouring_genes_with_domains(database, list(key_counts[label].keys()))
-                     for label in ['TP', 'FP', 'FN']}
-
-    # Process each category once
-    for dict_label in ['TP', 'FP', 'FN']:
-        score_dict = hit_scores[dict_label]
-        sorted_data = sorted(
-            ((key, score, key_counts[dict_label][key], gene_vicinity[dict_label].get(key, "No data")) 
-             for key, score in score_dict.items()),
-            key=lambda x: x[1],  # Sort by lowest score
-            reverse=True
-        )
-        
-            # Write the sorted data to a file
-        write_report_to_file(cv_directory, dict_label, sorted_data)
-        write_report_to_iTolBinary(cv_directory, dict_label, sorted_data)
-
-
-    # At this point, the key counts and gene vicinity data for TP, FP, and FN have been processed
-    return 
-    
-
-
-
-def fetch_neighbouring_genes_with_domains(database, protein_ids):
-    """
-    Fetches neighboring genes for a list of proteinIDs based on clusterID and gene order,
-    and returns the neighboring genes with their domains. For proteinIDs without clusterID,
-    only the entry for the proteinID itself is returned.
-
-    Args:
-        database (str): Pathway to the database file.
-        protein_ids (list): List of proteinIDs to fetch neighbors for.
-
-    Returns:
-        dict: A dictionary where each key is a proteinID, and the value is a list of 
-              neighboring genes in the same cluster, sorted by gene start position, or
-              just the entry for the proteinID if it has no cluster.
-              Each list entry contains the domains and the proteinID in the format 
-              '_domain_proteinID'.
-    """
-    if not protein_ids:
-        return {}
-    
-    chunk_size = 900    
-    
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-        cluster_ids = set()
-        
-        # Step 1: Fetch all relevant proteinID, clusterIDs (chunked)
-        for i in range(0, len(protein_ids), chunk_size):
-            chunk = protein_ids[i:i + chunk_size]
-            placeholders = ','.join('?' * len(chunk))
-
-            cur.execute(f"SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({placeholders})", chunk)
-            cluster_ids.update(row[0] for row in cur.fetchall() if row[0] is not None)
-            
-            
-            
-        # Step 2: Fetch all proteins that belong to these clusters (chunked)
-        protein_results = []
-        for i in range(0, len(cluster_ids), chunk_size):
-            chunk = list(cluster_ids)[i:i + chunk_size]  # Convert set to list for slicing
-            placeholders = ','.join('?' * len(chunk))
-
-            query = f"""
-            SELECT p.proteinID, p.clusterID, p.genomeID, p.start, COALESCE(d.domain, 'no_domain')
-            FROM Proteins p
-            LEFT JOIN Domains d ON p.proteinID = d.proteinID
-            WHERE p.clusterID IN ({placeholders})
-            ORDER BY p.clusterID, p.start
-            """
-            cur.execute(query, chunk)
-            protein_results.extend(cur.fetchall())
-
-
-    # Step 3: Organize results efficiently
-    cluster_dict = defaultdict(list)
-    protein_cluster_map = {}
-
-    for protein_id, cluster_id, genome_id, start, domain in protein_results:
-        domain_entry = f"{domain}_{protein_id}"
-        if cluster_id:
-            cluster_dict[cluster_id].append((start, domain_entry))
-            protein_cluster_map[protein_id] = cluster_id
-        else:
-            protein_cluster_map[protein_id] = None  # No cluster assigned
-
-    # Step 4: Sort by start position
-    for cluster_id in cluster_dict:
-        cluster_dict[cluster_id].sort()  # Sort by tuples first value: `start` position
-
-
-    # Step 5: Construct final output
-    neighbors_dict = {}
-    for protein_id in protein_ids:
-        cluster_id = protein_cluster_map.get(protein_id)
-        if cluster_id:
-            neighbors_dict[protein_id] = [protein for _, protein in cluster_dict[cluster_id]]
-        else:
-            neighbors_dict[protein_id] = [f"singleton_{protein_id}"]
-
-    return neighbors_dict
 
 
 def save_matrices_to_tsv(all_matrices, output_filepath):

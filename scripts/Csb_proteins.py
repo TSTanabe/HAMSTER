@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import sqlite3
 import os
+import pickle
 import multiprocessing
 from multiprocessing import Pool, Manager, Value, Lock
 
@@ -15,8 +16,20 @@ def csb_proteins_datasets(options, sglr_dict):
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     options.csb_dictionary = csb_dictionary # save the patterns for later use
+
+    # Try to retrieve saved dictionary
+    cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
+    os.makedirs(cache_dir, exist_ok=True)
     
-    #print("Fetch protein identifiers")
+    # Load existing data
+    dictionary = load_cache(cache_dir, "csb_protein_dataset.pkl")
+    
+    if dictionary:
+        print("Loaded existing protein dataset")
+        dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
+        dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
+        return dictionary    
+
     #Fetch for each csb id all the domains in the csb that are query domains
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     
@@ -28,6 +41,8 @@ def csb_proteins_datasets(options, sglr_dict):
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
     
+    save_cache(cache_dir, "csb_protein_dataset.pkl", dictionary)
+    
     #Remove domains that are excluded by user options
     dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
     
@@ -35,7 +50,7 @@ def csb_proteins_datasets(options, sglr_dict):
 
     return dictionary
 
-
+################################################################################################
 
 def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
     """
@@ -81,25 +96,31 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
     with sqlite3.connect(database_path) as conn:
         cursor = conn.cursor()
 
+        # **Schritt 1: Finde alle proteinIDs mit genomeID = 'QUERY'**
+        cursor.execute(
+            "SELECT proteinID FROM Proteins WHERE genomeID = 'QUERY'"
+        )
+        query_protein_ids = {row[0] for row in cursor.fetchall()}  # Set für schnellere Suche
+
+        if not query_protein_ids:
+            return combined_protein_sets  # Falls leer, sofort zurückgeben
+
         for key in combined_protein_sets:
-            # Extract domain from the key (assuming format 'categoryX_domain')
+            # Extract domain from key (assuming format 'categoryX_domain')
             parts = key.split("_")
             if len(parts) < 2:
                 continue  # Skip malformed keys
 
-            domain = "_".join(parts[1:])  # Reconstruct domain in case it contains '_'
+            domain = "_".join(parts[1:])  # Reconstruct domain if it contains '_'
 
-            # Fetch proteinIDs where domain matches and genomeID is 'QUERY'
+            # **Schritt 2: Hole proteinIDs aus Domains, aber nur, wenn sie in query_protein_ids sind**
             cursor.execute(
-                """
-                SELECT Proteins.proteinID 
-                FROM Proteins
-                INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
-                WHERE Domains.domain = ? AND Proteins.genomeID = 'QUERY'
+                f"""
+                SELECT proteinID FROM Domains 
+                WHERE domain = ? AND proteinID IN ({','.join(['?'] * len(query_protein_ids))})
                 """,
-                (domain,)
+                (domain, *query_protein_ids)
             )
-
 
             # Add fetched proteinIDs to the protein set
             protein_ids = {row[0] for row in cursor.fetchall()}
@@ -109,6 +130,7 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
 
 
 
+################################################################################################
 
 
 def csb_granular_datasets(options, dictionary):
@@ -127,6 +149,20 @@ def csb_granular_datasets(options, dictionary):
     print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_1")
 
 
+################################################################################################
+
+def decorate_training_data(options, score_limit_dict, grouped):
+
+    # Training datasets with additional sequences
+    score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory)
+    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
+    decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
+    print(decorated_grouped_dict.keys())
+    fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
+       
+
+    return
+################################################################################################
 
 
 
@@ -193,40 +229,56 @@ def parse_csb_file_to_dict(file_path):
 
 
 
-
 def process_keyword_domains(args):
     """
-    Helper function to process a single keyword and its domains.
+    Optimierte Funktion zur Verarbeitung eines Keywords und seiner Domains mit Chunks für große `IN`-Abfragen.
     """
     database, keyword, domains, min_seqs = args
     result = {}
+    chunk_size = 900  # Sicher unter dem SQLite-Limit von 999 bleiben
 
     with sqlite3.connect(database) as con:
         cur = con.cursor()
 
-        # Prepare a query for exact matches
-        query_conditions = ' OR '.join(['Domains.domain = ?'] * len(domains))
-        query = f"""
-            SELECT DISTINCT Proteins.proteinID, Domains.domain
+        # Schritt 1: Alle Proteins.proteinID für das Keyword abrufen
+        cur.execute("""
+            SELECT DISTINCT Proteins.proteinID
             FROM Proteins
-            INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
             INNER JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-            WHERE ({query_conditions}) AND Keywords.keyword = ?;
-        """
+            WHERE Keywords.keyword = ?;
+        """, (keyword,))
+        
+        protein_ids = {row[0] for row in cur.fetchall()}  # Set für schnelleres Nachschlagen
 
-        # Execute the query
-        cur.execute(query, (*domains, keyword))
-        rows = cur.fetchall()
+        if not protein_ids:
+            return result  # Falls keine Treffer, direkt zurückgeben
 
-        # Group results by (keyword, domain)
-        for proteinID, domain in rows:
-            key = (keyword, domain)
-            if key not in result:
-                result[key] = set()
-            result[key].add(proteinID)
+        # Schritt 2: Passende Protein-IDs mit den gewünschten Domains abrufen (in Chunks)
+        query_conditions = ' OR '.join(['Domains.domain = ?'] * len(domains))
 
-    # Apply filtering based on min_seqs
+        for i in range(0, len(protein_ids), chunk_size):
+            chunk = list(protein_ids)[i:i + chunk_size]  # Nimm max. 900 Protein-IDs
+            
+            query = f"""
+                SELECT DISTINCT Proteins.proteinID, Domains.domain
+                FROM Proteins
+                INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
+                WHERE ({query_conditions}) AND Proteins.proteinID IN ({','.join(['?'] * len(chunk))});
+            """
+
+            cur.execute(query, (*domains, *chunk))
+            rows = cur.fetchall()
+
+            # Ergebnisse in Dictionary speichern
+            for proteinID, domain in rows:
+                key = (keyword, domain)
+                if key not in result:
+                    result[key] = set()
+                result[key].add(proteinID)
+
     return result
+
+
 
 
 def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, num_workers=4):
@@ -459,7 +511,6 @@ def print_grouping_report(description, group, output):
 #################### Protein to fasta operations ##############################
 ###############################################################################
 
-
 def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=900):
     """
     Forks off the fetching of sequences for each domain using multiprocessing.
@@ -468,6 +519,9 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
         database (str): Path to the SQLite database.
         dataset_dict (dict): { domain: set(proteinIDs) }
         output_directory (str): Directory where FASTA files will be stored.
+        min_seq (int): Minimum number of sequences required for processing.
+        max_seq (int): Maximum number of sequences allowed for processing.
+        cores (int): Number of parallel processes.
         chunk_size (int): Number of protein IDs to process per query batch.
 
     Returns:
@@ -475,16 +529,36 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
     """
     os.makedirs(output_directory, exist_ok=True)  # Ensure the output directory exists
 
-    # Create a list of arguments for multiprocessing
-    tasks = [
-        (database, domain, protein_ids, output_directory, chunk_size)
-        for domain, protein_ids in dataset_dict.items()
-        if len(protein_ids) >= min_seq and len(protein_ids) <= max_seq and not os.path.exists(os.path.join(output_directory, f"{domain}.faa"))
-    ]
+    tasks = []
+    
+    for domain, protein_ids in dataset_dict.items():
+        num_sequences = len(protein_ids)
+        output_file = os.path.join(output_directory, f"{domain}.faa")
+
+        # Check limits and file existence
+        if num_sequences < min_seq:
+            print(f"WARNING: Domain '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
+            continue  # Skip this domain
+
+        if num_sequences > max_seq:
+            print(f"WARNING: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq})")
+            continue  # Skip this domain
+
+        if os.path.exists(output_file):
+            print(f"Skipping '{domain}', FASTA file already exists: {output_file}")
+            continue  # Skip existing files
+
+        # If all checks pass, add to tasks
+        tasks.append((database, domain, protein_ids, output_directory, chunk_size))
+
+    if not tasks:
+        return  # Exit if no tasks remain
 
     # Use multiprocessing to run fetch_seq_to_fasta in parallel
     with multiprocessing.Pool(processes=cores) as pool:
         pool.starmap(fetch_seq_to_fasta, tasks)
+
+
         
         
 def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_size=900):
@@ -561,6 +635,28 @@ def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit):
     return domain, protein_ids
 
 
+def filter_existing_faa_files(domain_dict, directory):
+    """
+    Entfernt Einträge aus `domain_dict`, falls bereits eine .faa-Datei 
+    für die jeweilige Domain im `directory` existiert.
+
+    Args:
+        domain_dict (dict): Dictionary mit Domains als Keys.
+        directory (str): Verzeichnis, in dem nach bestehenden .faa-Dateien gesucht wird.
+
+    Returns:
+        dict: Gefiltertes Dictionary ohne Domains, die bereits .faa-Dateien haben.
+    """
+    # Hole eine Liste aller existierenden .faa-Dateien im Verzeichnis
+    existing_files = {f for f in os.listdir(directory) if f.endswith(".faa")}
+
+    # Bereinige das Dictionary: Entferne Domains mit vorhandener .faa-Datei
+    filtered_dict = {domain: values for domain, values in domain_dict.items() 
+                     if f"{domain}.faa" not in existing_files}
+
+    return filtered_dict
+    
+    
 def fetch_protein_ids_parallel(database, score_limit_dict, cores):
     """
     Fetch all protein IDs per domain in parallel using multiprocessing.
@@ -583,7 +679,7 @@ def fetch_protein_ids_parallel(database, score_limit_dict, cores):
 
     # Combine results into a dictionary
     domain_protein_ids = {domain: protein_ids for domain, protein_ids in results}
-
+    print(domain_protein_ids.keys())
     return domain_protein_ids
 
 
@@ -809,10 +905,26 @@ def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
     
     
     
+##################################################################################################
     
     
-    
-    
+def save_cache(directory, filename, data):
+    """
+    Speichert Daten in einer Datei im Pickle-Format.
+    """
+    with open(os.path.join(directory, filename), "wb") as f:
+        pickle.dump(data, f)
+
+def load_cache(directory, filename):
+    """
+    Lädt zwischengespeicherte Daten aus einer Datei, falls vorhanden.
+    """
+    file_path = os.path.join(directory, filename)
+    if os.path.exists(file_path):
+        print("Loading from cache")
+        with open(file_path, "rb") as f:
+            return pickle.load(f)
+    return None
     
     
     

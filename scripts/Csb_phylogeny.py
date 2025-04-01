@@ -25,80 +25,7 @@ def csb_phylogeny_datasets(options, training_datasets):
     
     return monophylums
 
-def csb_phylogeny_target_sets(options):
-    target_files = fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory)
-    return target_files #dictionary with domain => target file with TP and TN
-        
-def get_domain_key_list_pairs(input_dict, output_dict=None):
-    # If no output_dict is provided, initialize a new empty dictionary
-    if output_dict is None:
-        output_dict = {}
-
-    # Iterate over the input_dict values, which contain lists of tuples
-    for tuples_list in input_dict.values():
-        for key, domain in tuples_list:
-            # Check if the domain exists in the output dictionary
-            if domain not in output_dict:
-                # If the domain is not present, create a new list for it
-                output_dict[domain] = []
-            # Append the key to the list of keys for the domain
-            output_dict[domain].append(key)
-    return output_dict
-
     
-def fetch_protein_type_to_fasta(options, domain_keyword_dict):
-#Fetches the TP proteinsIDs of one type regardless of the csb to combine csbs with a mixed distribution across the tree
-
-
-    with sqlite3.connect(options.database_directory) as con:
-        cur = con.cursor()
-
-        # Iterate over the domain-keyword dictionary
-        for domain, keywords in domain_keyword_dict.items():
-            print(domain)
-            modified_keywords = [keyword[1:] for keyword in keywords] #remove the marker character
-            print(modified_keywords)
-            # Use a parameterized query to check for the domain and the keywords
-            query = '''
-                SELECT DISTINCT P.proteinID, P.sequence
-                FROM Proteins P
-                JOIN Domains D ON P.proteinID = D.proteinID
-                JOIN Keywords K ON P.clusterID = K.clusterID
-                WHERE D.domain = ? AND K.keyword IN ({})
-            '''.format(','.join('?' * len(keywords)))
-            # Execute the query with the domain and the list of keywords
-            cur.execute(query, (domain, *modified_keywords))
-
-            proteins = cur.fetchall()
-
-            # Write the results to the domain-specific FASTA file
-            # Create the filename for this domain's output file
-            #this leaves only the protein type not the cluster number
-            name = domain.split('_')[-1]
-            filename = f"lca_{name}.faa"
-            output_fasta_path = os.path.join(options.phylogeny_directory, filename)
-            
-            # Use a set to track already written proteinIDs
-            written_proteins = set()
-            if os.path.exists(output_fasta_path):
-                # Open the existing file and extract protein IDs
-                with open(output_fasta_path, 'r') as fasta_file:
-                    for line in fasta_file:
-                        if line.startswith('>'):
-                            # Extract protein ID from the FASTA header line (assuming ID is everything after '>')
-                            protein_id = line[1:].strip().split()[0]  # Assuming ID is the first part after '>'
-                            written_proteins.add(protein_id)
-
-            #Append with the fetched sequences
-            with open(output_fasta_path, 'a') as fasta_file:
-                for proteinID, sequence in proteins:
-                    if proteinID not in written_proteins:
-                        fasta_file.write(f'>{proteinID}\n{sequence}\n')
-                        written_proteins.add(proteinID)
-
-
-
-
 #################################################################################
 ############  Finding lca in phylogenetic trees  ################################
 #################################################################################
@@ -139,7 +66,7 @@ def find_lca_and_monophyly(protein_ids, tree_file):
     try:
         lca = tree.common_ancestor(filtered_protein_ids)
     except Exception as e:
-        print(f"Error finding LCA in tree file: {tree_file}")
+        print(f"Error: finding LCA in tree file: {tree_file}")
         print(f"Original error: {e}")
         return None, None
     
@@ -153,78 +80,6 @@ def find_lca_and_monophyly(protein_ids, tree_file):
         included_identifiers = {tip.name for tip in lca.get_terminals()}
         return lca, included_identifiers
 
-
-
-
-
-
-def fetch_neighbouring_domains_deprecated(database, protein_ids):
-    """
-    Fetches neighboring domains for a list of proteinIDs based on clusterID and gene order,
-    and returns a dictionary where each proteinID is a key, and the value is a set of 
-    neighboring domains (including the domain of the protein itself).
-
-    Args:
-        database (str): Pathway to the database file.
-        protein_ids (list): List of proteinIDs to fetch neighbors for.
-
-    Returns:
-        dict: A dictionary where each key is a proteinID, and the value is a set of 
-              domains of neighboring genes in the same cluster or just the domain of the 
-              proteinID if it has no cluster.
-    """
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-
-        # Fetch all proteins and their domains in the same clusters as the input protein_ids
-        query = f"""
-        SELECT 
-            p.proteinID, p.clusterID, d.domain
-        FROM Proteins p
-        LEFT JOIN Domains d ON p.proteinID = d.proteinID
-        WHERE p.proteinID IN ({','.join('?' * len(protein_ids))})
-           OR p.clusterID IN (
-                SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({','.join('?' * len(protein_ids))})
-           )
-        """
-        
-        # Execute the query with the protein_ids list
-        cur.execute(query, protein_ids + protein_ids)  # Pass protein_ids twice for both conditions
-        protein_results = cur.fetchall()
-    
-    # Organize results by cluster and by proteinID
-    cluster_dict = {}
-    protein_cluster_map = {}  # Map each protein to its cluster
-    domain_map = {}           # Map each protein to its domain
-
-    for protein_id, cluster_id, domain in protein_results:
-        domain_str = domain if domain else "no_domain"  # Handle missing domain
-        domain_map[protein_id] = domain_str
-
-        if cluster_id is not None:  # Only process if a cluster exists
-            if cluster_id not in cluster_dict:
-                cluster_dict[cluster_id] = set()
-            cluster_dict[cluster_id].add(domain_str)
-            protein_cluster_map[protein_id] = cluster_id
-        else:
-            # Handle proteins without clusters separately in the result later
-            protein_cluster_map[protein_id] = None
-
-    # Prepare the final dictionary with proteinID as the key and neighboring domains as a set
-    neighbors_dict = {}
-    for protein_id in protein_ids:
-        cluster_id = protein_cluster_map.get(protein_id)
-        
-        # Handle proteins with a cluster
-        if cluster_id:
-            neighbors_dict[protein_id] = cluster_dict[cluster_id]
-        else:
-            # Handle proteins without a cluster (just return the domain of the protein itself)
-            neighbors_dict[protein_id] = {domain_map[protein_id]}
-
-    return neighbors_dict
-
-    
 
 def get_lca_worker_task(args):
     """
@@ -243,7 +98,7 @@ def get_lca_worker_task(args):
         # Attempt to get the tree
         tree = trees_dict.get(domain)
         if not tree:
-            print(f" Tree for {domain} is missing")
+            print(f"Skipping {domain}. Tree is not available")
             return None  # Skip if tree is missing
 
         # Get the monophyletic group
@@ -258,7 +113,7 @@ def get_lca_worker_task(args):
         return monophyly
 
     except Exception as e:
-        print(f"Error processing {proteinID_set}: {e}")
+        print(f"Error: processing {proteinID_set}: {e}")
         return {},{}
         
         
@@ -294,99 +149,6 @@ def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix):
 ##################################### Hits sorted by query hit ##########################################
 #########################################################################################################
 
-
-
-def fetch_protein_superfamily_to_fasta(options, blast_table, domain_keyword_dict, directory, max_seqs, deviation=0.5):
-    output_files = {}
-
-    with sqlite3.connect(options.database_directory) as con:
-        cur = con.cursor()
-
-        # Retrieve the SQLite variable limit dynamically
-        cur.execute("PRAGMA max_variable_number;")
-        result = cur.fetchone()
-        sqlimit = result[0] if result else 999  # Fallback to 999
-
-        for domain, query_length in domain_keyword_dict.items():  # Outer loop
-            # Write the results to the domain-specific FASTA file
-            name = domain.split('_')[-1]
-            filename = f"superfamily_{name}.faa"
-            output_fasta_path = os.path.join(directory, filename)
-            
-            #Skip if file exists
-            if os.path.isfile(output_fasta_path):
-                print(f" Skipping. File {output_fasta_path} already exists.")
-                continue
-            else:
-                print(f" {output_fasta_path} did not exist")
-            
-            
-            # Get the proteinIDs set
-            proteinIDs = get_domain_superfamily_proteinIDs(blast_table, domain, query_length, deviation)
-            proteinIDs = {string.strip() for string in proteinIDs}
-
-            # Adjust the identifiers from glob to match the database
-            if options.glob_gff:
-                proteinIDs = {f"{string.split('___', 1)[0]}-{string}" for string in proteinIDs}
-            else:
-                proteinIDs = {string.replace('___', '-', 1) for string in proteinIDs}
-
-            # Convert proteinIDs set to a list for slicing
-            proteinIDs = list(proteinIDs)
-
-            # Flag to indicate if the inner loop was broken
-            skip_domain = False
-
-            # Prepare to fetch in chunks based on the SQLite limit
-            proteins = []
-            total_sequences = 0  # Counter to track the number of sequences fetched
-            for i in range(0, len(proteinIDs), sqlimit):  # Inner loop
-                chunk = proteinIDs[i:i + sqlimit]
-                
-                # Use a parameterized query for each chunk
-                query = '''
-                    SELECT DISTINCT P.proteinID, P.sequence
-                    FROM Proteins P
-                    WHERE P.proteinID IN ({})
-                '''.format(','.join('?' * len(chunk)))
-                
-                cur.execute(query, tuple(chunk))
-                fetched = cur.fetchall()
-
-                proteins.extend(fetched)
-                total_sequences += len(fetched)
-
-                # Stop fetching if the sequence limit is reached, never stop if max_seqs is equal 0
-                if max_seqs > 0 and total_sequences >= max_seqs:
-                    proteins = proteins[:max_seqs]  # Trim to max allowed sequences
-                    skip_domain = True  # Set flag to skip further processing
-                    break  # Exit the inner loop
-
-            # Skip processing and file writing for this domain if limit was reached
-            if skip_domain:
-                print(f"Warning: Skipping domain {domain} because max sequence limit was reached.")
-                continue  # Skip the current iteration of the outer loop
-
-            # Use a set to track already written proteinIDs
-            written_proteins = set()
-            if os.path.exists(output_fasta_path):
-                with open(output_fasta_path, 'r') as fasta_file:
-                    for line in fasta_file:
-                        if line.startswith('>'):
-                            protein_id = line[1:].strip().split()[0]
-                            written_proteins.add(protein_id)
-
-            # Append the fetched sequences
-            with open(output_fasta_path, 'a') as fasta_file:  # 'w' to overwrite the file
-                for proteinID, sequence in proteins:
-                    if proteinID not in written_proteins:
-                        fasta_file.write(f'>{proteinID}\n{sequence}\n')
-                        written_proteins.add(proteinID)
-
-            # Add file to the output dictionary
-            output_files[name] = output_fasta_path
-
-    return output_files
 
 def get_domain_superfamily_proteinIDs(blast_table, domain, query_length, tolerance=0.5):
     """

@@ -18,6 +18,7 @@ from . import Csb_cluster
 from . import Csb_proteins
 from . import Csb_phylogeny
 from . import Csb_statistic
+from . import Csb_mcl
 
 from . import Alignment
 
@@ -95,11 +96,12 @@ def parse_arguments(arguments):
     
     
     search = parser.add_argument_group("Optional search parameters for diamond")
-    search.add_argument('-evalue', dest='evalue', type=float, default = 0.001, metavar = '<float>', help='E-value cutoff [0,inf]')
+    search.add_argument('-evalue', dest='evalue', type=float, default = 1e-5, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]')
     search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
     search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
     search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
+    search.add_argument('-memory',dest='diamond_memory_limit',type=int, default=8, metavar='<int>', help='DIAMOND BLASTp RAM limit')
     search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]')
     search.add_argument('-allow_multidomain', dest='multidomain_allowed', action='store_true', help='Allow multiple query hits for each sequence')
     search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
@@ -127,9 +129,21 @@ def parse_arguments(arguments):
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold')
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
+    csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
     csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered') #Wir das noch genutzt?
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
 
+    mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
+    mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]')
+    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=25, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]')
+    mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]')
+    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=500, metavar = '<int>', help='MCL maximum number of edges between sequences')
+    mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control')
+    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="more-sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive")
+    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive')
+    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive')
+    
+    #            options.mcl_hit_limit, options.alignment_mode, options.mcl_sensitivity
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
     alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned')
@@ -248,7 +262,7 @@ def generate_csb_sequence_fasta(options):
     print("Fetching sequences for training datasets")
     csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data
 
-    # Sammle Proteine aus den singulaeren, aber gruppierten Keywords
+    # Collect proteins from singular distantly related keywords
     if options.sglr:
         print("Processing dissimilar homologs with specific genomic context")
         singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
@@ -256,7 +270,7 @@ def generate_csb_sequence_fasta(options):
         singular = {}
     
     
-    # Sammle Proteine aus gruppierten Keywords
+    # Collect proteins from grouped keywords
     print("Processing highly similar homologs with specific genomic context")
     grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grpd")
     grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
@@ -264,18 +278,24 @@ def generate_csb_sequence_fasta(options):
 	
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
-    if options.csb_distinct_grouping:
+    if options.csb_distinct_grouping or options.csb_mcl_clustering:
         print("Including homologs without genomic context based on protein sequence phylogeny.")
-        decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
-        decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
-
-        # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-        print("Calculating phylogeny")
-        decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
-        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
-
-
+        Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
+        #decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
+        #decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
+        #Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
+        
+        # Phylogeny clustering
+        if options.csb_distinct_grouping:
+            # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
+            print("Calculating phylogeny")
+            decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+            Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
+    
+        # Markov chain clustering 
+        if options.csb_mcl_clustering:
+            # Eingabe daten grpd0
+            Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 
         
@@ -315,6 +335,7 @@ def report_cv_performance(options):
     
     options.strict_cutoff_report_file = Reports.concatenate_cv_cutoff_files(options.cross_validation_directory, "_cv_thresholds.txt", options.Hidden_markov_model_directory+"/strict_cutoffs.txt")
 
+    Reports.load_and_process_hit_distributions(options.fasta_alignment_directory, options.database_directory)
 
 
 

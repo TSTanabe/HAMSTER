@@ -122,11 +122,11 @@ def initial_glob_search(options):
         blast_results_table = DiamondSearch(
             options.glob_faa, options.query_file, options.cores, 
             options.evalue, options.searchcoverage, options.minseqid, 
-            options.diamond_report_hits_limit, options.alignment_mode
+            options.diamond_report_hits_limit, options.alignment_mode,
         )
     
     # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
-    print("Filtering BLASTp results...")   
+    print("Filtering BLASTp results")   
     query_length_dict = get_sequence_legth(options.self_query) # Retrieve sequence lengths
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
     
@@ -192,7 +192,7 @@ def init_worker(diamond_blast_results_table, score_threshold_diction, csb_patter
 
 ####### Search routine #############
 
-def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits_limit, alignment_mode=2):
+def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits_limit, alignment_mode=2, sensitivity = "ultra-sensitive"):
     # path ist die Assembly FASTA-Datei
     # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
     
@@ -209,8 +209,8 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
 
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    print(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
-    os.system(f'{diamond} blastp --quiet --ultra-sensitive -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    print(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    os.system(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
 
