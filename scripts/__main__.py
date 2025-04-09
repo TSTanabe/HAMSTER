@@ -96,13 +96,13 @@ def parse_arguments(arguments):
     
     
     search = parser.add_argument_group("Optional search parameters for diamond")
-    search.add_argument('-evalue', dest='evalue', type=float, default = 1e-5, metavar = '<float>', help='E-value cutoff [0,inf]')
-    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]')
-    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
-    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
-    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
+    search.add_argument('-evalue', dest='evalue', type=float, default = 1e-5, metavar = '<float>', help='E-value cutoff [0,inf]. Default: 1e-5')
+    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]. Default: 100')
+    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]. Default: 25')
+    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]. Default: 0.6')
+    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode. Default: 2')
     search.add_argument('-memory',dest='diamond_memory_limit',type=int, default=8, metavar='<int>', help='DIAMOND BLASTp RAM limit')
-    search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]')
+    search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]. Default: 0.0')
     search.add_argument('-allow_multidomain', dest='multidomain_allowed', action='store_true', help='Allow multiple query hits for each sequence')
     search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query. 0 = no limit')
 
@@ -118,36 +118,36 @@ def parse_arguments(arguments):
 
     
     genecluster = parser.add_argument_group("Optional gene cluster prediction parameters")
-    genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes')
+    genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes. Default: 3500')
     genecluster.add_argument('-p', dest= 'patterns_file' , type=myUtil.file_path, default=__location__+"/src/Patterns", metavar='<filepath>', help='Filepath to patterns file')
     
     csb = parser.add_argument_group("Optional collinear synthenic block parameters")
-    csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb')
-    csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least times')
-    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
-    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
-    csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold')
+    csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb. Default: 2')
+    csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least times. Default: 10')
+    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb. Default: 4')
+    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes. Default: 0.4')
+    csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold. Default: 0.75')
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
     csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
-    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered') #Wir das noch genutzt?
+    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered. Default: 0.3') #Wir das noch genutzt?
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
 
     mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
-    mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]')
-    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=25, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]')
-    mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]')
-    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=500, metavar = '<int>', help='MCL maximum number of edges between sequences')
-    mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control')
-    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="more-sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive")
-    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive')
-    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive')
+    mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]. Default: 1e-10')
+    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=25, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]. Default: 25')
+    mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]. Default: 0.6')
+    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=500, metavar = '<int>', help='MCL maximum number of edges between sequences. Default: 500')
+    mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control. Default: 2.0')
+    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="more-sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: more-sensitive")
+    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
+    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
     
     #            options.mcl_hit_limit, options.alignment_mode, options.mcl_sensitivity
     alignment = parser.add_argument_group("Optional alignment parameters")
-    alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned')
-    alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
+    alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 100 000')
+    alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids. Default: 0.05')
     alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
     alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
     
