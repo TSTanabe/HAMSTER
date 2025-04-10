@@ -26,6 +26,9 @@ from . import Validation
 from . import Reports
 from . import myUtil
 
+from . import Singleton_finder
+from . import Singleton_Mx_algorithm
+
 
 if getattr(sys, 'frozen', False):
     __location__ = os.path.split(sys.executable)[0]
@@ -146,7 +149,7 @@ def parse_arguments(arguments):
     #            options.mcl_hit_limit, options.alignment_mode, options.mcl_sensitivity
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 100 000')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 300000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 300 000')
     alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids. Default: 0.05')
     alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
     alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
@@ -260,7 +263,7 @@ def generate_csb_sequence_fasta(options):
     
     score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
     print("Fetching sequences for training datasets")
-    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data
+    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data, excluding the keywords in the clust_ex_key_dict argument
 
     # Collect proteins from singular distantly related keywords
     if options.sglr:
@@ -272,18 +275,55 @@ def generate_csb_sequence_fasta(options):
     
     # Collect proteins from grouped keywords
     print("Processing highly similar homologs with specific genomic context")
-    grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grpd")
-    grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
-    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, grouped, options.fasta_output_directory, 10, options.max_seqs, options.cores)
-	
+    grouped = Csb_proteins.load_cache(
+        os.path.join(options.result_files_directory, "pkl_cache"),
+        'grp_training_proteinIDs.pkl'
+    )
+
+    if not grouped:
+        grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp")
+        grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
+        Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            grouped,
+            options.fasta_output_directory,
+            10,
+            options.max_seqs,
+            options.cores
+        )
+
+    
+    # Collect singletons without any conserved csb
+    print("Collecting highly similar homologs from query hits without any conserved genomic context")
+    Singleton_finder.singleton_reference_sequences(options)
+    score_limit_dict1, singleton_reference_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options)
+    
+    #Debugging
+    print("----##-----")
+    #print(score_limit_dict)
+    #print(grouped)
+    
+    #
+    print("----##-##----")
+    print(score_limit_dict1)
+    print(singleton_reference_seqs_dict)
+    
+    Csb_proteins.save_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'grp_training_proteinIDs.pkl', grouped)
+    options.grouped = grouped #structure of grouped: combined_protein_sets[f"{category}{i}_{domain}"] = protein_set
+    options.score_limit_dict = score_limit_dict
+    
+    
+
+def decorate_training_sequences(options):
+    grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'grp_training_proteinIDs.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'domain_score_limits.pkl')
+    
+    
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
     if options.csb_distinct_grouping or options.csb_mcl_clustering:
         print("Including homologs without genomic context based on protein sequence phylogeny.")
         Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
-        #decorated_grouped_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
-        #decorated_grouped_dict = Csb_proteins.merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-        #Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
         
         # Phylogeny clustering
         if options.csb_distinct_grouping:
@@ -389,23 +429,30 @@ def main(args=None):
         myUtil.print_header("\n 5. Preparing training data fasta files")
         generate_csb_sequence_fasta(options)   
 
-#6    
-    #align
     if options.stage <= 6 and options.end >= 6:
+        myUtil.print_header("\n 6. Recruiting singleton sequences to reference training datasets")
+        Singleton_finder.singleton_reference_sequences(options)
+   
+    if options.stage <= 7 and options.end >= 7:
+        myUtil.print_header("\n 6. Recruiting singleton sequences to reference training datasets")
+        decorate_training_sequences(options)
+#7    
+    #align
+    if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 6. Aligning sequences")
         model_alignment(options)
         
     
-#7        
+#8        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
-    if options.stage <= 7 and options.end >= 7:
+    if options.stage <= 8 and options.end >= 8:
         myUtil.print_header("\n 7. Performing cross valdation procedure")
         cross_validation(options)
 
-#8  
+#9  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
-    if options.stage <= 8 and options.end >= 8:
+    if options.stage <= 9 and options.end >= 9:
         report_cv_performance(options)
     
     

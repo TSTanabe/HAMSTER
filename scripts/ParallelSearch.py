@@ -489,47 +489,6 @@ def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=1
 
     return protein_dict
     
-def parse_bulk_blastreport_genomize_deprecated(genomeID,filepath,thresholds,cut_score=10):
-    #
-    # Parse a hit table with sseqid qseqid evalue bitscore sstart send pident
-    # First use grep to get all lines with the genomeID. Requisite: GENOMEID has to be part of the Hit identifier
-    #
-    
-    
-    protein_dict = {}
-
-    result = subprocess.run(['grep', genomeID, filepath], stdout=subprocess.PIPE, text=True)
-    
-    lines = result.stdout.splitlines()  # Split output into lines
-
-    for line in lines:
-        columns = line.split('\t')  # Assuming columns are tab-separated
-        if columns:
-            try:
-                #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-                #the hit identifier in the fasta file must have a genomeID___proteinID$ format, only the first ___ will be recognized
-                
-                #Bei Query___proteinID$
-                
-                hit_proteinID = columns[0]
-                query = columns[1]
-                hit_bitscore = int(float(columns[3]))
-                hsp_start = int(columns[4])
-                hsp_end = int(columns[5])
-                
-                if hit_proteinID in protein_dict:
-                    protein = protein_dict[hit_proteinID]
-                    protein.add_domain(query,hsp_start,hsp_end,hit_bitscore)
-                else:
-                    protein_dict[hit_proteinID] = ParseReports.Protein(hit_proteinID,query,hsp_start,hsp_end,hit_bitscore,genomeID)
-            except Exception as e:
-                error_message = f"\nError occurred: {str(e)}"
-                traceback_details = traceback.format_exc()
-                print(f"\tWARNING: Skipped {filepath} due to an error - {error_message}")
-                print(f"\tTraceback details:\n{traceback_details}")
-                continue
-                
-    return protein_dict
 
 
 

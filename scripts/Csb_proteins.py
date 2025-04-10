@@ -679,7 +679,7 @@ def fetch_protein_ids_parallel(database, score_limit_dict, cores):
 
     # Combine results into a dictionary
     domain_protein_ids = {domain: protein_ids for domain, protein_ids in results}
-    print(domain_protein_ids.keys())
+    #print(domain_protein_ids.keys())
     return domain_protein_ids
 
 
