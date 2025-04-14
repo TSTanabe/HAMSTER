@@ -261,7 +261,7 @@ def generate_csb_sequence_fasta(options):
     #prepares the sequence fasta files for the alignments
     Database.index_database(options.database_directory)
     
-    score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
+    grp_score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
     print("Fetching sequences for training datasets")
     csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data, excluding the keywords in the clust_ex_key_dict argument
 
@@ -273,7 +273,7 @@ def generate_csb_sequence_fasta(options):
         singular = {}
     
     
-    # Collect proteins from grouped keywords
+    ### Collect proteins from grouped keywords
     print("Processing highly similar homologs with specific genomic context")
     grouped = Csb_proteins.load_cache(
         os.path.join(options.result_files_directory, "pkl_cache"),
@@ -293,30 +293,46 @@ def generate_csb_sequence_fasta(options):
         )
 
     
-    # Collect singletons without any conserved csb
+    ### Collect singletons without any conserved csb
     print("Collecting highly similar homologs from query hits without any conserved genomic context")
-    Singleton_finder.singleton_reference_sequences(options)
-    score_limit_dict1, singleton_reference_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options)
-    
-    #Debugging
-    print("----##-----")
-    #print(score_limit_dict)
-    #print(grouped)
-    
-    #
-    print("----##-##----")
-    print(score_limit_dict1)
-    print(singleton_reference_seqs_dict)
-    
-    Csb_proteins.save_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'grp_training_proteinIDs.pkl', grouped)
-    options.grouped = grouped #structure of grouped: combined_protein_sets[f"{category}{i}_{domain}"] = protein_set
-    options.score_limit_dict = score_limit_dict
-    
+    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_finder.singleton_reference_sequences(options) #Very strict reference seqs with 0.95 blast score ratio
+
+
+
+    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options) # Pulls seqs directly from the fasta/tsv files
+
+    # --- Merge score_limit_dicts ---
+    merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
+
+    # --- Merge grouped dictionaries ---
+    merged_grouped = {**grouped, **sng_ref_seqs_dict}
+
+    # --- Debugging output ---
+    #print("----## Merged Score Limits ----")
+    #print(merged_score_limit_dict)
+    #print("----## Merged Grouped ----")
+    #print(merged_grouped)
+
+    # --- Save merged grouped ---
+    Csb_proteins.save_cache(
+        os.path.join(options.result_files_directory, "pkl_cache"),
+        'merged_grouped.pkl',
+        merged_grouped
+    )
+
+    Csb_proteins.save_cache(
+        os.path.join(options.result_files_directory, "pkl_cache"),
+        'merged_score.pkl',
+        merged_score_limit_dict
+    )
+    # --- Update options ---
+    options.grouped = merged_grouped
+    options.score_limit_dict = merged_score_limit_dict
     
 
 def decorate_training_sequences(options):
-    grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'grp_training_proteinIDs.pkl')
-    score_limit_dict = options.score_limit_dict if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'domain_score_limits.pkl')
+    grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'merged_grouped.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'merged_score.pkl')
     
     
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
@@ -337,7 +353,13 @@ def decorate_training_sequences(options):
             # Eingabe daten grpd0
             Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
-
+def demote_orphan_training_sequences(options):
+    # Ich brauche eine Presence absence matrix für das gesamte grp1
+    # Eine correlations matrix für alle in grp0
+    # Dann prüfe für jede domain ob mindestesn thrs der prozentsatz der korrelation der korrellierten sequenzen erhalten bleiben
+    # falls ja sequenz in neues file schreiben, wenn es sich um eine sequenz handelt die nicht in grp0 vorhanden war, sondern mit grp1 gekommen ist
+    Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
+    return
         
 def model_alignment(options):
     Alignment.initial_alignments(options, options.fasta_output_directory)
@@ -430,29 +452,29 @@ def main(args=None):
         generate_csb_sequence_fasta(options)   
 
     if options.stage <= 6 and options.end >= 6:
-        myUtil.print_header("\n 6. Recruiting singleton sequences to reference training datasets")
-        Singleton_finder.singleton_reference_sequences(options)
+        myUtil.print_header("\n 6. Add Markov chain cluster sequences to reference training datasets")
+        decorate_training_sequences(options)
    
     if options.stage <= 7 and options.end >= 7:
-        myUtil.print_header("\n 6. Recruiting singleton sequences to reference training datasets")
-        decorate_training_sequences(options)
+        myUtil.print_header("\n 7. Recruiting singleton sequences to reference training datasets")
+        demote_orphan_training_sequences(options)
 #7    
     #align
-    if options.stage <= 7 and options.end >= 7:
-        myUtil.print_header("\n 6. Aligning sequences")
+    if options.stage <= 8 and options.end >= 8:
+        myUtil.print_header("\n 8. Aligning sequences")
         model_alignment(options)
         
     
 #8        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
-    if options.stage <= 8 and options.end >= 8:
+    if options.stage <= 9 and options.end >= 9:
         myUtil.print_header("\n 7. Performing cross valdation procedure")
         cross_validation(options)
 
 #9  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
-    if options.stage <= 9 and options.end >= 9:
+    if options.stage <= 10 and options.end >= 10:
         report_cv_performance(options)
     
     

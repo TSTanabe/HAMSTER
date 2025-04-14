@@ -29,6 +29,7 @@ def group_gene_cluster_statistic(options):
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
     os.makedirs(cache_dir, exist_ok=True)
     # Load cache if available
+    #TODO für die bessere Übersicht diesen pkl einen prefix voranstellen, erleidgen solbald debugging der singleton routine durchgeführt ist
     filtered_stats_dict = load_cache(cache_dir, "filtered_stats.pkl")
     domain_score_limits = load_cache(cache_dir, "domain_score_limits.pkl")
     grouped_keywords = load_cache(cache_dir, "grouped_keywords.pkl")
@@ -37,7 +38,7 @@ def group_gene_cluster_statistic(options):
     query_score_dict = load_cache(cache_dir, "query_score_dict.pkl")  # Try loading from cache first
     
     
-    if domain_score_limits and grouped_keywords and clustered_excluded_keywords:
+    if domain_score_limits and filtered_stats_dict and grouped_keywords and clustered_excluded_keywords:
         print("Loaded existing CSB grouping from cache.")
         return domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
 

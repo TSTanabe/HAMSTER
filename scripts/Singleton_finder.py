@@ -2,19 +2,6 @@
 
 import os
 from . import Csb_proteins
-## Feststellung der singleton domänen die keinem genomsichen kontext angehören
-# First we need all query domains
-
-# Dann filter alle domänen aus die bereits im Protein_Phylogeny directory vorhanden sind.
-
-## Referenzproteine für diese Domänen festlegen
-
-# Aus dem selfblast die bitscore grenze finden. Falls mehrere queries für diese domäne verfügbar waren, dann sollten das etwa den rahmen festlegen was als referenz gelten kann
-
-# Hole alle Sequenzen oberhalb dieses cutoff scores als Referenz sequenzen fürs training
-
-# Dann übergabe an das MCL und Phylogenie modul
-
 
 
     
@@ -82,7 +69,19 @@ def get_min_bitscore_for_query(report_path, query_id, blast_score_ratio = 0.9):
 
 #### Main routine of this module
 def singleton_reference_sequences(options):
-    # Write reference sequence fasta files into the Sequence directory for the HMM training dataset fasta files
+
+    # Load cache if available
+    cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
+    os.makedirs(cache_dir, exist_ok=True)
+    domain_score_limits = Csb_proteins.load_cache(cache_dir, "sng_domain_score_limits.pkl")
+    singleton_reference_seqs_dict = Csb_proteins.load_cache(cache_dir, "sng_reference_seqs_dict.pkl")
+    
+    if domain_score_limits and singleton_reference_seqs_dict:
+        print("Loaded existing reference sequences for genes without conserved genomic context")
+        return domain_score_limits,singleton_reference_seqs_dict
+        
+
+    # If cache is not available calculate score limits and define reference sequences
     
     # Get the domains as a set that are present in the query file but not in training seq data
     query_names = extract_protein_ids_from_fasta(options.self_query)
@@ -99,12 +98,16 @@ def singleton_reference_sequences(options):
             "lower_limit": min_cutoff,
             "upper_limit": max_cutoff
         }
-
+    
+    Csb_proteins.save_cache(cache_dir, "sng_domain_score_limits.pkl", domain_score_limits)
+    
     # fetch proteins with the singleton domain and above thrs score to fasta
     singleton_reference_seqs_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory,domain_score_limits, options.cores)
     singleton_reference_seqs_dict = {f"sng0_{k}": v for k, v in singleton_reference_seqs_dict.items()} # Add prefix
+    Csb_proteins.save_cache(cache_dir, "sng_reference_seqs_dict.pkl", singleton_reference_seqs_dict)
     Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singleton_reference_seqs_dict, options.fasta_output_directory, 5, options.max_seqs, options.cores)
-
+    
+    return domain_score_limits, singleton_reference_seqs_dict
 
 
 
