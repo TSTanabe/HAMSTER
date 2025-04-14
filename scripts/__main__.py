@@ -334,12 +334,12 @@ def decorate_training_sequences(options):
     grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'merged_score.pkl')
     
-    
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
     if options.csb_distinct_grouping or options.csb_mcl_clustering:
         print("Including homologs without genomic context based on protein sequence phylogeny.")
         Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
+        
         
         # Phylogeny clustering
         if options.csb_distinct_grouping:
@@ -350,7 +350,7 @@ def decorate_training_sequences(options):
     
         # Markov chain clustering 
         if options.csb_mcl_clustering:
-            # Eingabe daten grpd0
+            print("Calculating Marjov Chain Clustering")            
             Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 def demote_orphan_training_sequences(options):
@@ -458,21 +458,21 @@ def main(args=None):
     if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 7. Recruiting singleton sequences to reference training datasets")
         demote_orphan_training_sequences(options)
-#7    
+#8    
     #align
     if options.stage <= 8 and options.end >= 8:
         myUtil.print_header("\n 8. Aligning sequences")
         model_alignment(options)
         
     
-#8        
+#9        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
     if options.stage <= 9 and options.end >= 9:
         myUtil.print_header("\n 7. Performing cross valdation procedure")
         cross_validation(options)
 
-#9  
+#10  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
     if options.stage <= 10 and options.end >= 10:
         report_cv_performance(options)

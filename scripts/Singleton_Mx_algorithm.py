@@ -26,8 +26,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
     ]
     domain_to_proteins = {}
     all_protein_ids = set()
-    print(faa_files)
-    sys.exit()
+
     for faa_file in faa_files:
         domain = os.path.splitext(faa_file)[0]#.replace("grp0_", "").replace("sng0_", "")
         file_path = os.path.join(faa_dir, faa_file)
@@ -469,7 +468,7 @@ def generate_singleton_reference_seqs(options):
 
     # Define intermediate file paths
     matrix_filepath = os.path.join(options.result_files_directory, "grp0_presence_absence_matrix.tsv")
-    correlation_filepath = os.path.join(options.result_files_directory, "grp0_protein_presence_correlations.tsv")
+    correlation_filepath = os.path.join(options.result_files_directory, "sng0_protein_presence_correlations.tsv")
 
     # Step 1: Create presence/absence matrix
     create_presence_absence_matrix(
@@ -536,7 +535,34 @@ def generate_singleton_reference_seqs(options):
 
 
     return score_limit_dict, singleton_reference_seqs_dict
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
 
 def main_presence_absence_matrix_filter(options):
     """
@@ -560,7 +586,10 @@ def main_presence_absence_matrix_filter(options):
     matrix_filepath = os.path.join(options.result_files_directory, "grp1_presence_absence_matrix.tsv")
     correlation_filepath = os.path.join(options.result_files_directory, "grp1_protein_presence_correlations.tsv")
 
-    # Step 1: Create presence/absence matrix
+    basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
+    basis_correlation_filepath = os.path.join(options.result_files_directory, "basis_protein_presence_correlations.tsv")
+
+    # Step 1: Create presence/absence matrix for grp1
     create_presence_absence_matrix(
         faa_dir=options.fasta_output_directory,
         database_directory=options.database_directory,
@@ -570,21 +599,46 @@ def main_presence_absence_matrix_filter(options):
         prefixes=("grp1",) # has to be a tuple
     )
 
-    # Step 2: Compute domain co-occurrence correlations
+    # Step 2: Compute domain co-occurrence correlations for grp1
     compute_conditional_presence_correlations(
         matrix_path=matrix_filepath,
         output_path=correlation_filepath,
         prefix='grp1'  # Use 'grp1' to limit to grp1 domains only
     )
 
-    # Step 3: Extract highly correlated co-domains
-    raw_correlation_dict = extract_high_correlation_partners(
-        input_tsv=correlation_filepath,
+    # Step 3: Create presence/absence matrix for grp0 as basis co-occurence
+    create_presence_absence_matrix(
+        faa_dir=options.fasta_output_directory,
+        database_directory=options.database_directory,
+        output_path=basis_matrix_filepath,
+        chunk_size=990,
+        extensions=(".faa",), # has to be a tuple
+        prefixes=("grp0",) # has to be a tuple
+    )
+
+    # Step 4: Compute domain co-occurrence correlations for grp0
+    compute_conditional_presence_correlations(
+        matrix_path=basis_matrix_filepath,
+        output_path=basis_correlation_filepath,
+        prefix='grp0'  # Use 'grp1' to limit to grp1 domains only
+    )
+
+    
+    # Step 5: Extract highly correlated co-domains
+    raw_basis_correlation_dict = extract_high_correlation_partners(
+        input_tsv=basis_correlation_filepath,
         min_correlation=0.5, #TODO make this an option
         top_n=None,
-        output_tsv=correlation_filepath
+        output_tsv=basis_correlation_filepath
     )
     
+    redundancy_dict = adjust_correlation_for_redundancy(raw_basis_correlation_dict)
+    
+    
+    
+    print(raw_basis_correlation_dict)
+    print(redundancy_dict)
+    sys.exit()
     #TODO hier weiter machen. Nummer 7 testen und die korrelationen in abhängigkeit von einander nutzen um in der presence absence matrix aufzuräumen
     return
     

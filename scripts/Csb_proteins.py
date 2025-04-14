@@ -154,13 +154,11 @@ def csb_granular_datasets(options, dictionary):
 def decorate_training_data(options, score_limit_dict, grouped):
 
     # Training datasets with additional sequences
-    score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory)
-    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores)
+    score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
+    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-    print(decorated_grouped_dict.keys())
-    fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, 20, options.max_seqs, options.cores)
-       
-
+    fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
+    
     return
 ################################################################################################
 
@@ -684,27 +682,18 @@ def fetch_protein_ids_parallel(database, score_limit_dict, cores):
 
 
 def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
-    """
-    Merge protein IDs from the grouped dataset into the protein_ids_by_domain dictionary (in place).
-    
-    Args:
-        protein_ids_by_domain (dict): { domain: set(proteinIDs) }
-        grouped_dict (dict): { "grpd0_domain": set(proteinIDs) } (Keys are prefixed strings)
 
-    Returns:
-        None (Modifies protein_ids_by_domain in place)
-    """
+    # Merge the grp0 seqIDs and the decorate seqIDs into a new dictionary which has only domain without prefix
+    # this value set is used for the fetching of the sequences to a file for the further classification steps
+    merged = protein_ids_by_domain.copy()
     for grouped_key, protein_ids in grouped_dict.items():
-        # Extract domain by removing the prefix "grpd0_"
-        domain = grouped_key.replace("grpd0_", "", 1)
-
-        # If domain already exists, update it with new protein IDs
-        if domain in protein_ids_by_domain:
-            protein_ids_by_domain[domain].update(protein_ids)
+        domain = grouped_key.replace("grp0_", "", 1)
+        if domain in merged:
+            merged[domain].update(protein_ids)
         else:
-            # If the domain doesn't exist, create a new entry with the protein IDs
-            protein_ids_by_domain[domain] = set(protein_ids)
-    return protein_ids_by_domain
+            merged[domain] = set(protein_ids)
+
+    return {k: v for k, v in merged.items() if not k.startswith("grp0_")}
 
 
 

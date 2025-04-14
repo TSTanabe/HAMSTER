@@ -153,16 +153,15 @@ def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshol
     and processes them using process_single_mcl_file.
 
     Args:
-    - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths.
+    - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths. These are either grp0_ or without prefix
     - reference_dict (dict): Dictionary where keys need to be split ('_'), and values are sets of reference sequence IDs. keys are grp0_domain
     - density_threshold (float): Minimum reference density required.
 
     Returns:
     - all_clusters (dict): Merged dictionary of all high-density clusters.
     """
-
     all_clusters = {}
-
+    
     # Process reference_dict to extract the actual domain names
     processed_reference_dict = {
         key.split("_", 1)[-1]: value for key, value in reference_dict.items()
@@ -173,22 +172,28 @@ def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshol
 
         # Get reference sequences for the domain (if exists in processed reference dict)
         reference_sequences = processed_reference_dict.get(domain, set())
-
         if not reference_sequences:
             print(f"Warning: No reference sequences found for domain '{domain}', skipping.")
             continue
 
-        # Process the MCL file for this domain
+        # Step 1 Process the MCL file for this domain
         mcl_domain_clusters_dict = process_single_mcl_file(mcl_file, domain, reference_sequences, density_threshold, reference_threshold)
         
-        # Combine all individual cluster sets into one merged set
+        # Step 2 Combine all individual cluster sets into one merged set
         
         combined_set = set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
 
-        # Add the combined set to the cluster dictionary
-        mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set
+        # Step 3 Replace if only one cluster and it's equal to combined
+        if len(mcl_domain_clusters_dict) == 1:
+            only_cluster = next(iter(mcl_domain_clusters_dict.values()))
+            if only_cluster == combined_set:
+                print(f"Only one cluster identical to reference+merged set. Using grp1_{domain} only.")
+                mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
+        else:
+            # Add combined set additionally
+            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set
 
-        # Write down the clusters (including the combined one)
+        # Step 4 Write down the clusters (including the combined one)
         Csb_proteins.fetch_seqs_to_fasta_parallel(
             options.database_directory,
             mcl_domain_clusters_dict,  # Now contains both individual clusters + combined set

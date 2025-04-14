@@ -105,7 +105,7 @@ def get_lca_worker_task(args):
         lca, clade_identifier_set = find_lca_and_monophyly(proteinID_set, tree)
 
         if clade_identifier_set:
-            monophyly[domain] = clade_identifier_set
+            monophyly["lca_"+domain] = clade_identifier_set
         else:
             return {},{} #if no addition was found and set is already monophylum, return emtpy dicts
 
@@ -125,7 +125,7 @@ def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix):
 
     # Prepare arguments for the worker function
     worker_args = [
-        (proteinID_set, grouped_key.replace("grpd0_", "", 1), trees_dict, tree_prefix)
+        (proteinID_set, grouped_key.replace("grp0_", "", 1), trees_dict, tree_prefix)
         for grouped_key, proteinID_set in grouped.items()
     ]
 
