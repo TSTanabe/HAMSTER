@@ -6,7 +6,13 @@ from . import Csb_proteins
 from multiprocessing import Pool
 from collections import defaultdict
 
-def create_presence_absence_matrix(faa_dir, database_directory, output_path, chunk_size=900, extensions=(".faa",), prefixes=("grp0", "sng0")):
+
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.exceptions import ConvergenceWarning
+import warnings
+
+def create_presence_absence_matrix(faa_dir, database_directory, output_path, chunk_size=900, extensions=(".faa",), prefixes=("grp0", "sng0"), cores=4):
     """
     Creates a TSV file where each cell contains the proteinID(s) for a domain in a genome.
     Multiple proteinIDs per genome-domain pair are joined with commas. Empty if absent.
@@ -19,6 +25,10 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
         extensions (tuple): File extensions to include (e.g. (".faa", ".fa")).
         prefixes (tuple): Acceptable filename prefixes (e.g. ("grp0", "sng0")).
     """
+    
+    if os.path.isfile(output_path):
+        return
+    
     # Step 1: Find relevant FASTA files
     faa_files = [
         f for f in os.listdir(faa_dir)
@@ -28,6 +38,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
     all_protein_ids = set()
 
     for faa_file in faa_files:
+        print(f"Fetching presence from faa_file {faa_file}")
         domain = os.path.splitext(faa_file)[0]#.replace("grp0_", "").replace("sng0_", "")
         file_path = os.path.join(faa_dir, faa_file)
         protein_ids = set()
@@ -41,37 +52,47 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
 
         domain_to_proteins[domain] = protein_ids
 
-    # Step 2: Map proteinID → genomeID
+
+    ### Step 2: Map proteinID → genomeID
+    print("Mapping proteinIDs to genomeID")
+    # Erzeuge Chunk-Argumente
+    chunk_args = [
+        (database_directory, chunk)
+        for chunk in chunked(all_protein_ids, chunk_size)
+    ]
+
+    # Parallel ausführen
+    with Pool(processes=cores) as pool:
+        results = pool.map(_fetch_protein_to_genome_chunk, chunk_args)
+
+    # Ergebnisse zusammenführen
     protein_to_genome = {}
-    with sqlite3.connect(database_directory) as con:
-        cur = con.cursor()
+    for partial in results:
+        protein_to_genome.update(partial)
 
-        def chunked(iterable, size):
-            it = list(iterable)
-            for i in range(0, len(it), size):
-                yield it[i:i + size]
 
-        for chunk in chunked(all_protein_ids, chunk_size):
-            placeholders = ",".join(["?"] * len(chunk))
-            query = f"""
-                SELECT proteinID, genomeID FROM Proteins
-                WHERE proteinID IN ({placeholders})
-            """
-            cur.execute(query, chunk)
-            for proteinID, genomeID in cur.fetchall():
-                protein_to_genome[proteinID] = genomeID
 
-    # Step 3: Build genomeID → domain → proteinID(s)
+
+    ### Step 3: Build genomeID → domain → proteinID(s)
+    # Prepare arguments per domain
+    args_list = [
+        (domain, protein_ids, protein_to_genome)
+        for domain, protein_ids in domain_to_proteins.items()
+    ]
+
+    print("Step 3 execution (parallelized)")
     genome_domain_matrix = defaultdict(lambda: defaultdict(list))
-    all_domains = sorted(domain_to_proteins.keys())
 
-    for domain, protein_ids in domain_to_proteins.items():
-        for prot_id in protein_ids:
-            genome_id = protein_to_genome.get(prot_id)
-            if genome_id:
-                genome_domain_matrix[genome_id][domain].append(prot_id)
+    with Pool(processes=cores) as pool:
+        results = pool.map(_map_domain_proteins_to_genomes, args_list)
 
-    # Step 4: Write TSV
+    # Merge results
+    for partial in results:
+        for genome_id, domain_prot_pairs in partial.items():
+            for domain, pid in domain_prot_pairs:
+                genome_domain_matrix[genome_id][domain].append(pid)
+
+    ### Step 4: Write TSV
     with open(output_path, "w", newline="") as f_out:
         writer = csv.writer(f_out, delimiter="\t")
         writer.writerow(["genomeID"] + all_domains)
@@ -82,85 +103,35 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
                 prot_list = genome_domain_matrix[genome_id].get(domain, [])
                 row.append(",".join(prot_list) if prot_list else "")
             writer.writerow(row)
-
-def create_presence_absence_matrix_deprecated(faa_dir, database_directory, output_path, chunk_size=500):
-    """
-    Generates a TSV presence/absence matrix of domains per genome without using pandas.
-    It includes chunked database queries to handle large sets of protein IDs.
-
-    Args:
-        faa_dir (str): Directory containing .faa files (FASTA format with proteinIDs in headers).
-        database_directory (str): Path to the SQLite database.
-        output_path (str): Path to the output TSV file.
-        chunk_size (int): Maximum number of proteinIDs per database query.
-    """
-    if os.path.isfile(output_path):
-        return
-    
-    # 1. Collect all .faa files with the correct prefixes
-    faa_files = [f for f in os.listdir(faa_dir)
-                 if f.endswith(".faa") and (f.startswith("grp0") or f.startswith("sng0"))]
-
-    domain_to_proteins = {}
-    all_protein_ids = set()
-
-    # 2. Parse protein IDs from each .faa file
-    for faa_file in faa_files:
-        domain = os.path.splitext(faa_file)[0]  # Use filename (without extension) as domain label
-        file_path = os.path.join(faa_dir, faa_file)
-        protein_ids = set()
-
-        with open(file_path, "r") as f:
-            for line in f:
-                if line.startswith(">"):
-                    prot_id = line[1:].strip().split()[0]
-                    protein_ids.add(prot_id)
-                    all_protein_ids.add(prot_id)
-
-        domain_to_proteins[domain] = protein_ids
-
-    # 3. Chunked query to map proteinID → genomeID from the database
-    protein_to_genome = {}
-
-    def chunked(iterable, size):
-        it = list(iterable)
-        for i in range(0, len(it), size):
-            yield it[i:i + size]
-
-    with sqlite3.connect(database_directory) as con:
-        cur = con.cursor()
-        for chunk in chunked(all_protein_ids, chunk_size):
-            placeholders = ",".join(["?"] * len(chunk))
-            query = f"SELECT proteinID, genomeID FROM Proteins WHERE proteinID IN ({placeholders})"
-            cur.execute(query, chunk)
-            for proteinID, genomeID in cur.fetchall():
-                protein_to_genome[proteinID] = genomeID
-
-    # 4. Build the presence/absence matrix: genomeID × domain
-    genome_domain_matrix = defaultdict(dict)
-    genome_ids = set()
-    domain_list = sorted(domain_to_proteins.keys())
-
-    for domain in domain_list:
-        for prot_id in domain_to_proteins[domain]:
-            genome_id = protein_to_genome.get(prot_id)
-            if genome_id:
-                genome_domain_matrix[genome_id][domain] = "1"
-                genome_ids.add(genome_id)
-
-    # 5. Write the matrix to TSV
-    with open(output_path, "w", newline="") as out_file:
-        writer = csv.writer(out_file, delimiter="\t")
-        header = ["genomeID"] + domain_list
-        writer.writerow(header)
-
-        for genome_id in sorted(genome_ids):
-            row = [genome_id]
-            for domain in domain_list:
-                row.append(genome_domain_matrix[genome_id].get(domain, "0"))
-            writer.writerow(row)
-
     return
+    
+    
+def _map_domain_proteins_to_genomes(args):
+    domain, protein_ids, protein_to_genome = args
+    result = defaultdict(list)
+    for pid in protein_ids:
+        genome_id = protein_to_genome.get(pid)
+        if genome_id:
+            result[genome_id].append((domain, pid))
+    return result
+
+def _fetch_protein_to_genome_chunk(args):
+    database_path, chunk = args
+    local_result = {}
+    with sqlite3.connect(database_path) as con:
+        cur = con.cursor()
+        placeholders = ",".join(["?"] * len(chunk))
+        query = f"SELECT proteinID, genomeID FROM Proteins WHERE proteinID IN ({placeholders})"
+        cur.execute(query, chunk)
+        for proteinID, genomeID in cur.fetchall():
+            local_result[proteinID] = genomeID
+    return local_result
+
+
+
+
+
+
 
 
 def compute_conditional_presence_correlations(matrix_path, output_path=None, prefix=None):
@@ -477,7 +448,8 @@ def generate_singleton_reference_seqs(options):
         output_path=matrix_filepath,
         chunk_size=990,
         extensions=(".faa",),
-        prefixes=("grp0", "sng0")
+        prefixes=("grp0", "sng0"),
+        cores = options.cores
     )
 
     # Step 2: Compute domain co-occurrence correlations
@@ -555,12 +527,85 @@ def generate_singleton_reference_seqs(options):
 
 
 
+###############################################################################
+####### Main routines for the regression of presence absence matrices #########
+###############################################################################
 
 
 
+def train_logistic_models_from_tsv(tsv_path):
+    """
+    Liest eine TSV-Datei mit Präsenz-/Absenz-Matrix ein, entfernt das 'grp0_'-Prefix aus den Spaltennamen,
+    wandelt die Werte in binär ("" = 0, alles andere = 1), und trainiert für jede Spalte ein
+    logistische Regressionsmodell auf Basis der übrigen Spalten.
+
+    Rückgabe:
+        - Dictionary mit trainierten Modellen
+        - DataFrame mit den Regressionsgewichten
+    """
+    # Einlesen
+    df = pd.read_csv(tsv_path, sep="\t")
+
+    # Spaltennamen bereinigen
+    df.columns = [col.replace("grp0_", "") for col in df.columns]
+
+    # Binär-Matrix erzeugen
+    binary_matrix = df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+
+    # Ergebnisse
+    models = {}
+    coefficients_table = {}
+
+    # Warnungen unterdrücken (z. B. falls kleine Datensätze nicht konvergieren)
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+    for target_protein in binary_matrix.columns:
+        X = binary_matrix.drop(columns=[target_protein])
+        y = binary_matrix[target_protein]
+
+        if y.nunique() > 1:
+            model = LogisticRegression()
+            model.fit(X, y)
+            models[target_protein] = model
+            coefs = pd.Series(model.coef_[0], index=X.columns)
+            coefs["(Intercept)"] = model.intercept_[0]
+            coefficients_table[target_protein] = coefs
+
+    coef_df = pd.DataFrame(coefficients_table).T
+    return models, coef_df
 
 
+def check_new_presences(base_tsv_path, extended_tsv_path, threshold=0.6):
+    # Modelle auf Basisdaten trainieren
+    models, coef_df = train_logistic_models_from_tsv(base_tsv_path)
 
+    # Erweiterte Matrix laden und vorbereiten
+    extended_df = pd.read_csv(extended_tsv_path, sep="\t")
+    extended_df.columns = [col.replace("grp1_", "") for col in extended_df.columns]
+    extended_bin = extended_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+
+    # Basisdaten zur Differenzberechnung auch laden
+    base_df = pd.read_csv(base_tsv_path, sep="\t")
+    base_df.columns = [col.replace("grp0_", "") for col in base_df.columns]
+    base_bin = base_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+
+    # Überprüfung jeder neuen 1, die vorher 0 war
+    for protein in extended_bin.columns:
+        if protein not in models:
+            continue  # kein Modell für konstante Spalte
+        model = models[protein]
+        X_extended = extended_bin.drop(columns=[protein])
+        y_extended = extended_bin[protein]
+        y_base = base_bin[protein]
+
+        for idx in extended_bin.index:
+            was_0 = y_base.loc[idx] == 0
+            now_1 = y_extended.loc[idx] == 1
+            if was_0 and now_1:
+                features = X_extended.loc[idx].values.reshape(1, -1)
+                score = model.predict_proba(features)[0, 1]
+                if score < threshold:
+                    print(f"NICHT PLAUSIBEL: Genom={idx}, Domain={protein}, Score={score:.3f}")
 
    
 
@@ -589,40 +634,37 @@ def main_presence_absence_matrix_filter(options):
     basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
     basis_correlation_filepath = os.path.join(options.result_files_directory, "basis_protein_presence_correlations.tsv")
 
-    # Step 1: Create presence/absence matrix for grp1
-    create_presence_absence_matrix(
-        faa_dir=options.fasta_output_directory,
-        database_directory=options.database_directory,
-        output_path=matrix_filepath,
-        chunk_size=990,
-        extensions=(".faa",), # has to be a tuple
-        prefixes=("grp1",) # has to be a tuple
-    )
-
-    # Step 2: Compute domain co-occurrence correlations for grp1
-    compute_conditional_presence_correlations(
-        matrix_path=matrix_filepath,
-        output_path=correlation_filepath,
-        prefix='grp1'  # Use 'grp1' to limit to grp1 domains only
-    )
-
-    # Step 3: Create presence/absence matrix for grp0 as basis co-occurence
+    # Step 1: Create presence/absence matrix for grp0 as basis co-occurence
     create_presence_absence_matrix(
         faa_dir=options.fasta_output_directory,
         database_directory=options.database_directory,
         output_path=basis_matrix_filepath,
         chunk_size=990,
         extensions=(".faa",), # has to be a tuple
-        prefixes=("grp0",) # has to be a tuple
+        prefixes=("grp0",), # has to be a tuple
+        cores = options.cores
     )
 
-    # Step 4: Compute domain co-occurrence correlations for grp0
-    compute_conditional_presence_correlations(
-        matrix_path=basis_matrix_filepath,
-        output_path=basis_correlation_filepath,
-        prefix='grp0'  # Use 'grp1' to limit to grp1 domains only
+    # Step 2: Create presence/absence matrix for grp1
+    create_presence_absence_matrix(
+        faa_dir=options.fasta_output_directory,
+        database_directory=options.database_directory,
+        output_path=matrix_filepath,
+        chunk_size=990,
+        extensions=(".faa",), # has to be a tuple
+        prefixes=("grp1",), # has to be a tuple
+        cores = options.cores
     )
 
+    print("Created matrices ----------------")
+    # Step 3: Learn regression from grp0 co-occurence
+    check_new_presences(basis_matrix_filepath,matrix_filepath)
+    sys.exit()    
+    
+    
+    
+    
+    
     
     # Step 5: Extract highly correlated co-domains
     raw_basis_correlation_dict = extract_high_correlation_partners(
