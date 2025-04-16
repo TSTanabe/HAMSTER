@@ -62,7 +62,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
     ]
 
     # Parallel ausführen
-    with Pool(processes=cores) as pool:
+    with Pool(processes=4) as pool:
         results = pool.map(_fetch_protein_to_genome_chunk, chunk_args)
 
     # Ergebnisse zusammenführen
@@ -83,7 +83,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
     print("Step 3 execution (parallelized)")
     genome_domain_matrix = defaultdict(lambda: defaultdict(list))
 
-    with Pool(processes=cores) as pool:
+    with Pool(processes=4) as pool:
         results = pool.map(_map_domain_proteins_to_genomes, args_list)
 
     # Merge results
@@ -93,6 +93,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
                 genome_domain_matrix[genome_id][domain].append(pid)
 
     ### Step 4: Write TSV
+    all_domains = sorted(domain_to_proteins.keys())
     with open(output_path, "w", newline="") as f_out:
         writer = csv.writer(f_out, delimiter="\t")
         writer.writerow(["genomeID"] + all_domains)
@@ -130,9 +131,9 @@ def _fetch_protein_to_genome_chunk(args):
 
 
 
-
-
-
+#########################################################################################
+################## Routines for the correlation values ##################################
+#########################################################################################
 
 def compute_conditional_presence_correlations(matrix_path, output_path=None, prefix=None):
     """
@@ -296,7 +297,7 @@ def _process_target_domain(args):
 
             # Step 2: Get best scoring proteins for target_domain in chunks
             genome_list = list(genomes_with_all)
-            chunk_size = 900
+            chunk_size = 990
             total_chunks = (len(genome_list) + chunk_size - 1) // chunk_size
 
             print(f"[{target_domain}] Fetching best proteins in {len(genome_list)} genomes (split into {total_chunks} chunks)")
@@ -529,6 +530,7 @@ def generate_singleton_reference_seqs(options):
 
 ###############################################################################
 ####### Main routines for the regression of presence absence matrices #########
+####### Step 7                                                        #########
 ###############################################################################
 
 
@@ -577,38 +579,243 @@ def train_logistic_models_from_tsv(tsv_path):
 
 
 def check_new_presences(base_tsv_path, extended_tsv_path, threshold=0.6):
+
     # Modelle auf Basisdaten trainieren
     models, coef_df = train_logistic_models_from_tsv(base_tsv_path)
 
     # Erweiterte Matrix laden und vorbereiten
     extended_df = pd.read_csv(extended_tsv_path, sep="\t")
     extended_df.columns = [col.replace("grp1_", "") for col in extended_df.columns]
-    extended_bin = extended_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
+    extended_df = extended_df.set_index("genomeID")
+    extended_bin = extended_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
 
     # Basisdaten zur Differenzberechnung auch laden
     base_df = pd.read_csv(base_tsv_path, sep="\t")
     base_df.columns = [col.replace("grp0_", "") for col in base_df.columns]
-    base_bin = base_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
+    base_df = base_df.set_index("genomeID")
+    base_bin = base_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
 
-    # Überprüfung jeder neuen 1, die vorher 0 war
-    for protein in extended_bin.columns:
-        if protein not in models:
-            continue  # kein Modell für konstante Spalte
-        model = models[protein]
-        X_extended = extended_bin.drop(columns=[protein])
-        y_extended = extended_bin[protein]
-        y_base = base_bin[protein]
+    # Ergebnisse
+    non_plausible_hits = []
 
-        for idx in extended_bin.index:
-            was_0 = y_base.loc[idx] == 0
-            now_1 = y_extended.loc[idx] == 1
+    # Warnungen unterdrücken (z. B. falls kleine Datensätze nicht konvergieren)
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+    for genome_id in extended_bin.index:
+        if genome_id not in base_bin.index:
+            # Hits in new genomes are generally unplausible
+            for protein in extended_bin.columns:
+                if extended_bin.at[genome_id, protein] == 1:
+                    non_plausible_hits.append((genome_id, protein, 0.0))
+            continue
+
+        for protein in extended_bin.columns:
+            if protein not in models:
+                continue  # kein Modell für konstante Spalte
+
+            model = models[protein]
+            was_0 = base_bin.at[genome_id, protein] == 0
+            now_1 = extended_bin.at[genome_id, protein] == 1
+
             if was_0 and now_1:
-                features = X_extended.loc[idx].values.reshape(1, -1)
-                score = model.predict_proba(features)[0, 1]
-                if score < threshold:
-                    print(f"Non-plausible hit detected: Genom={idx}, Domain={protein}, Score={score:.3f}")
+                # Feature-Vektor ohne Zielspalte
+                # Features holen aus grp0 für dieses Genom, ohne Zielprotein
+                X_context = base_bin.loc[genome_id].drop(labels=[protein])
 
-   
+                # In DataFrame verwandeln und reindexieren auf trainierte Spalten
+                expected_features = model.feature_names_in_
+                X_aligned = pd.DataFrame([X_context], columns=base_bin.columns)
+                X_aligned = X_aligned.reindex(columns=expected_features, fill_value=0)
+
+                # Jetzt sicher und fehlerfrei
+                score = model.predict_proba(X_aligned)[0, 1]
+
+
+                if score < threshold:
+                    non_plausible_hits.append((genome_id, protein, score))
+
+    return non_plausible_hits
+
+def check_new_presences_with_combined_context(base_tsv_path, extended_tsv_path, threshold=0.6):
+    """
+    Bewertet neue 1-Einträge in extended_tsv_path mit einem auf base_tsv_path trainierten Modell,
+    wobei zusätzlich alle neuen Präsenzen im selben Genom berücksichtigt werden.
+
+    Gibt eine Liste der unplausiblen neuen Einträge zurück (genomeID, protein, score).
+    """
+
+    # Modelle auf Basisdaten trainieren
+    models, coef_df = train_logistic_models_from_tsv(base_tsv_path)
+
+    # Daten laden
+    extended_df = pd.read_csv(extended_tsv_path, sep="\t")
+    extended_df.columns = [col.replace("grp1_", "") for col in extended_df.columns]
+    extended_df = extended_df.set_index("genomeID")
+    extended_bin = extended_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+    
+    base_df = pd.read_csv(base_tsv_path, sep="\t")
+    base_df.columns = [col.replace("grp0_", "") for col in base_df.columns]
+    base_df = base_df.set_index("genomeID")
+    base_bin = base_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+
+    # Ergebnisse
+    non_plausible_hits = []
+    warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
+    for genome_id in extended_bin.index:
+        if genome_id not in base_bin.index:
+            # Komplett neues Genom – alles ist unplausibel
+            for protein in extended_bin.columns:
+                if extended_bin.at[genome_id, protein] == 1:
+                    non_plausible_hits.append((genome_id, protein, 0.0))
+            continue
+
+        # Kontext von grp0
+        base_context = base_bin.loc[genome_id].copy()
+
+        # Zusätzlich neue 1en aus grp1 identifizieren
+        new_hits = []
+        for protein in extended_bin.columns:
+            was_0 = base_bin.at[genome_id, protein] == 0
+            now_1 = extended_bin.at[genome_id, protein] == 1
+            if was_0 and now_1:
+                new_hits.append(protein)
+
+        # Kombinierter Kontext: base + neue (außer dem Target selbst beim Test)
+        for target in new_hits:
+            if target not in models:
+                continue
+            model = models[target]
+
+            # Erweitere Kontext: kopiere grp0 Präsenz, füge neue 1er hinzu
+            combined_context = base_context.copy()
+            for nh in new_hits:
+                if nh != target:
+                    combined_context[nh] = 1
+
+            # Align auf Modellinput
+            expected_features = model.feature_names_in_
+            X_aligned = pd.DataFrame([combined_context], columns=base_bin.columns)
+            X_aligned = X_aligned.reindex(columns=expected_features, fill_value=0)
+
+            score = model.predict_proba(X_aligned)[0, 1]
+            if score < threshold:
+                non_plausible_hits.append((genome_id, target, score))
+
+    return non_plausible_hits
+
+
+def extract_protein_ids_for_hits(tsv_path, non_plausible_hits):
+    """
+    Extrahiert die Protein-IDs aus der Presence/Absence-Matrix für alle unplausiblen Treffer.
+
+    Args:
+        tsv_path (str): Pfad zur Presence/Absence-Matrix (.tsv).
+        non_plausible_hits (list of tuples): [(genome_id, domain, score), ...]
+
+    Returns:
+        dict: {genome_id: {domain: [proteinIDs]}}
+    """
+    # Matrix laden, fehlende Zellen als leere Strings behandeln
+    df = pd.read_csv(tsv_path, sep="\t", dtype=str).fillna("")
+    
+    # Spaltennamen bereinigen (entferne grp1_ oder grp0_)
+    original_cols = df.columns.tolist()
+    cleaned_cols = [
+        col if col == "genomeID" else col.replace("grp0_", "").replace("grp1_", "")
+        for col in original_cols
+    ]
+    df.columns = cleaned_cols
+
+    # Index setzen
+    df.set_index("genomeID", inplace=True)
+
+    # Ergebnisse sammeln
+    result = defaultdict(dict)
+    for genome, domain, score in non_plausible_hits:
+        if genome not in df.index:
+            result[genome][domain] = []
+            continue
+
+        if domain not in df.columns:
+            result[genome][domain] = []
+            continue
+
+        entry = df.at[genome, domain]
+        proteins = entry.split(",") if entry else []
+        result[genome][domain] = [p.strip() for p in proteins if p.strip()]
+
+    return result
+
+def invert_protein_mapping_by_domain(protein_mapping):
+    """
+    Wandelt das Mapping {genome: {domain: [proteinIDs]}} um in
+    {domain: set(proteinIDs)} – unabhängig vom Genom.
+
+    Args:
+        protein_mapping (dict): Mapping mit Struktur {genome: {domain: [proteinIDs]}}
+
+    Returns:
+        dict: Mapping mit Struktur {domain: set(proteinIDs)}
+    """
+    domain_to_proteins = {}
+
+    for genome, domain_dict in protein_mapping.items():
+        for domain, proteins in domain_dict.items():
+            if domain not in domain_to_proteins:
+                domain_to_proteins[domain] = set()
+            domain_to_proteins[domain].update(proteins)
+
+    return domain_to_proteins
+    
+
+def write_plausible_fasta_sequences(faa_dir, unplausible_proteins_by_domain, output_dir):
+    """
+    Liest grp1_*.faa Dateien, filtert unplausible Protein-IDs und schreibt plausible Sequenzen
+    in neue grp2_*.faa Dateien.
+
+    Args:
+        faa_dir (str): Verzeichnis mit den grp1_*.faa Dateien.
+        unplausible_proteins_by_domain (dict): {domain: set(proteinIDs)}.
+        output_dir (str): Zielverzeichnis für die grp2_*.faa Dateien.
+    """
+    for filename in os.listdir(faa_dir):
+        if not filename.startswith("grp1_") or not filename.endswith(".faa"):
+            continue
+
+        domain = filename.replace("grp1_", "").replace(".faa", "")
+        unplausible_ids = unplausible_proteins_by_domain.get(domain, set())
+
+        input_path = os.path.join(faa_dir, filename)
+        output_filename = filename.replace("grp1_", "grp2_")
+        output_path = os.path.join(output_dir, output_filename)
+
+        with open(input_path, "r") as infile, open(output_path, "w") as outfile:
+            write_flag = False
+            current_header = ""
+            current_seq_lines = []
+
+            for line in infile:
+                if line.startswith(">"):
+                    # Beim nächsten Header – prüfen, ob vorheriger Header geschrieben werden soll
+                    if write_flag and current_header:
+                        outfile.write(current_header)
+                        outfile.writelines(current_seq_lines)
+
+                    prot_id = line[1:].strip().split()[0]
+                    write_flag = prot_id not in unplausible_ids
+                    current_header = line if write_flag else ""
+                    current_seq_lines = []
+
+                else:
+                    if write_flag:
+                        current_seq_lines.append(line)
+
+            # Letzte Sequenz schreiben (falls gültig)
+            if write_flag and current_header:
+                outfile.write(current_header)
+                outfile.writelines(current_seq_lines)
+
 
 def main_presence_absence_matrix_filter(options):
     """
@@ -629,7 +836,7 @@ def main_presence_absence_matrix_filter(options):
     """
 
     # Define intermediate file paths
-    matrix_filepath = os.path.join(options.result_files_directory, "grp1_presence_absence_matrix.tsv")
+    grp1_matrix_filepath = os.path.join(options.result_files_directory, "grp1_presence_absence_matrix.tsv")
     correlation_filepath = os.path.join(options.result_files_directory, "grp1_protein_presence_correlations.tsv")
 
     basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
@@ -650,87 +857,51 @@ def main_presence_absence_matrix_filter(options):
     create_presence_absence_matrix(
         faa_dir=options.fasta_output_directory,
         database_directory=options.database_directory,
-        output_path=matrix_filepath,
+        output_path=grp1_matrix_filepath,
         chunk_size=990,
         extensions=(".faa",), # has to be a tuple
         prefixes=("grp1",), # has to be a tuple
         cores = options.cores
     )
 
-    print("Created matrices ----------------")
-    # Step 3: Learn regression from grp0 co-occurence
-    check_new_presences(basis_matrix_filepath,matrix_filepath)
-    sys.exit()    
+    # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
+    #TODO option für liberal und konservativ
+    # Conservative with new hits against base grp0 hits in the genome
+    #grp1_non_plausible_hits = check_new_presences(basis_matrix_filepath,grp1_matrix_filepath) # Learn from base and check individually new hits against genome base hits
+    #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
+ 
+    # Liberal with new hits against base grp0 hits in the genome + new hits in the genome
+    #grp1_non_plausible_hits2 = check_new_presences_with_combined_context(basis_matrix_filepath,grp1_matrix_filepath,options.pam_threshold) # Learn from base and check new hits against base + new hits in genome
+    #protein_mapping2 = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits2)
+    
+    cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
+    
+    if os.path.exists(cache_dir+"/grp1_non_plausible_hits2.pkl") and os.path.exists(cache_dir+"/protein_mapping2.pkl"):
+        grp1_non_plausible_hits2 = Csb_proteins.load_cache(cache_dir, "grp1_non_plausible_hits2.pkl")
+        protein_mapping2 = Csb_proteins.load_cache(cache_dir, "protein_mapping2.pkl")
+    else:
+        print("Running logistic regression check...")
+        grp1_non_plausible_hits2 = check_new_presences_with_combined_context(
+            basis_matrix_filepath,
+            grp1_matrix_filepath,
+            options.pam_threshold
+        )
+        protein_mapping2 = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits2)
+
+        Csb_proteins.save_cache(cache_dir, "grp1_non_plausible_hits2.pkl", grp1_non_plausible_hits2)
+        Csb_proteins.save_cache(cache_dir, "protein_mapping2.pkl", protein_mapping2)
+    
+    
+    unplausible_hits_dict = invert_protein_mapping_by_domain(protein_mapping2)
+    
+    
+    # Step 4: Check unplausible hits in the phylogenetic tree
+    #TODO entwickle eine methode, welche die unplausiblen sequenzen in einem Baum lokalisiert. Falls diese besonders nah verwandt mit bestätigten sequenzen sind, dann aus dem protein mapping löschen
     
     
     
+    # Step 5: Copy grp1 files without unplausible proteinIDs to the grp2 files
+    write_plausible_fasta_sequences(options.fasta_output_directory, unplausible_hits_dict, options.fasta_output_directory)
     
-    
-    
-    # Step 5: Extract highly correlated co-domains
-    raw_basis_correlation_dict = extract_high_correlation_partners(
-        input_tsv=basis_correlation_filepath,
-        min_correlation=0.5, #TODO make this an option
-        top_n=None,
-        output_tsv=basis_correlation_filepath
-    )
-    
-    redundancy_dict = adjust_correlation_for_redundancy(raw_basis_correlation_dict)
-    
-    
-    
-    print(raw_basis_correlation_dict)
-    print(redundancy_dict)
-    sys.exit()
-    #TODO hier weiter machen. Nummer 7 testen und die korrelationen in abhängigkeit von einander nutzen um in der presence absence matrix aufzuräumen
     return
-    
-    
-    # Wie soll das danach ablaufen?
-    # Meine eigene initiative wäre es...
-    # markiere die domänen die nur in grp1 vorkommen
-    # dann schau in der zeile, welche anderen domänen noch vorkommen
-    # dann schau nach wie wahrscheinlich ist es, dass diese domänen vorkommen
-    # addiere die wahrscheinlichkeiten zu einer wahrscheinlichkeits summe. 
-    # Diese summe soll angeben, wie wahrscheinlich es ist, dass es ein zufall ist. 
-    
-    # Step 4: Remove prefixes to normalize domain names
-    correlation_dict = {
-        domain.replace("grp1_", ""): [
-            co.replace("grp1_", "") for co, _ in co_list
-        ]
-        for domain, co_list in raw_correlation_dict.items()
-    }
 
-    # Step 5: Identify genomes with correlated domains and extract top proteins
-    singleton_reference_seqs_dict = find_best_proteins_parallel(
-        database_path=options.database_directory,
-        correlation_dict=correlation_dict,
-        matrix_path = matrix_filepath,
-        options=options
-    )
-
-    # Step 6: Re-add grp0_ prefix for downstream labeling
-    singleton_reference_seqs_dict = {
-        f"grp0_{k}": v for k, v in singleton_reference_seqs_dict.items()
-    }
-
-    # Step 7: Export protein sequences to FASTA
-    Csb_proteins.fetch_seqs_to_fasta_parallel(
-        options.database_directory,
-        singleton_reference_seqs_dict,
-        options.fasta_output_directory,
-        5, # min seqs
-        options.max_seqs,
-        options.cores
-    )
-    
-    # Step 8: Calculate score limits    
-    score_limit_dict = compute_score_limit_dict(
-    database_path=options.database_directory,
-    singleton_reference_seqs_dict=singleton_reference_seqs_dict
-    )
-    
-
-
-    return score_limit_dict, singleton_reference_seqs_dict

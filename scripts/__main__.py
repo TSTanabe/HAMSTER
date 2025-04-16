@@ -146,7 +146,9 @@ def parse_arguments(arguments):
     mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
     mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
     
-    #            options.mcl_hit_limit, options.alignment_mode, options.mcl_sensitivity
+    pam_search = parser.add_argument_group("Optional presence/absence matrix machine learning parameters")
+    pam_search.add_argument('-pam_thrs', dest='pam_threshold', type=float, default=0.6, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.6')
+    
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
     alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 300000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 300 000')
@@ -350,15 +352,13 @@ def decorate_training_sequences(options):
     
         # Markov chain clustering 
         if options.csb_mcl_clustering:
-            print("Calculating Marjov Chain Clustering")            
+            print("Calculating Markov Chain Clustering")            
             Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 def demote_orphan_training_sequences(options):
-    # Ich brauche eine Presence absence matrix für das gesamte grp1
-    # Eine correlations matrix für alle in grp0
-    # Dann prüfe für jede domain ob mindestesn thrs der prozentsatz der korrelation der korrellierten sequenzen erhalten bleiben
-    # falls ja sequenz in neues file schreiben, wenn es sich um eine sequenz handelt die nicht in grp0 vorhanden war, sondern mit grp1 gekommen ist
+
     Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
+
     return
         
 def model_alignment(options):
