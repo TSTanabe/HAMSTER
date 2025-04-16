@@ -550,7 +550,8 @@ def train_logistic_models_from_tsv(tsv_path):
     df.columns = [col.replace("grp0_", "") for col in df.columns]
 
     # Binär-Matrix erzeugen
-    binary_matrix = df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+    binary_matrix = df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
+
 
     # Ergebnisse
     models = {}
@@ -582,12 +583,12 @@ def check_new_presences(base_tsv_path, extended_tsv_path, threshold=0.6):
     # Erweiterte Matrix laden und vorbereiten
     extended_df = pd.read_csv(extended_tsv_path, sep="\t")
     extended_df.columns = [col.replace("grp1_", "") for col in extended_df.columns]
-    extended_bin = extended_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+    extended_bin = extended_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
 
     # Basisdaten zur Differenzberechnung auch laden
     base_df = pd.read_csv(base_tsv_path, sep="\t")
     base_df.columns = [col.replace("grp0_", "") for col in base_df.columns]
-    base_bin = base_df.applymap(lambda x: 1 if isinstance(x, str) and x != "" else 0)
+    base_bin = base_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
 
     # Überprüfung jeder neuen 1, die vorher 0 war
     for protein in extended_bin.columns:
@@ -605,7 +606,7 @@ def check_new_presences(base_tsv_path, extended_tsv_path, threshold=0.6):
                 features = X_extended.loc[idx].values.reshape(1, -1)
                 score = model.predict_proba(features)[0, 1]
                 if score < threshold:
-                    print(f"NICHT PLAUSIBEL: Genom={idx}, Domain={protein}, Score={score:.3f}")
+                    print(f"Non-plausible hit detected: Genom={idx}, Domain={protein}, Score={score:.3f}")
 
    
 
