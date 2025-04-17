@@ -2,15 +2,19 @@
 import os
 import sqlite3
 import csv
-from . import Csb_proteins
-from multiprocessing import Pool
-from collections import defaultdict
+import warnings
 
+from . import Csb_proteins
+from . import Csb_phylogeny
 
 import pandas as pd
+from collections import defaultdict
+from multiprocessing import Pool
+
+
 from sklearn.linear_model import LogisticRegression
 from sklearn.exceptions import ConvergenceWarning
-import warnings
+
 
 def create_presence_absence_matrix(faa_dir, database_directory, output_path, chunk_size=900, extensions=(".faa",), prefixes=("grp0", "sng0"), cores=4):
     """
@@ -36,7 +40,11 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
     ]
     domain_to_proteins = {}
     all_protein_ids = set()
-
+    
+    if not faa_files:
+        # There were no faa files found
+        return
+    
     for faa_file in faa_files:
         print(f"Fetching presence from faa_file {faa_file}")
         domain = os.path.splitext(faa_file)[0]#.replace("grp0_", "").replace("sng0_", "")
@@ -53,7 +61,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
         domain_to_proteins[domain] = protein_ids
 
 
-    ### Step 2: Map proteinID → genomeID
+    ### Step 2: Map proteinID to genomeID
     print("Mapping proteinIDs to genomeID")
     # Erzeuge Chunk-Argumente
     chunk_args = [
@@ -73,7 +81,7 @@ def create_presence_absence_matrix(faa_dir, database_directory, output_path, chu
 
 
 
-    ### Step 3: Build genomeID → domain → proteinID(s)
+    ### Step 3: Build genomeID to domain to proteinID(s)
     # Prepare arguments per domain
     args_list = [
         (domain, protein_ids, protein_to_genome)
@@ -767,7 +775,32 @@ def invert_protein_mapping_by_domain(protein_mapping):
             domain_to_proteins[domain].update(proteins)
 
     return domain_to_proteins
+
+def extract_domain_to_proteins(tsv_path):
+    """
+    Liest eine Presence/Absence-TSV-Datei und erzeugt ein Dictionary:
+    { domain_name: set(proteinIDs) }
+
+    Annahmen:
+    - Erste Spalte ist 'genomeID'
+    - Alle anderen Spalten sind Domains
+    - Zellen enthalten entweder leere Strings oder Kommaseparierte ProteinIDs
+    """
+    df = pd.read_csv(tsv_path, sep="\t")
     
+    # Entferne Präfixe aus den Domain-Namen (falls vorhanden)
+    df.columns = [col.replace("grp0_", "").replace("grp1_", "") for col in df.columns]
+
+    domain_to_proteins = {}
+
+    for domain in df.columns[1:]:  # Überspringe genomeID
+        proteins = set()
+        for entry in df[domain].dropna():
+            if isinstance(entry, str) and entry.strip():
+                proteins.update(entry.strip().split(","))
+        domain_to_proteins[domain] = proteins
+
+    return domain_to_proteins  
 
 def write_plausible_fasta_sequences(faa_dir, unplausible_proteins_by_domain, output_dir):
     """
@@ -837,10 +870,8 @@ def main_presence_absence_matrix_filter(options):
 
     # Define intermediate file paths
     grp1_matrix_filepath = os.path.join(options.result_files_directory, "grp1_presence_absence_matrix.tsv")
-    correlation_filepath = os.path.join(options.result_files_directory, "grp1_protein_presence_correlations.tsv")
 
     basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
-    basis_correlation_filepath = os.path.join(options.result_files_directory, "basis_protein_presence_correlations.tsv")
 
     # Step 1: Create presence/absence matrix for grp0 as basis co-occurence
     create_presence_absence_matrix(
@@ -864,6 +895,14 @@ def main_presence_absence_matrix_filter(options):
         cores = options.cores
     )
 
+    # Step 2.5 check if presence absence matrices are available
+    if os.path.isfile(basis_matrix_filepath) and os.path.getsize(basis_matrix_filepath) > 0 and \
+       os.path.isfile(grp1_matrix_filepath) and os.path.getsize(grp1_matrix_filepath) > 0:
+        print("Presence/absence matrices found and non-empty. Skipping recalculation.")
+    else:
+        print("Presence/absence matrices missing or empty. Cannot proceed.")
+        return
+    
     # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
     #TODO option für liberal und konservativ
     # Conservative with new hits against base grp0 hits in the genome
@@ -871,9 +910,6 @@ def main_presence_absence_matrix_filter(options):
     #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
  
     # Liberal with new hits against base grp0 hits in the genome + new hits in the genome
-    #grp1_non_plausible_hits2 = check_new_presences_with_combined_context(basis_matrix_filepath,grp1_matrix_filepath,options.pam_threshold) # Learn from base and check new hits against base + new hits in genome
-    #protein_mapping2 = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits2)
-    
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
     
     if os.path.exists(cache_dir+"/grp1_non_plausible_hits2.pkl") and os.path.exists(cache_dir+"/protein_mapping2.pkl"):
@@ -891,17 +927,63 @@ def main_presence_absence_matrix_filter(options):
         Csb_proteins.save_cache(cache_dir, "grp1_non_plausible_hits2.pkl", grp1_non_plausible_hits2)
         Csb_proteins.save_cache(cache_dir, "protein_mapping2.pkl", protein_mapping2)
     
-    
+    grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
+    basis_hits_dict = extract_domain_to_proteins(basis_matrix_filepath)
     unplausible_hits_dict = invert_protein_mapping_by_domain(protein_mapping2)
-    
+
+
+    print("Training sequence selection by regression of the presence/absence matrix")
+    for domain in sorted(unplausible_hits_dict.keys()):
+        total = len(grp1_hits_dict[domain]) - len(basis_hits_dict[domain]) # Number of all added proteinIDs by MCL
+        excluded = len(unplausible_hits_dict.get(domain, set()))
+        included = total - excluded
+        
+        print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")    
     
     # Step 4: Check unplausible hits in the phylogenetic tree
-    #TODO entwickle eine methode, welche die unplausiblen sequenzen in einem Baum lokalisiert. Falls diese besonders nah verwandt mit bestätigten sequenzen sind, dann aus dem protein mapping löschen
+    if os.path.exists(cache_dir+"/Mx_included_hits.pkl"):
+        unplausible_hits_dict = Csb_proteins.load_cache(cache_dir, "grp1_non_plausible_hits3.pkl")
+        
+    else:
+        grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
+        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(options.phylogeny_directory, unplausible_hits_dict, grp1_hits_dict, 0.5, 0.00, options.cores)
     
+        Csb_proteins.save_cache(cache_dir, "Mx_included_hits.pkl", included_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
+
+    # Delete the included hits from the unplausible dict
+    for domain, included_proteins in include_hits_dict.items():
+        if domain in unplausible_hits_dict:
+            unplausible_hits_dict[domain] -= included_proteins
+            # Clean up domains with empty sets
+            if not unplausible_hits_dict[domain]:
+                del unplausible_hits_dict[domain]
     
-    
+    # Print out the number of excluded sequences
+    print("Training sequence selection by regression of the presence/absence matrix and phylogenetic placement")
+    for domain in sorted(unplausible_hits_dict.keys()):
+        total = len(grp1_hits_dict[domain]) - len(basis_hits_dict[domain]) # Number of all added proteinIDs by MCL
+        excluded = len(unplausible_hits_dict.get(domain, set()))
+        included = total - excluded
+        
+        print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")
+
     # Step 5: Copy grp1 files without unplausible proteinIDs to the grp2 files
     write_plausible_fasta_sequences(options.fasta_output_directory, unplausible_hits_dict, options.fasta_output_directory)
     
     return
+    
+    
+    """
+    Traceback (most recent call last):
+  File "HAMSTER.py", line 9, in <module>
+    main(args)
+  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/__main__.py", line 460, in main
+    demote_orphan_training_sequences(options)
+  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/__main__.py", line 360, in demote_orphan_training_sequences
+    Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
+  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/Singleton_Mx_algorithm.py", line 951, in main_presence_absence_matrix_filter
+    Csb_proteins.save_cache(cache_dir, "Mx_included_hits.pkl", included_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
+NameError: name 'included_hits_dict' is not defined
+
+    """
 

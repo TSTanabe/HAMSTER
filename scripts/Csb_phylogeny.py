@@ -3,7 +3,8 @@
 import sqlite3
 import os
 import subprocess
-import multiprocessing
+from multiprocessing import Pool
+from collections import defaultdict
 from . import Alignment
 
 from Bio import Phylo
@@ -244,4 +245,85 @@ def get_sequence_legth(file_path):
     
     return averaged_data   
 
+
+
+#########################################################################################################
+#################      Routine for the sequences below PAM regression        ############################
+#########################################################################################################
+
+def _analyze_single_tree(args):
+    domain, tree_path, unplausible_proteins, grp1_proteins, max_branch_length, max_neighbour_distance = args
+    close_grp1_hits = set()
+    close_external_hits = set()
+
+    try:
+        tree = Phylo.read(tree_path, "newick")
+        terminals = tree.get_terminals()
+        name_to_terminal = {t.name: t for t in terminals}
+        print(f"Analysing placement of hits for {domain} in the phylogenetic tree")
+    except Exception:
+        return domain, close_grp1_hits, close_external_hits
+
+    for pid in unplausible_proteins:
+        if pid not in name_to_terminal:
+            continue
+        clade = name_to_terminal[pid]
+
+        # skip if branch too long
+        if clade.branch_length and clade.branch_length > max_branch_length:
+            continue
+
+        path = tree.get_path(clade)
+        if len(path) < 2:
+            continue
+
+        parent = path[-2]
+        sibling_clades = [c for c in parent.clades if c != clade]
+        found = False
+
+        for sibling in sibling_clades:
+            sib_terms = sibling.get_terminals()
+            for neighbor in sib_terms:
+                nname = neighbor.name
+                if not nname or nname == pid:
+                    continue
+                if nname in unplausible_proteins:
+                    continue
+                if nname in grp1_proteins:
+                    try:
+                        dist = tree.distance(name_to_terminal[pid], name_to_terminal[nname])
+                        if dist <= max_neighbour_distance:
+                            close_grp1_hits.add(pid)
+                    except Exception as e:
+                        print(f"Distance error between {pid} and {nname}: {e}")
+                    found = True
+                    break
+                else:
+                    close_external_hits.add(pid)
+                    found = True
+                    break
+            if found:
+                break
+
+    return domain, close_grp1_hits, close_external_hits
+
+def analyze_unplausible_proteins_in_trees_parallel(tree_dir, unplausible_dict, grp1_dict, max_branch_length=0.8, max_neighbour_distance=0.15, cores=4):
+    dict_close_grp1 = defaultdict(set)
+    dict_close_external = defaultdict(set)
+    print(f"Acceptable distance to a reference sequence {max_neighbour_distance}")
+    args_list = []
+    for domain, unplausible_proteins in unplausible_dict.items():
+        tree_path = os.path.join(tree_dir, domain + ".tree")
+        if os.path.isfile(tree_path):
+            grp1_proteins = grp1_dict.get(domain, set())
+            args_list.append((domain, tree_path, unplausible_proteins, grp1_proteins, max_branch_length, max_neighbour_distance))
+
+    with Pool(processes=cores) as pool:
+        results = pool.map(_analyze_single_tree, args_list)
+
+    for domain, close_grp1_hits, close_external_hits in results:
+        dict_close_grp1[domain].update(close_grp1_hits)
+        dict_close_external[domain].update(close_external_hits)
+    
+    return dict_close_grp1, dict_close_external
 
