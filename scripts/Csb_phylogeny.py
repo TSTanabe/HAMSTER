@@ -3,6 +3,7 @@
 import sqlite3
 import os
 import subprocess
+import multiprocessing
 from multiprocessing import Pool
 from collections import defaultdict
 from . import Alignment

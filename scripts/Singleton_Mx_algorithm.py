@@ -941,14 +941,15 @@ def main_presence_absence_matrix_filter(options):
         print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")    
     
     # Step 4: Check unplausible hits in the phylogenetic tree
-    if os.path.exists(cache_dir+"/Mx_included_hits.pkl"):
-        unplausible_hits_dict = Csb_proteins.load_cache(cache_dir, "grp1_non_plausible_hits3.pkl")
+    # options für branch distances als zahlen in den dateinamen einfügen
+    if os.path.exists(cache_dir+f"/Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl"):
+        include_hits_dict = Csb_proteins.load_cache(cache_dir, f"Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl")
         
     else:
         grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
-        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(options.phylogeny_directory, unplausible_hits_dict, grp1_hits_dict, 0.5, 0.00, options.cores)
+        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(options.phylogeny_directory, unplausible_hits_dict, grp1_hits_dict, options.pam_long_branch_thres, options.pam_phylogenetic_distance, options.cores)
     
-        Csb_proteins.save_cache(cache_dir, "Mx_included_hits.pkl", included_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
+        Csb_proteins.save_cache(cache_dir, f"Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl", include_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
 
     # Delete the included hits from the unplausible dict
     for domain, included_proteins in include_hits_dict.items():
@@ -973,17 +974,4 @@ def main_presence_absence_matrix_filter(options):
     return
     
     
-    """
-    Traceback (most recent call last):
-  File "HAMSTER.py", line 9, in <module>
-    main(args)
-  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/__main__.py", line 460, in main
-    demote_orphan_training_sequences(options)
-  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/__main__.py", line 360, in demote_orphan_training_sequences
-    Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
-  File "/home/tomohisa/BioprojectHazel/HAMSTER/scripts/Singleton_Mx_algorithm.py", line 951, in main_presence_absence_matrix_filter
-    Csb_proteins.save_cache(cache_dir, "Mx_included_hits.pkl", included_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
-NameError: name 'included_hits_dict' is not defined
-
-    """
 

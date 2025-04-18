@@ -146,8 +146,10 @@ def parse_arguments(arguments):
     mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
     mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
     
-    pam_search = parser.add_argument_group("Optional presence/absence matrix machine learning parameters")
-    pam_search.add_argument('-pam_thrs', dest='pam_threshold', type=float, default=0.6, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.6')
+    pam_search = parser.add_argument_group("Optional presence/absence matrix and phylogenetic placement parameters")
+    pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.6, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.6')
+    pam_search.add_argument('-mx_long_branch_thrs', dest='pam_long_branch_thres', type=float, default=0.5, metavar = '<float>', help='Do not consider hits with this branch length in the phylogenetic tree. Default: 0.5')
+    pam_search.add_argument('-mx_max_phylo_distance', dest='pam_phylogenetic_distance', type=float, default=0.05, metavar = '<float>', help='Max. phylogenetic distance to reference sequence. Default: 0.05')
     
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
@@ -450,11 +452,11 @@ def main(args=None):
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
         generate_csb_sequence_fasta(options)   
-
+#6
     if options.stage <= 6 and options.end >= 6:
         myUtil.print_header("\n 6. Add Markov chain cluster sequences to reference training datasets")
         decorate_training_sequences(options)
-   
+#7   
     if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 7. Recruiting singleton sequences to reference training datasets")
         demote_orphan_training_sequences(options)
