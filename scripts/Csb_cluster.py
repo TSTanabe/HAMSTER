@@ -288,7 +288,7 @@ def jaccard(set1,set2):
             set1 = set(set1)
             set2 = set(set2)
         except Exception as e:
-            print("An error occurred while converting to sets:", e)
+            print("An error occurred while converting to sets for jaccard clustering of csb:", e)
             return 0
             
     intersection = len(set1.intersection(set2))

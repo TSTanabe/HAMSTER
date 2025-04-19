@@ -106,7 +106,7 @@ def index_database(database):
     Indexes the relevant columns in the database to improve search and join performance.
     This is especially important for large databases (> 3000 genomes).
     """
-    print(f"Indexing database {database}")
+    print(f"Indexing database {database}", end="\r")
     
     # List of indexes to create, each represented as a tuple (index_name, create_statement)
     indexes = [
@@ -134,7 +134,7 @@ def index_database(database):
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
-    print("Indexing complete.")
+    print(f"Indexing database {database} -- ok")
 
 def insert_database_genomeIDs(database, genomeIDs):
     """

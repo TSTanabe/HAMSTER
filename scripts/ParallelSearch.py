@@ -110,7 +110,7 @@ def initial_glob_search(options):
     5. Batch process the genome hits in parallel using multiprocessing.
     """
     
-    print(f"Initilize DIAMOND BLASTp search")
+    print(f"Initilize DIAMOND BLASTp self-blast against query")
     
     # Step 1: Perform self BLAST query to establish reference scores for blast score ratio
     self_blast_report = self_blast_query(options)
@@ -118,7 +118,7 @@ def initial_glob_search(options):
     # Step 2: Run DIAMOND BLASp if no precomputed BLAST table is provided or exists
     blast_results_table = options.glob_table
     if not blast_results_table:
-        print(f"Running DIAMOND BLASTp search")    
+        print(f"Initilize DIAMOND BLASTp against target")
         blast_results_table = DiamondSearch(
             options.glob_faa, options.query_file, options.cores, 
             options.evalue, options.searchcoverage, options.minseqid, 
@@ -126,11 +126,12 @@ def initial_glob_search(options):
         )
     
     # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
-    print("Filtering BLASTp results")   
+    print("Filtering BLASTp results according to general limit values")   
     query_length_dict = get_sequence_legth(options.self_query) # Retrieve sequence lengths
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
     
     blast_results_table = filter_blast_table(
+        options.result_files_directory + f"/filtered_{os.path.basename(blast_results_table)}",
         blast_results_table, options.evalue, options.thrs_score, 
         options.searchcoverage, options.minseqid, options.thrs_bsr, 
         query_length_dict, selfblast_scores_dict
@@ -146,7 +147,7 @@ def initial_glob_search(options):
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
     # Step 5: Process genome hits in parallel
-    print("Parsing hits per genome")
+    print("Parsing hits from filtered results table per genome")
     genomeID_batches = split_genomeIDs_into_batches(list(genomeIDs_set), options.cores-1) # batch sets of genomeIDs for each worker
     
     manager = Manager()
@@ -601,11 +602,12 @@ def get_sequence_hits_scores(blast_file):
     return selfblast_scores
     
         
-def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff, identity_cutoff, bsr_cutoff, sequence_lengths, selfblast_scores, buffer_size=10000):
+def filter_blast_table(output_file, blast_file, evalue_cutoff, score_cutoff, coverage_cutoff, identity_cutoff, bsr_cutoff, sequence_lengths, selfblast_scores, buffer_size=10000):
     """
     Filters a BLASTP table based on given criteria including Blast Score Ratio (BSR),
     and writes the results to a new file using buffered writing to optimize RAM usage.
 
+    :param output_file
     :param blast_file: Path to the BLASTP table file.
     :param evalue_cutoff: Maximum allowable e-value.
     :param score_cutoff: Minimum required bit score.
@@ -619,8 +621,8 @@ def filter_blast_table(blast_file, evalue_cutoff, score_cutoff, coverage_cutoff,
     """
 
     # Determine the output file path
-    output_file = os.path.join(os.path.dirname(blast_file), f"filtered_{os.path.basename(blast_file)}")
-
+    #output_file = os.path.join(os.path.dirname(blast_file), f"filtered_{os.path.basename(blast_file)}")
+    
     # Open input and output files using CSV reader/writer
     with open(blast_file, 'r') as infile, open(output_file, 'w', newline='') as outfile:
         reader = csv.reader(infile, delimiter='\t')

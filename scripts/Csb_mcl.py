@@ -103,7 +103,8 @@ def run_mcl_clustering(mcl_input_file, mcl_output_file, mcl_inflation, domain='u
     # Step 2: Run MCL clustering
     print(f"Running MCL clustering for {domain}")
     mcl = myUtil.find_executable("mcl")
-    os.system(f"{mcl} {mcl_input_file} --abc -I {mcl_inflation} -o {mcl_output_file} 1>/dev/null 0>/dev/null")
+    os.system(f"{mcl} {mcl_input_file} --abc -I {mcl_inflation} -o {mcl_output_file} > /dev/null 2>&1")
+
 
     # Step 3: Display a preview of the MCL clusters
     return mcl_output_file
@@ -187,11 +188,11 @@ def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshol
         if len(mcl_domain_clusters_dict) == 1:
             only_cluster = next(iter(mcl_domain_clusters_dict.values()))
             if only_cluster == combined_set:
-                print(f"Only one cluster identical to reference+merged set. Using grp1_{domain} only.")
+                print(f"All reference grp0 are present in a single mcl cluster. Using grp1_{domain} only.")
                 mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
         else:
             # Add combined set additionally
-            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set
+            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set # adds the grp1 to the mclx keys
 
         # Step 4 Write down the clusters (including the combined one)
         Csb_proteins.fetch_seqs_to_fasta_parallel(

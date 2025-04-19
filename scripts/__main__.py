@@ -12,7 +12,6 @@ from . import Queue
 from . import Database
 from . import Translation
 from . import ParallelSearch
-from . import ParseSequenceLinclustReports
 
 from . import Csb_cluster
 from . import Csb_proteins
@@ -85,7 +84,7 @@ def parse_arguments(arguments):
     resources.add_argument('-x', dest='end', type=int, default = 9, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='End at stage')
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
-    resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run') # project folder TODO print the directory that is used for reconfirmation with the user
+    resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run')
     resources.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Filepath to existing database')
    
     
@@ -128,13 +127,16 @@ def parse_arguments(arguments):
     csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb. Default: 2')
     csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least times. Default: 10')
     csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb. Default: 4')
-    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.4, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes. Default: 0.4')
+    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.2, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes. Default: 0.2')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold. Default: 0.75')
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
     csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
     csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered. Default: 0.3') #Wir das noch genutzt?
+    csb.add_argument('-exclude_csb_hitscore', dest='low_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Exclude csb with all hits below this deviation from the query self-hits. Default: 0.3')
+    csb.add_argument('-group_csb_hitscore', dest='group_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Group hits from csb above this deviation from the query self-hit. Default: 0.3')
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
+    csb.add_argument('-csb_singleton_correlation', dest='csb_singleton_correlation', type=float,default = 0.3, metavar='<float>', help='Required correlation of singletons to existing csb. Default: 0.5')
 
     mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
     mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]. Default: 1e-10')
@@ -198,7 +200,7 @@ def fasta_preparation(options):
         Queue.queue_files(options)
         return
     
-    #Comcatenate the fasta files, in case of a glob fasta file is provided deconcat it
+    # Concatenate the fasta files, in case of a glob fasta file is provided deconcat it
     if options.glob_faa and options.glob_gff:
         print(f"Preparing separate files from {options.glob_faa}")
         #create separated files
@@ -207,48 +209,42 @@ def fasta_preparation(options):
         options.deconcat_flag = 1
     else:
 
-        #Unpacks and translates fasta
+        # Unpacks and translates fasta
         Translation.parallel_translation(options.fasta_file_directory, options.cores)
         Translation.parallel_transcription(options.fasta_file_directory, options.cores)
 
-        #concat to to globfile if search results are not already provided
+        # concat to to globfile if search results are not already provided
         Queue.queue_files(options)
         if not options.glob_table:
-            print(f"Generating glob faa file")
+            print("Generating concatenated glob faa file", end="\r")
             Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier
+            print("Generating concatenated glob faa file -- ok")
             options.glob_flag = 1   
+    
+    # Create self query file
     Translation.create_selfquery_file(options)
+    
+    return
 
 def initial_search(options):
-    #Writes a database with the protein hits and their gene clusters for later use.
-    #Writes fasta files for each hit for linclust    
+    # Writes a database with the protein hits and their gene clusters for later use.
+    # Writes fasta files for each hit for linclust    
 
     if not os.path.isfile(options.database_directory):
         Database.create_database(options.database_directory)
 
     if options.glob_search:
-        #Search the glob file
+        # Search the glob file
         ParallelSearch.initial_glob_search(options)
     else:
-        #Process all files separately
+        # Process all files separately
         ParallelSearch.initial_genomize_search(options)
 
-    if options.deconcat_flag: #deconcatenation was done but is not needed anymore
-        myUtil.remove_directory(options.fasta_file_directory)#remove the deconcatenated files
+    if options.deconcat_flag: # deconcatenation was done but is not needed anymore
+        myUtil.remove_directory(options.fasta_file_directory)# remove the deconcatenated files
     elif options.glob_flag:
         os.remove(options.glob_faa)
     
-def cluster_sequences(options):
-    # Currently not in use
-    if not options.protein_cluster_active: # skip if not activated to cluster the sequences
-        return
-    
-    #Groups sequences via linclust and updates the database with grouped identifiers
-    Database.index_database(options.database_directory)
-    
-    print(f"MMseqs cluster with --threads {options.cores} --min-seq-id {options.cminseqid} --alignment-mode {options.alignment_mode} -e {options.evalue} -c {options.clustercoverage}")    
-    ParseSequenceLinclustReports.cluster_sequences(options)
-
 
 def csb_finder(options):
 
@@ -256,8 +252,8 @@ def csb_finder(options):
     csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
 
     Database.index_database(options.database_directory)
-    Database.delete_keywords_from_csb(options.database_directory, options) #remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
-    Database.update_keywords(options.database_directory,csb_gene_cluster_dict) #assigns the names of the keywords to the clusters
+    Database.delete_keywords_from_csb(options.database_directory, options) # remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
+    Database.update_keywords(options.database_directory,csb_gene_cluster_dict) # assigns the names of the keywords to the clusters
 
 
 
@@ -285,7 +281,7 @@ def generate_csb_sequence_fasta(options):
     )
 
     if not grouped:
-        grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp")
+        grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp") #Warnung, dieser Wert hier hat einen iterator für die Zahl nach grp. Das kann einen konflikt mit grp1 und grp2 herstellen,falls mal mehr als bis 1 gezählt wird
         grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
         Csb_proteins.fetch_seqs_to_fasta_parallel(
             options.database_directory,
@@ -301,8 +297,7 @@ def generate_csb_sequence_fasta(options):
     print("Collecting highly similar homologs from query hits without any conserved genomic context")
     sng_score_limit_dict, sng_ref_seqs_dict = Singleton_finder.singleton_reference_sequences(options) #Very strict reference seqs with 0.95 blast score ratio
 
-
-
+    print("Collecting highly similar homologs from query hits correlated to csb")
     sng_score_limit_dict, sng_ref_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options) # Pulls seqs directly from the fasta/tsv files
 
     # --- Merge score_limit_dicts ---
@@ -341,20 +336,21 @@ def decorate_training_sequences(options):
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
     if options.csb_distinct_grouping or options.csb_mcl_clustering:
-        print("Including homologs without genomic context based on protein sequence phylogeny.")
+        print("Including homologs without genomic context based on protein sequence phylogeny")
+        print("Generating protein family fasta files")
         Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
         
         
         # Phylogeny clustering
         if options.csb_distinct_grouping:
             # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-            print("Calculating phylogeny")
+            print("\nCalculating phylogeny for each protein family")
             decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
             Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
     
         # Markov chain clustering 
         if options.csb_mcl_clustering:
-            print("Calculating Markov Chain Clustering")            
+            print("\nCalculating Markov Chain Clustering")            
             Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 def demote_orphan_training_sequences(options):
@@ -422,51 +418,43 @@ def main(args=None):
     options = parse_arguments(args)
     Project.prepare_result_space(options)
     
-    
+#2    
     if options.stage <= 2 and options.end >= 2:
         myUtil.print_header("\n 2. Prokaryotic gene recognition and translation via prodigal")
         fasta_preparation(options)
-        
-
     
-#2    
+#3    
     if options.stage <= 3 and options.end >= 3:
         myUtil.print_header("\n 3. Searching for homologoues sequences")
         initial_search(options)
         
-#3    
-    #cluster the adjacent protein sequences, which are not annotated yet into groups called pcs combined with a number
-    #cluster with mmseqs the divergent_output_file
-    #Info: this resulted in an error when only a single genome was used. linclust did this error and dumped the core. the tsv file was not created and subsequent errors occured therefore
-
-    #if options.stage <= 3 and options.end >= 3:
-    #    myUtil.print_header("\n 3. Clustering sequences by similarity")
-    #    cluster_sequences(options)
-    
 #4    
     #csb naming
     if options.stage <= 4 and options.end >= 4:
         myUtil.print_header("\n 4. Searching for collinear syntenic blocks")
         csb_finder(options)
+
 #5
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
         generate_csb_sequence_fasta(options)   
+
 #6
     if options.stage <= 6 and options.end >= 6:
         myUtil.print_header("\n 6. Add Markov chain cluster sequences to reference training datasets")
         decorate_training_sequences(options)
+
 #7   
     if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 7. Recruiting singleton sequences to reference training datasets")
         demote_orphan_training_sequences(options)
+
 #8    
     #align
     if options.stage <= 8 and options.end >= 8:
         myUtil.print_header("\n 8. Aligning sequences")
         model_alignment(options)
         
-    
 #9        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)

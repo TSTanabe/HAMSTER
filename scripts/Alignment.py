@@ -179,7 +179,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         gap_threshold: Proportion of gaps allowed in a column (default: 0.95).
     """
     trimal = find_executable("trimal")
-    print(f"Trimming {input_fasta} with {gap_threshold}")
+    print(f"Trimming {input_fasta} with {gap_threshold} gap threshold")
     try:
         # Run the trimAl command with the gap threshold
         subprocess.run([

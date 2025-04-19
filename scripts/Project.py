@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import csv
 import os
 import tarfile
 from datetime import datetime
@@ -81,7 +82,8 @@ def prepare_result_space(options,project="project"):
         #Creates an new project and overwrites the result file directory with the project folder. All
         #other subfolders and files are stored in this project folder
         options.result_files_directory = create_project(options.result_files_directory,project)        
-
+        write_options_to_tsv(options, options.result_files_directory)
+        
         options.database_directory = options.result_files_directory+"/database.db"
         
 
@@ -111,14 +113,16 @@ def prepare_result_space(options,project="project"):
         
 
 
-def create_project(directory,projectname="project"):
+def create_project(directory, projectname="project"):
     now = datetime.now()
-    timestamp = datetime.timestamp(now)
-    directory = directory + "/" + str(timestamp) + "_" + projectname
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")  # z. B. "2025-04-16_14-53-21"
+    directory = os.path.join(directory, f"{timestamp}_{projectname}")
+    
     try:
         os.mkdir(directory)
-    except:
-        raise Exception(f"\nERROR: No writing rights.")
+    except Exception:
+        raise Exception("\nERROR: No writing rights.")
+    
     return directory
     
 
@@ -181,7 +185,27 @@ def any_process_args_provided(args, default_values):
     return False
     
 
-   
+def write_options_to_tsv(options, output_directory, filename="parameters_summary.tsv"):
+    """
+    Schreibt alle Parameter aus einem argparse-Objekt als TSV-Datei.
+
+    Args:
+        options (argparse.Namespace): Dein Argument-Objekt.
+        output_directory (str): Zielverzeichnis für die Datei.
+        filename (str): Name der Ausgabedatei (Standard: parameters_summary.tsv).
+    """
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+
+    output_path = os.path.join(output_directory, filename)
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerow(["Parameter", "Value"])
+        for key, value in vars(options).items():
+            writer.writerow([key, value])
+    
+    print(f"Parameters saved: {output_path}")   
      
 
 

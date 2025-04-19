@@ -44,17 +44,17 @@ def group_gene_cluster_statistic(options):
 
     # Schritt 1: Berechnung der Keyword-Statistiken
     if not filtered_stats_dict or not query_score_dict:
-        print("Computing keyword statistics")
+        print("Computing hitscore statistic per gene cluster")
         stats_dict = get_keyword_statistics_parallel(options.database_directory, options.cores)
 
         # Schritt 2: Extrahiere das höchste Bitscore pro Domain in QUERY
-        print("Extracting highest bitscores per domain")
+        print("Extracting highest bitscores per hit")
         query_score_dict = get_highest_bitscores_for_genome(options.database_directory, "QUERY")
         save_cache(cache_dir, "query_score_dict.pkl", query_score_dict)
 
-        # Schritt 3: Entferne CSBs, deren Domains unter 80% der Query-Referenz liegen
-        print("Filtering out low-quality CSBs")
-        filtered_stats_dict = filter_out_low_quality_csb(stats_dict, query_score_dict, 0.2, min(10,options.min_seqs))
+        # Schritt 3: Entferne CSBs, deren Domains alle unter 70% der Query-Referenz liegen
+        print("Filtering out hits with low scores")
+        filtered_stats_dict = filter_out_low_quality_csb(stats_dict, query_score_dict, options.low_hitscore_csb_cutoff, min(10,options.min_seqs))
         
         save_cache(cache_dir, "filtered_stats.pkl", filtered_stats_dict)
     
@@ -65,20 +65,20 @@ def group_gene_cluster_statistic(options):
     if not grouped_keywords or not distant_keywords:
         print("Grouping keywords by domain")
 
-        grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, 0.30)
+        grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, options.group_hitscore_csb_cutoff)
         save_cache(cache_dir, "grouped_keywords.pkl", grouped_keywords)
         save_cache(cache_dir, "distant_keywords.pkl", distant_keywords)
 
     # Schritt 6: Clustere ausgeschlossene Keywords basierend auf statistischer Ähnlichkeit
     if not clustered_excluded_keywords:
-        print("Clustering excluded keywords by similarity")
+        print("Clustering gene clusters with low hitscores by similarity")
 
         clustered_excluded_keywords = group_excluded_keywords_by_similarity(filtered_stats_dict, distant_keywords)
         save_cache(cache_dir, "clustered_excluded_keywords.pkl", clustered_excluded_keywords)
 
     # Schritt 7: Oberes und unteres Score-Limit der gruppierten CSBs ohne Outliers
     if not domain_score_limits:
-        print("Computing score limits for grouped CSBs")
+        print("Computing hitscore limits for grouped csbs")
  
         domain_score_limits = compute_score_limits(filtered_stats_dict, grouped_keywords)
         save_cache(cache_dir, "domain_score_limits.pkl", domain_score_limits)
@@ -448,7 +448,7 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
                 ])
 
     if not keyword_vectors:
-        print("Warning: There were no keyword statistics for distinct keywords")
+        print("WARNING: There were no keyword statistics for distinct keywords")
         return {}
 
     keyword_vectors = np.array(keyword_vectors)
@@ -478,7 +478,7 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
         try:
             clustered_keywords[domain][cluster_mapping[label]].append(keyword)
         except IndexError:
-            print(f"Warning: Skipping domain {domain} with label {label} with keyword {keyword} due to high dissimilarity.")
+            print(f"WARNING: Skipping domain {domain} with label {label} with keyword {keyword} due to high dissimilarity.")
             #print("Clustered Keywords")
             #pprint(clustered_keywords)
             #print("Mapping")
