@@ -300,7 +300,11 @@ def _process_target_domain(args):
     try:
         with sqlite3.connect(database_path) as con:
             cur = con.cursor()
-
+            con.execute('PRAGMA journal_mode=WAL;')
+            con.execute('PRAGMA synchronous=NORMAL;')
+            con.execute('PRAGMA temp_store=MEMORY;')
+            con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+            
             # Step 2: Get best scoring proteins for target_domain in chunks
             genome_list = list(genomes_with_all)
             chunk_size = 990
@@ -895,12 +899,29 @@ def main_presence_absence_matrix_filter(options):
     )
 
     # Step 2.5 check if presence absence matrices are available
-    if os.path.isfile(basis_matrix_filepath) and os.path.getsize(basis_matrix_filepath) > 0 and \
-       os.path.isfile(grp1_matrix_filepath) and os.path.getsize(grp1_matrix_filepath) > 0:
+    basis_exists = os.path.isfile(basis_matrix_filepath)
+    grp1_exists = os.path.isfile(grp1_matrix_filepath)
+
+    basis_nonempty = os.path.getsize(basis_matrix_filepath) > 0 if basis_exists else False
+    grp1_nonempty = os.path.getsize(grp1_matrix_filepath) > 0 if grp1_exists else False
+
+    if basis_exists and basis_nonempty and grp1_exists and grp1_nonempty:
         print("Presence/absence matrices generated and non-empty")
     else:
-        print("ERROR: Presence/absence matrices missing or empty. Cannot proceed.")
+        print("WARNING: Presence/absence matrices missing or empty. Cannot proceed.")
+
+        if not basis_exists:
+            print(f"Missing file: {basis_matrix_filepath}")
+        elif not basis_nonempty:
+            print(f"File is empty: {basis_matrix_filepath}")
+
+        if not grp1_exists:
+            print(f"Missing file: {grp1_matrix_filepath}")
+        elif not grp1_nonempty:
+            print(f"File is empty: {grp1_matrix_filepath}")
+
         return
+    
     
     # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
     #TODO option für liberal und konservativ

@@ -76,12 +76,12 @@ def parse_arguments(arguments):
     parser = argparse.ArgumentParser(formatter_class=argparse.HelpFormatter, description = "HAMSTER version 0.0.8 \nSyntax: HAMSTER [OPTIONS]",epilog = "")
     
     
-    parser.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = None, metavar = '<directory>', help='Directory of the target fasta files')
+    parser.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = __location__, metavar = '<directory>', help='Directory of the target fasta files')
     parser.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Query sequences fasta file')
 
     resources = parser.add_argument_group("Optional parameters")
     resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='Start at stage')
-    resources.add_argument('-x', dest='end', type=int, default = 9, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='End at stage')
+    resources.add_argument('-x', dest='end', type=int, default = 10, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='End at stage')
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
     resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Directory for the result files/results from a previous run')
@@ -127,7 +127,7 @@ def parse_arguments(arguments):
     csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb. Default: 2')
     csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least times. Default: 10')
     csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb. Default: 4')
-    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.2, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes. Default: 0.2')
+    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.0, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes. Default: 0.0')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Merge if sequences from two csb is identical above this threshold. Default: 0.75')
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
@@ -140,11 +140,11 @@ def parse_arguments(arguments):
 
     mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
     mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]. Default: 1e-10')
-    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=25, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]. Default: 25')
+    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=50, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]. Default: 50')
     mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]. Default: 0.6')
-    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=500, metavar = '<int>', help='MCL maximum number of edges between sequences. Default: 500')
+    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=100, metavar = '<int>', help='MCL maximum number of edges between sequences. Default: 100')
     mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control. Default: 2.0')
-    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="more-sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: more-sensitive")
+    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="fast", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: fast")
     mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
     mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
     
@@ -155,7 +155,7 @@ def parse_arguments(arguments):
     
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 300000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 300 000')
+    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned. Default: 100 000')
     alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids. Default: 0.05')
     alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces, that are specifically included')
     alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='List of domains, separated by spaces that are specifically excluded')
@@ -328,6 +328,7 @@ def generate_csb_sequence_fasta(options):
     options.grouped = merged_grouped
     options.score_limit_dict = merged_score_limit_dict
     
+    return
 
 def decorate_training_sequences(options):
     grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'merged_grouped.pkl')

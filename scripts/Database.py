@@ -162,26 +162,32 @@ def insert_database_proteins(database, protein_dict):
         Args:
             protein_dict    dictionary with protein objects
     """
-    with sqlite3.connect(database) as con:
-        try:
+def insert_database_proteins(database, protein_dict):
+    """
+    Inserts for concated glob hmmsearches. GenomeId must be defined within the protein object
+    Args:
+        protein_dict    dictionary with protein objects
+    """
+    try:
+        with sqlite3.connect(database) as con:
+            # Inside 'with con', if an exception occurs, it will rollback automatically
             cur = con.cursor()
             cur.execute("""PRAGMA foreign_keys = ON;""")
             cur.execute("""PRAGMA synchronous = OFF;""")
             cur.execute("""PRAGMA journal_mode = OFF;""")
             
-            
             protein_list = sorted(protein_dict.values(), key=lambda x: (x.gene_contig, x.gene_start))
-            #protein_list = protein_dict.values()
             protein_records = []
             domain_records = []
 
-            for protein in protein_list: #protein_dict.values()
+            for protein in protein_list:
                 genomeID = protein.genomeID
                 proteinID = f"{genomeID}-{protein.proteinID}"
                 domains = protein.domains
                 if not genomeID or not proteinID:
                     print(f"Warning error annotated protein {protein.proteinID}")
                     continue
+
                 # Prepare the protein record
                 protein_record = (
                     proteinID, genomeID, protein.gene_locustag, protein.gene_contig,
@@ -189,13 +195,14 @@ def insert_database_proteins(database, protein_dict):
                     len(domains), protein.get_sequence()
                 )
                 protein_records.append(protein_record)
+
                 # Prepare domain records
                 for domain in domains.values():
                     domain_record = (
                         proteinID, domain.HMM, domain.start, domain.end, domain.score
                     )
                     domain_records.append(domain_record)
-            
+
             # Batch insert for proteins
             cur.executemany('''INSERT OR IGNORE INTO Proteins
                 (proteinID, genomeID, locustag, contig, start, end, strand, dom_count, sequence)
@@ -205,14 +212,15 @@ def insert_database_proteins(database, protein_dict):
             cur.executemany('''INSERT OR IGNORE INTO Domains
                 (proteinID, domain, domStart, domEnd, score)
                 VALUES (?, ?, ?, ?, ?)''', domain_records)
-            
-            con.commit()
-        except Exception as e:
-                error_message = f"\nError occurred: {str(e)}"
-                traceback_details = traceback.format_exc()
-                print(f"\tWARNING: Due to an error - {error_message}")
-                print(f"\tTraceback details:\n{traceback_details}")
-                
+
+            # No need to manually call con.commit() — 'with' will handle it
+
+    except Exception as e:
+        error_message = f"\nError occurred: {str(e)}"
+        traceback_details = traceback.format_exc()
+        print(f"\tWARNING: Due to an error - {error_message}")
+        print(f"\tTraceback details:\n{traceback_details}")
+
     return
     
     
@@ -371,24 +379,31 @@ def update_domain(database, protein_diction, old_tag, new_tag):
 ########## Fetch information from database routines ##########
 ##############################################################
 
-def update_keywords(database, keyword_dict):
+def update_keywords(database, keyword_dict, batch_size=400):
     """
-    Update keywords in the database.
-
+    Update keywords in the database in batches.
+    
     Args:
         database: Name of the database to be worked on.
-        keyword_dict: Dictionary containing the clusterID as key and the new keyword as value.
+        keyword_dict: Dictionary containing the new keywords and associated clusterIDs.
+        batch_size: Number of (clusterID, keyword) pairs per batch insert.
     """
     if keyword_dict:
         with sqlite3.connect(database) as con:
             cur = con.cursor()
             query = """INSERT INTO Keywords (clusterID, keyword) VALUES (?, ?)"""
-            for new_keyword,clusterIDs in keyword_dict.items():
+            
+            inserts = []
+            for new_keyword, clusterIDs in keyword_dict.items():
                 for clusterID in clusterIDs:
-                    cur.execute(query, (clusterID, new_keyword))
+                    inserts.append((clusterID, new_keyword))
+            
+            # In Batches verarbeiten
+            for i in range(0, len(inserts), batch_size):
+                batch = inserts[i:i+batch_size]
+                cur.executemany(query, batch)
 
     return
-
 
 
 
@@ -440,5 +455,64 @@ def fetch_genomeIDs(database):
     return genomeIDs
 
 
+def clean_database_locks(database_path, wait_seconds=10):
+    """
+    Ensure the database is unlocked and all pending writes are flushed.
+
+    Args:
+        database_path: Path to the SQLite .db file
+        wait_seconds: How long to wait if database is busy (default 10 seconds)
+    """
+    wal_path = database_path + "-wal"
+    shm_path = database_path + "-shm"
+
+    print(f"Checking database for locks: {database_path}")
+
+    # Step 1: Check if WAL and SHM files exist
+    wal_exists = os.path.exists(wal_path)
+    shm_exists = os.path.exists(shm_path)
+
+    if wal_exists or shm_exists:
+        print(f"Found WAL/SHM files. WAL: {wal_exists}, SHM: {shm_exists}")
+    else:
+        print("No WAL/SHM files found. Database seems clean.")
+
+    # Step 2: Try to connect and perform a WAL checkpoint
+    print("Attempting to checkpoint database")
+    success = False
+    start_time = time.time()
+
+    while not success and (time.time() - start_time) < wait_seconds:
+        try:
+            with sqlite3.connect(database_path, timeout=5) as con:
+                # Force complete WAL checkpoint
+                con.execute("PRAGMA wal_checkpoint(FULL);")
+                con.commit()
+                success = True
+                print("Checkpoint successful. Database flushed.")
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e):
+                print("Database is locked. Waiting a bit...")
+                time.sleep(1)
+            else:
+                print(f"Unexpected SQLite error: {e}")
+                raise
+
+    if not success:
+        raise RuntimeError(f"Could not unlock the database after {wait_seconds} seconds.")
+
+    # Step 3: Check again if WAL and SHM still exist
+    wal_exists = os.path.exists(wal_path)
+    shm_exists = os.path.exists(shm_path)
+
+    if not wal_exists and not shm_exists:
+        print("WAL/SHM files cleaned up successfully.")
+    else:
+        print("WAL/SHM files still exist. Database might have unclean shutdown earlier.")
+        # Optional: Force delete them if you are absolutely sure
+        # os.remove(wal_path)
+        # os.remove(shm_path)
+
+    print("Database cleaning routine finished.")
 
 

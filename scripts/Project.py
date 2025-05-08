@@ -132,46 +132,57 @@ def isProjectFolder(options):
     if options.database_directory and os.path.isfile(options.database_directory):
         options.result_files_directory = os.path.dirname(options.database_directory)
     
-    #Confirm that in the directory is everything
     try:
-        if not os.path.isfile(options.result_files_directory+"/database.db"):
-            print("No database file found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Sequences"):
-            print("No sequence directory found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Initial_validation"):
-            print("No initial validation directory found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Hit_list"):
-            print("No hit directory found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Hidden_markov_models"):
-            print("No Hidden Markov model directory found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Cross_validation"):
-            print("No cross validation directory found. Creating new project folder.")
-            return 0
-        if not os.path.isdir(options.result_files_directory+"/Collinear_syntenic_blocks"):
-            print("No collinear syntenic block directory found. Creating new project folder.")
-            return 0
-        
-        #Check for temporary files
-        if os.path.isfile(options.result_files_directory+"/self_blast.faa"):
-            options.self_query = options.result_files_directory+"/self_blast.faa"
+        database_path = os.path.join(options.result_files_directory, "database.db")
+
+        if not os.path.isfile(database_path):
+            print("No database file found in expected directory. Searching recursively...")
+
+            # Recursive search for database.db
+            found_db = None
+            for root, dirs, files in os.walk(options.result_files_directory):
+                if "database.db" in files:
+                    found_db = os.path.join(root, "database.db")
+                    break
+
+            if found_db:
+                print(f"Found database at {found_db}")
+                options.result_files_directory = os.path.dirname(found_db)
+            else:
+                print("No database found at all. Creating new project folder structure.")
+
+        # Now ensure required directories exist
+        required_dirs = [
+            "Sequences",
+            "Initial_validation",
+            "Hit_list",
+            "Hidden_markov_models",
+            "Cross_validation",
+            "Collinear_syntenic_blocks"
+        ]
+
+        for subdir in required_dirs:
+            path = os.path.join(options.result_files_directory, subdir)
+            if not os.path.isdir(path):
+                print(f"Missing directory {subdir} created")
+                os.makedirs(path, exist_ok=True)
+
+
+        self_query_path = os.path.join(options.result_files_directory, "self_blast.faa")
+        if os.path.isfile(self_query_path):
+            options.self_query = self_query_path
         else:
-            print("No internal query file self_blast.faa. Creating new project folder")
-            return 0
-            
-        #Check for the blast result table and define it if possible
+            print("No internal query file (self_blast.faa) found. Will need to create later.")
+
+        # Find blast table if not already defined
         if options.glob_table is None:
             for file_name in os.listdir(options.result_files_directory):
                 if file_name.startswith("filtered_"):
                     options.glob_table = os.path.join(options.result_files_directory, file_name)
-                    break  # Stop searching once a match is found
+                    break
 
     except Exception as e:
-        raise Exception(f"An error occurred: {e}")
+        raise Exception(f"An error occurred while checking project folder: {e}")
 
     return 1
     

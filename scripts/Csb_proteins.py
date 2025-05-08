@@ -12,6 +12,7 @@ from . import Csb_cluster
 def csb_proteins_datasets(options, sglr_dict):
     
     #Get the domain types as set per csb and predefined pattern
+    print("Reading collinear syntenic block files")
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
@@ -37,6 +38,7 @@ def csb_proteins_datasets(options, sglr_dict):
         csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
         csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
 
+    print("Reading proteinIDs from database")
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
@@ -93,7 +95,7 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
         dict: Updated combined_protein_sets with additional proteinIDs from the database.
     """
     # Connect to the database
-    with sqlite3.connect(database_path) as conn:
+    with sqlite3.connect(database_path, timeout=120.0) as conn:
         cursor = conn.cursor()
 
         # **Schritt 1: Finde alle proteinIDs mit genomeID = 'QUERY'**
@@ -235,9 +237,13 @@ def process_keyword_domains(args):
     result = {}
     chunk_size = 900  # Sicher unter dem SQLite-Limit von 999 bleiben
 
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
-
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+        
         # Schritt 1: Alle Proteins.proteinID für das Keyword abrufen
         cur.execute("""
             SELECT DISTINCT Proteins.proteinID
@@ -298,7 +304,7 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
         results = []
         for i, result in enumerate(pool.imap(process_keyword_domains, tasks), start=1):
             # Print task start in order
-            print(f"{i}/{total_tasks}...", end="\r")
+            print(f"{i}/{total_tasks}", end="\r")
             results.append(result)
 
     # Combine results from all workers
@@ -309,7 +315,7 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
                 combined_dict[key] = set()
             combined_dict[key].update(value)
 
-    print("\nTraining data complete.")
+    print("\nCompleted training data selection")
     return combined_dict
 
     
@@ -337,8 +343,9 @@ def fetch_query_clusters(database, dictionary):
 
     
     # Connect to the SQLite database
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
+        con.execute('PRAGMA journal_mode=WAL;')
         # Query to get distinct domains from the selfblast associated with genomeID 'QUERY'
         query = """
             SELECT DISTINCT Domains.domain
@@ -375,8 +382,14 @@ def remove_non_query_clusters(database, dictionary):
     selected_dictionary = dict()  # Dictionary to hold filtered results
     
     # Connect to the SQLite database
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+
         # Query to get distinct domains from the selfblast associated with genomeID 'QUERY'
         query = """
             SELECT DISTINCT Domains.domain
@@ -509,7 +522,7 @@ def print_grouping_report(description, group, output):
 #################### Protein to fasta operations ##############################
 ###############################################################################
 
-def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=900):
+def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=990):
     """
     Forks off the fetching of sequences for each domain using multiprocessing.
 
@@ -559,7 +572,7 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
 
         
         
-def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_size=900):
+def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_size=990):
     """
     Fetch protein sequences from the database for a specific domain and save them into a FASTA file.
     """
@@ -568,9 +581,13 @@ def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_si
     if not protein_ids or os.path.exists(fasta_file_path):
         return  # Skip empty domains or if the file already exists
 
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
-
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+        
         with open(fasta_file_path, "w") as fasta_file:
             protein_id_list = list(protein_ids)
             for i in range(0, len(protein_id_list), chunk_size):
@@ -614,9 +631,13 @@ def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit):
     """
     protein_ids = set()
 
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
-
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+        
         # Query to fetch protein IDs within score limits for this domain
         query = """
             SELECT DISTINCT proteinID
@@ -718,8 +739,12 @@ def fetch_protein_to_fasta(options, grouped, prefix=""):
     Returns:
         None, but writes the sequences to a FASTA file.
     """
-    with sqlite3.connect(options.database_directory) as con:
+    with sqlite3.connect(options.database_directory, timeout=120.0) as con:
         cursor = con.cursor()
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
 
         for proteinID_frozenset, keyword_domain_pairs in grouped.items():
             # Convert frozenset to a tuple for the SQL IN clause
@@ -768,8 +793,14 @@ def fetch_domains_superfamily_to_fasta(options, directory):
     """
     output_files = {}
 
-    with sqlite3.connect(options.database_directory) as con:
+    with sqlite3.connect(options.database_directory, timeout=120.0) as con:
         cur = con.cursor()
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
+
+
 
         # Retrieve all distinct domains from the database
         query = "SELECT DISTINCT domain FROM Domains"
@@ -827,8 +858,13 @@ def fetch_all_proteins(database, filepath):
     """
     if os.path.isfile(filepath):
         return filepath
-    with sqlite3.connect(database) as con:
+    with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA journal_mode=WAL;')
+        con.execute('PRAGMA synchronous=NORMAL;')
+        con.execute('PRAGMA temp_store=MEMORY;')
+        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
         
         #get all proteins with id and key output shall be "proteinId csb_proteintype" 
         query = """

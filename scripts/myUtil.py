@@ -5,6 +5,7 @@ import sys
 import gzip
 import shutil
 import random
+from datetime import datetime
 
 def packgz(path):
 # gzip file from path and return packed file name
@@ -54,8 +55,12 @@ def file_path(string):
 
 def print_header(string,verbose=0):
     if not verbose:
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print("\n"+string)
-        print(len(string)*"-")
+        print(current_time)
+        print((len(current_time) + 3 + len(string)) * "-")
+        
+        
         
 def clean_empty_files(directory):
 
