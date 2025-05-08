@@ -155,7 +155,7 @@ def decorate_training_data(options, score_limit_dict, grouped):
 
     # Training datasets with additional sequences
     score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
-    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores) # get the proteinIDs within the score limits for each domain, new keys are domain only
+    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.max_seqs, options.cores) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
     fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
     
@@ -599,38 +599,56 @@ def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_si
 
 
 
-def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit):
+def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit, max_count=50000):
     """
-    Fetch all protein IDs for a single domain that fall within the specified score limits.
+    Efficiently fetch top protein IDs for a domain, including all with same score at cutoff,
+    with only one sorted query. Prints a warning if max_count is exceeded due to score ties.
 
     Args:
-        database (str): Path to the SQLite database.
-        domain (str): The domain name.
-        lower_limit (float): Lower score limit.
-        upper_limit (float): Upper score limit.
+        database (str): Path to SQLite database.
+        domain (str): Domain name.
+        lower_limit (float): Lower score threshold.
+        upper_limit (float): Upper score threshold.
+        max_count (int): Minimum number of top scoring entries to fetch (ties allowed above).
 
     Returns:
         tuple: (domain, set(proteinIDs))
     """
-    protein_ids = set()
-
     with sqlite3.connect(database) as con:
         cur = con.cursor()
 
-        # Query to fetch protein IDs within score limits for this domain
         query = """
-            SELECT DISTINCT proteinID
+            SELECT proteinID, score
             FROM Domains
             WHERE domain = ?
-            AND score BETWEEN ? AND ?;
+              AND score BETWEEN ? AND ?
+            ORDER BY score DESC;
         """
         cur.execute(query, (domain, lower_limit, upper_limit))
         rows = cur.fetchall()
 
-        # Store results in a set
-        protein_ids = {row[0] for row in rows}
+    protein_ids = set()
+    count = 0
+    last_score = None
+    tie_count = 0
+
+    for protein_id, score in rows:
+        if count < max_count:
+            protein_ids.add(protein_id)
+            last_score = score
+            count += 1
+        elif score == last_score:
+            protein_ids.add(protein_id)
+            tie_count += 1
+        else:
+            break
+
+    if tie_count > 0:
+        print(f"WARNING: max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
+              f"with the same score ({last_score}) were included.")
 
     return domain, protein_ids
+
 
 
 def filter_existing_faa_files(domain_dict, directory):
@@ -655,7 +673,7 @@ def filter_existing_faa_files(domain_dict, directory):
     return filtered_dict
     
     
-def fetch_protein_ids_parallel(database, score_limit_dict, cores):
+def fetch_protein_ids_parallel(database, score_limit_dict, max_seqs, cores):
     """
     Fetch all protein IDs per domain in parallel using multiprocessing.
 
@@ -667,11 +685,11 @@ def fetch_protein_ids_parallel(database, score_limit_dict, cores):
         dict: { domain: set(proteinIDs) }
     """
     tasks = [
-        (database, domain, limits["lower_limit"], limits["upper_limit"])
+        (database, domain, limits["lower_limit"], limits["upper_limit"], max_seqs)
         for domain, limits in score_limit_dict.items()
     ]
 
-    # Use multiprocessing to run fetch_protein_ids_for_domain in parallel
+    # Use multiprocessing to run fetch_protein_ids_for_domain in parallel. This routine fetches seqs up to a limiter and then all seqs with the same score
     with multiprocessing.Pool(processes=cores) as pool:
         results = pool.starmap(fetch_protein_ids_for_domain, tasks)
 
