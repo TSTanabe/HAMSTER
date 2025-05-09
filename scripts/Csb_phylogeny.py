@@ -133,7 +133,6 @@ def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix):
 
 
     # Use multiprocessing to fork the outer loop
-    monophyly_results = []
     with multiprocessing.Pool(processes=options.cores) as pool:
         results = pool.map(get_lca_worker_task, worker_args)
 
@@ -152,7 +151,7 @@ def get_last_common_ancestor_fasta(options, grouped, trees_dict, tree_prefix):
 #########################################################################################################
 
 
-def get_domain_superfamily_proteinIDs(blast_table, domain, query_length, tolerance=0.5):
+def get_domain_superfamily_proteinIDs_deprecated(blast_table, domain, query_length, tolerance=0.5):
     """
     Filters protein IDs based on length constraints relative to the query length.
 

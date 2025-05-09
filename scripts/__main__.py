@@ -132,7 +132,7 @@ def parse_arguments(arguments):
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
     csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
-    csb.add_argument('-scan_eps', dest='dbscan_epsilon', type=float,default = 0.3, metavar='<float>', help='Acceptable dissimilarity for protein training datasets to be clustered. Default: 0.3') #Wir das noch genutzt?
+    csb.add_argument('-only_fasta', dest='only_fasta_for_clustering', action='store_true', help='Generate only fasta file for MCL')
     csb.add_argument('-exclude_csb_hitscore', dest='low_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Exclude csb with all hits below this deviation from the query self-hits. Default: 0.3')
     csb.add_argument('-group_csb_hitscore', dest='group_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Group hits from csb above this deviation from the query self-hit. Default: 0.3')
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
@@ -144,7 +144,7 @@ def parse_arguments(arguments):
     mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]. Default: 0.6')
     mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=100, metavar = '<int>', help='MCL maximum number of edges between sequences. Default: 100')
     mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control. Default: 2.0')
-    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="fast", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: fast")
+    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: fast")
     mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
     mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
     
@@ -167,7 +167,7 @@ def parse_arguments(arguments):
 
     options = Options()
     parser.parse_args(namespace=options)
-    
+    options.location = __location__
     validate_options(options)
     
     return options
@@ -335,24 +335,22 @@ def decorate_training_sequences(options):
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'merged_score.pkl')
     
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
-    #Csb_proteins.csb_granular_datasets(options,csb_proteins_dict)
-    if options.csb_distinct_grouping or options.csb_mcl_clustering:
-        print("Including homologs without genomic context based on protein sequence phylogeny")
-        print("Generating protein family fasta files")
-        Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
+    print("Including homologs without genomic context based on protein sequence phylogeny")
+    print("Generating protein family fasta files")
+    Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
         
         
-        # Phylogeny clustering
-        if options.csb_distinct_grouping:
-            # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-            print("\nCalculating phylogeny for each protein family")
-            decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
-            Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
+    # Phylogeny clustering
+    if options.csb_distinct_grouping:
+        # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
+        print("\nCalculating phylogeny for each protein family")
+        decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
     
-        # Markov chain clustering 
-        if options.csb_mcl_clustering:
-            print("\nCalculating Markov Chain Clustering")            
-            Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
+    # Markov chain clustering 
+    if options.csb_mcl_clustering:
+        print("\nCalculating Markov Chain Clustering")            
+        Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 def demote_orphan_training_sequences(options):
 

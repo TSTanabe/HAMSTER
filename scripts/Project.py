@@ -38,79 +38,62 @@ def prepare_directory_structure(directory):
             pass  # Creates an empty file
 
 
-def prepare_result_space(options,project="project"):
-    
-    logfile = 0
+def prepare_result_space(options, project="project"):
     now = datetime.now()
     timestamp = str(datetime.timestamp(now))
-    
-    if isProjectFolder(options): #check if existing project folder was given
-        
-        #print(options.result_files_directory)
-        #print(options.fasta_initial_hit_directory)
-        
-        #Define directories from the existing project
-        options.database_directory = options.result_files_directory+"/database.db"
-        options.fasta_initial_hit_directory = options.result_files_directory+"/Hit_list"
-        options.fasta_output_directory = options.result_files_directory+"/Sequences"
-        options.fasta_alignment_directory = options.result_files_directory+"/Initial_validation"        
-        options.Hidden_markov_model_directory = options.result_files_directory+"/Hidden_markov_models"
-        options.cross_validation_directory = options.result_files_directory+"/Cross_validation"
-        options.phylogeny_directory = options.result_files_directory+"/Protein_Phylogeny"
-        options.Csb_directory = options.result_files_directory+"/Collinear_syntenic_blocks"
-        
-        
-        #Define files from the existing project
-        options.divergent_output_file = options.result_files_directory+"/div_output_file.faa"
-        options.csb_output_file = options.Csb_directory+"/Csb_output.txt"
-        options.gene_clusters_file = options.Csb_directory+"/All_gene_clusters.txt"
-        
-        
-        options.report_output_file = options.result_files_directory+"/Report.txt" #for CV
-        options.thresholds_output_file = options.result_files_directory+"/Thresholds.txt" #for CV
 
+    default_dir = os.path.join(options.location, "results")
 
+    # Prüfe, ob Standardverzeichnis verwendet wird
+    if options.result_files_directory == default_dir:
+        # Neues Projekt im Standardverzeichnis anlegen
+        if not os.path.isdir(default_dir):
+            try:
+                os.mkdir(default_dir)
+            except:
+                raise Exception("\nERROR: No writing rights in default results directory.")
+        options.result_files_directory = create_project(default_dir, project)
+        write_options_to_tsv(options, options.result_files_directory)
 
-
-
-    else: #if new project is created
+    # Benutzerdefiniertes Verzeichnis: prüfe ob existierendes Projekt
+    elif not isProjectFolder(options):
         if not os.path.isdir(options.result_files_directory):
             try:
                 os.mkdir(options.result_files_directory)
             except:
-                raise Exception(f"\nERROR: No writing rights.")
-        #Creates an new project and overwrites the result file directory with the project folder. All
-        #other subfolders and files are stored in this project folder
-        options.result_files_directory = create_project(options.result_files_directory,project)        
+                raise Exception(f"\nERROR: No writing rights for directory {options.result_files_directory}")
+        options.result_files_directory = create_project(options.result_files_directory, project)
         write_options_to_tsv(options, options.result_files_directory)
-        
-        options.database_directory = options.result_files_directory+"/database.db"
-        
 
-        options.fasta_initial_hit_directory = options.result_files_directory+"/Hit_list"
-        os.mkdir(options.fasta_initial_hit_directory)
-        options.fasta_output_directory = options.result_files_directory+"/Sequences"
-        os.mkdir(options.fasta_output_directory)
-        options.fasta_alignment_directory = options.result_files_directory+"/Initial_validation"
-        os.mkdir(options.fasta_alignment_directory)
-        options.Hidden_markov_model_directory = options.result_files_directory+"/Hidden_markov_models"
-        os.mkdir(options.Hidden_markov_model_directory)
-        options.cross_validation_directory = options.result_files_directory+"/Cross_validation"
-        os.mkdir(options.cross_validation_directory)
-        options.phylogeny_directory = options.result_files_directory+"/Protein_Phylogeny"
-        os.mkdir(options.phylogeny_directory)
-        options.Csb_directory = options.result_files_directory+"/Collinear_syntenic_blocks"
-        os.mkdir(options.Csb_directory)
-        
-        
-        options.divergent_output_file = options.result_files_directory+"/div_output_file.faa"
-        options.csb_output_file = options.Csb_directory+"/Csb_output.txt"
-        options.gene_clusters_file = options.Csb_directory+"/All_gene_clusters.txt"
-        options.data_computed_Instances_json = options.Csb_directory+"/csb_instances.json"
+    # Definiere Projektstruktur – gilt für beide Fälle
+    options.database_directory = options.result_files_directory + "/database.db"
+    options.fasta_initial_hit_directory = options.result_files_directory + "/Hit_list"
+    options.fasta_output_directory = options.result_files_directory + "/Sequences"
+    options.fasta_alignment_directory = options.result_files_directory + "/Initial_validation"
+    options.Hidden_markov_model_directory = options.result_files_directory + "/Hidden_markov_models"
+    options.cross_validation_directory = options.result_files_directory + "/Cross_validation"
+    options.phylogeny_directory = options.result_files_directory + "/Protein_Phylogeny"
+    options.Csb_directory = options.result_files_directory + "/Collinear_syntenic_blocks"
 
-        options.report_output_file = options.result_files_directory+"/Report.txt"
-        options.thresholds_output_file = options.result_files_directory+"/Thresholds.txt"
-        
+    options.divergent_output_file = options.result_files_directory + "/div_output_file.faa"
+    options.csb_output_file = options.Csb_directory + "/Csb_output.txt"
+    options.gene_clusters_file = options.Csb_directory + "/All_gene_clusters.txt"
+    options.data_computed_Instances_json = options.Csb_directory + "/csb_instances.json"
+    options.report_output_file = options.result_files_directory + "/Report.txt"
+    options.thresholds_output_file = options.result_files_directory + "/Thresholds.txt"
+
+    # Falls neue Verzeichnisse nötig sind – erstelle sie
+    for path in [
+        options.fasta_initial_hit_directory,
+        options.fasta_output_directory,
+        options.fasta_alignment_directory,
+        options.Hidden_markov_model_directory,
+        options.cross_validation_directory,
+        options.phylogeny_directory,
+        options.Csb_directory
+    ]:
+        if not os.path.exists(path):
+            os.mkdir(path)
 
 
 def create_project(directory, projectname="project"):

@@ -134,67 +134,17 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
 
 ################################################################################################
 
-
-def csb_granular_datasets(options, dictionary):
-    #Currently not in use. Granular datasets have usually issues with false positives
-    #Grouping routines to reduce redundancy in training datasets
-    grouped = group_proteinID_sets(dictionary) #removed doublicates #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
-    
-    merged, singles = merge_similar_groups(grouped,options.dbscan_epsilon,"m") # reduce redundancy by merging sets that have identical proteinIDs (like the extension of an existing csb)
-    #print("\nMerged\n\n")
-    #print(merged)
-    #print("\nSingles\n\n")
-    #print(singles)
-    options.TP_merged = merged
-    options.TP_singles = singles
-    print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_csb_groups_1")
-    print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_1")
-
-
-################################################################################################
-
 def decorate_training_data(options, score_limit_dict, grouped):
 
     # Training datasets with additional sequences
     score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
-    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.max_seqs, options.cores) # get the proteinIDs within the score limits for each domain, new keys are domain only
+    decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores, options.max_seqs) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
     fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
     
     return
 ################################################################################################
 
-
-
-
-def training_data_fasta(options):
-    
-    training_datasets = {**options.TP_merged, **options.TP_singles, **options.TP_monophyla, **options.superfamily}
-    
-    dicts = [options.TP_merged, options.TP_singles, options.TP_monophyla]
-    training_datasets = {}
-    
-    for d in dicts:
-        for key,value in d.items():
-            if key in training_datasets:
-                training_datasets[key] += value
-            else:
-                training_datasets[key] = value
-    
-    merged, singles = merge_similar_groups(training_datasets, options.dbscan_epsilon,"p")
-    print_grouping_report("Merged csb groupes that include highly similar or identical proteins groups",merged,options.Csb_directory+"/Merged_phylogenetic_groups_2")
-    print_grouping_report("Unique csb groupes that include distinct proteins groups",singles,options.Csb_directory+"/Singles_csb_groups_2")
-
-    #print(len(options.TP_merged))
-    #print(len(options.TP_singles))
-    #print(len(options.TP_monophyla))
-    #print(len(merged))
-    #print(len(singles))
-
-    
-    fetch_protein_to_fasta(options,merged)
-    fetch_protein_to_fasta(options,singles)
-    
     
 def parse_csb_file_to_dict(file_path):
     data_dict = {}
@@ -551,8 +501,8 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
             print(f"WARNING: Domain '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
             continue  # Skip this domain
 
-        if num_sequences > max_seq:
-            print(f"WARNING: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq})")
+        if num_sequences > (max_seq + 5000):
+            print(f"WARNING: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
             continue  # Skip this domain
 
         if os.path.exists(output_file):
@@ -691,7 +641,7 @@ def filter_existing_faa_files(domain_dict, directory):
     return filtered_dict
     
     
-def fetch_protein_ids_parallel(database, score_limit_dict, max_seqs, cores):
+def fetch_protein_ids_parallel(database, score_limit_dict, cores, max_seqs=50000):
     """
     Fetch all protein IDs per domain in parallel using multiprocessing.
 
@@ -875,7 +825,6 @@ def fetch_all_proteins(database, filepath):
         return filepath
     with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
-        con.execute('PRAGMA journal_mode=WAL;')
         con.execute('PRAGMA journal_mode=WAL;')
         con.execute('PRAGMA synchronous=NORMAL;')
         con.execute('PRAGMA temp_store=MEMORY;')
