@@ -2,8 +2,12 @@
 
 import csv
 import os
+import itertools
+import numpy as np
 from . import Csb_proteins
 from . import myUtil
+
+
 
 
 def csb_mcl_datasets(options, reference_dict):
@@ -145,66 +149,94 @@ def run_mcl_for_all_domains(output_files_dict, mcl_directory, mcl_inflation):
     return mcl_output_dict
 
 
+##################################################################################################################
 
 
-
-def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshold=0.3, reference_threshold=0.3):
+def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences, 
+                                      fixed_density_threshold=None, 
+                                      fixed_reference_threshold=None):
     """
-    Iterates over multiple MCL output files, extracts reference sequences, 
-    and processes them using process_single_mcl_file.
+    Calculates the optimal (density, reference) thresholds based on F1 score.
 
     Args:
-    - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths. These are either grp0_ or without prefix
-    - reference_dict (dict): Dictionary where keys need to be split ('_'), and values are sets of reference sequence IDs. keys are grp0_domain
-    - density_threshold (float): Minimum reference density required.
+        mcl_file (str): Path to MCL output file.
+        domain (str): Domain name (used for logging/debugging).
+        reference_sequences (set): Set of known reference sequence IDs.
+        fixed_density_threshold (float or None): Optional fixed density threshold.
+        fixed_reference_threshold (float or None): Optional fixed reference threshold.
 
     Returns:
-    - all_clusters (dict): Merged dictionary of all high-density clusters.
+        (float, float): Tuple of best (density_threshold, reference_threshold)
     """
-    all_clusters = {}
     
-    # Process reference_dict to extract the actual domain names
-    processed_reference_dict = {
-        key.split("_", 1)[-1]: value for key, value in reference_dict.items()
-    }
+    def parse_mcl_clusters(path):
+        with open(path, 'r') as f:
+            return [line.strip().split() for line in f if line.strip()]
+    
+    clusters = parse_mcl_clusters(mcl_file)
+    n_ref_total = len(reference_sequences)
 
-    for domain, mcl_file in mcl_output_dict.items():
-        print(f"Processing domain: {domain}")
+    if n_ref_total == 0:
+        raise ValueError(f"[{domain}] No reference sequences provided.")
 
-        # Get reference sequences for the domain (if exists in processed reference dict)
-        reference_sequences = processed_reference_dict.get(domain, set())
-        if not reference_sequences:
-            print(f"Warning: No reference sequences found for domain '{domain}', skipping.")
+    cluster_metrics = []
+    for cluster in clusters:
+        cluster_set = set(cluster)
+        cluster_size = len(cluster_set)
+        ref_count = len(cluster_set & reference_sequences)
+        non_ref_count = cluster_size - ref_count
+
+        if cluster_size == 0 or ref_count == 0:
             continue
 
-        # Step 1 Process the MCL file for this domain
-        mcl_domain_clusters_dict = process_single_mcl_file(mcl_file, domain, reference_sequences, density_threshold, reference_threshold)
-        
-        # Step 2 Combine all individual cluster sets into one merged set
-        
-        combined_set = set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
+        ref_ratio_in_cluster = ref_count / cluster_size
+        ref_ratio_of_total = ref_count / n_ref_total
 
-        # Step 3 Replace if only one cluster and it's equal to combined
-        if len(mcl_domain_clusters_dict) == 1:
-            only_cluster = next(iter(mcl_domain_clusters_dict.values()))
-            if only_cluster == combined_set:
-                print(f"All reference grp0 are present in a single mcl cluster. Using grp1_{domain} only.")
-                mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
-        else:
-            # Add combined set additionally
-            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set # adds the grp1 to the mclx keys
+        cluster_metrics.append({
+            'ref_ratio_in_cluster': ref_ratio_in_cluster,
+            'ref_ratio_of_total': ref_ratio_of_total,
+            'ref_count': ref_count,
+            'non_ref_count': non_ref_count
+        })
 
-        # Step 4 Write down the clusters (including the combined one)
-        Csb_proteins.fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            mcl_domain_clusters_dict,  # Now contains both individual clusters + combined set
-            options.fasta_output_directory,
-            options.min_seqs,
-            options.max_seqs,
-            options.cores
-        )
-        
-        
+    if not cluster_metrics:
+        raise ValueError(f"[{domain}] No informative clusters found.")
+
+    # Threshold grids
+    x_bins = [fixed_reference_threshold] if fixed_reference_threshold is not None else np.round(np.arange(0.001, 1.01, 0.005), 3)
+    y_bins = [fixed_density_threshold] if fixed_density_threshold is not None else np.round(np.arange(0.01, 1.01, 0.005), 3)
+
+    best_score = 0.0
+    best_coords = (None, None)
+
+    for x_thresh in x_bins:
+        for y_thresh in y_bins:
+            selected = [
+                c for c in cluster_metrics
+                if c['ref_ratio_of_total'] >= x_thresh and c['ref_ratio_in_cluster'] >= y_thresh
+            ]
+
+            TP = sum(c['ref_count'] for c in selected)
+            FP = sum(c['non_ref_count'] for c in selected)
+            FN = n_ref_total - TP
+
+            if TP + FP == 0 or TP + FN == 0:
+                continue
+
+            precision = TP / (TP + FP)
+            recall = TP / (TP + FN)
+            f1 = 2 * (precision * recall) / (precision + recall)
+
+            if f1 >= best_score:
+                best_score = f1
+                best_coords = (x_thresh, y_thresh)
+
+    if best_coords[0] is None or best_coords[1] is None:
+        print(f"[{domain}] No optimal threshold combination found for mcl cluster selection. Returning fallback (0.0, 0.0).")
+        return 0.0, 0.0
+
+    print(f"[{domain}] Optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
+    return best_coords[1], best_coords[0]  # Return in order: (density, reference)
 
 
 
@@ -232,9 +264,9 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
             seqs = set(line.strip().split())  # Convert line to a set of sequences
 
             # Compute reference sequence statistics
-            ref_count = len(seqs.intersection(reference_sequences))
-            cluster_size = len(seqs)
-            ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Reference density
+            ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
+            cluster_size = len(seqs) # absoulte number of sequences in the cluster
+            ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequencse in the current mcl cluster
             ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
 
             # Store clusters that exceed both thresholds
@@ -243,6 +275,93 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
                 cluster_index += 1
 
     return cluster_dict
+
+
+#### Main for the mcl cluster iteration ####
+
+def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshold=None, reference_threshold=None):
+    """
+    Iterates over multiple MCL output files, extracts reference sequences, 
+    and processes them using process_single_mcl_file.
+
+    Args:
+    - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths. These are either grp0_ or without prefix
+    - reference_dict (dict): Dictionary where keys need to be split ('_'), and values are sets of reference sequence IDs. keys are grp0_domain
+    - density_threshold (float): Minimum reference density required.
+
+    Returns:
+    - all_clusters (dict): Merged dictionary of all high-density clusters.
+    """
+    all_clusters = {}
+    
+    # Process reference_dict to extract the actual domain names
+    processed_reference_dict = {
+        key.split("_", 1)[-1]: value for key, value in reference_dict.items()
+    }
+
+    for domain, mcl_file in mcl_output_dict.items():
+        print(f"Processing domain: {domain}")
+
+        # Get reference sequences for the domain (if exists in processed reference dict)
+        reference_sequences = processed_reference_dict.get(domain, set())
+        if not reference_sequences:
+            print(f"Warning: No reference sequences found for domain '{domain}', skipping.")
+            continue
+        
+        
+        local_density_thrs = density_threshold
+        local_reference_thrs = reference_threshold
+        
+        # Step 1 Calculate the optimal density and reference thresholds
+        local_density_thrs, local_reference_thrs = calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,fixed_density_threshold=local_density_thrs, fixed_reference_threshold=local_reference_thrs)
+        
+        # Step 1 Process the MCL file for this domain
+        mcl_domain_clusters_dict = process_single_mcl_file(mcl_file, domain, reference_sequences, local_density_thrs, local_reference_thrs)
+        
+        # Step 2 Combine all individual cluster sets into one merged set
+        
+        combined_set = set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
+
+        grp1_dict = {f"grp1_{domain}": combined_set}
+        
+        # Step 5 Write down the clusters (including the combined one)
+        Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            grp1_dict,  # Now contains both individual clusters + combined set
+            options.fasta_output_directory,
+            options.min_seqs,
+            options.max_seqs,
+            options.cores
+        )
+        
+        continue
+        
+        # Currently out of order. Individual HMMs for each MCL cluster are not made
+        # Step 3 Replace if only one cluster and it's equal to combined
+        if len(mcl_domain_clusters_dict) == 1:
+            only_cluster = next(iter(mcl_domain_clusters_dict.values()))
+            if only_cluster == combined_set:
+                print(f"All reference grp0 are present in a single mcl cluster. Using grp1_{domain} only.")
+                mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
+        else:
+            # Add combined set additionally
+            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set # adds the grp1 to the mclx keys
+                
+        # Step 5 Write down the clusters (including the combined one)
+        Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            mcl_domain_clusters_dict,  # Now contains both individual clusters + combined set
+            options.fasta_output_directory,
+            options.min_seqs,
+            options.max_seqs,
+            options.cores
+        )
+        
+        
+
+
+
+
 
 
 

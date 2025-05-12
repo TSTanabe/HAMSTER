@@ -144,8 +144,16 @@ def parse_arguments(arguments):
     mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=100, metavar = '<int>', help='MCL maximum number of edges between sequences. Default: 100')
     mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control. Default: 2.0')
     mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive. Default: fast")
-    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=0.01, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive. Default: 0.01')
-    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=0.1, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive. Default: 0.1')
+    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive [0.0,1.0]. Default: None')
+    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive [0.0,1.0]. Default: None')
+    
+    #This is how the MCL reference thresholds work
+    #ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
+    #cluster_size = len(seqs) # absoulte number of sequences in the cluster
+    #ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequencse in the current mcl cluster
+    #ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
+    #ref_density >= density_threshold and ref_fraction >= reference_fraction_threshold:
+    
     
     pam_search = parser.add_argument_group("Optional presence/absence matrix and phylogenetic placement parameters")
     pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.6, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.6')
