@@ -560,7 +560,7 @@ def train_logistic_models_from_tsv(tsv_path):
     df = pd.read_csv(tsv_path, sep="\t")
 
     # Spaltennamen bereinigen
-    df.columns = [col.replace("grp0_", "") for col in df.columns]
+    df.columns = [col.replace("grp0_", "").replace("sng0_","") for col in df.columns]
 
     # Binär-Matrix erzeugen
     binary_matrix = df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
@@ -589,7 +589,7 @@ def train_logistic_models_from_tsv(tsv_path):
     return models, coef_df
 
 
-def check_new_presences(base_tsv_path, extended_tsv_path, threshold=0.6):
+def check_new_presences_deprecated(base_tsv_path, extended_tsv_path, threshold=0.6):
 
     # Modelle auf Basisdaten trainieren
     models, coef_df = train_logistic_models_from_tsv(base_tsv_path)
@@ -665,7 +665,7 @@ def check_new_presences_with_combined_context(base_tsv_path, extended_tsv_path, 
     extended_bin = extended_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
 
     base_df = pd.read_csv(base_tsv_path, sep="\t")
-    base_df.columns = [col.replace("grp0_", "") for col in base_df.columns]
+    base_df.columns = [col.replace("grp0_", "").replace("sng0_","") for col in base_df.columns]
     base_df = base_df.set_index("genomeID")
     base_bin = base_df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
 
@@ -687,6 +687,8 @@ def check_new_presences_with_combined_context(base_tsv_path, extended_tsv_path, 
         # Zusätzlich neue 1en aus grp1 identifizieren
         new_hits = []
         for protein in extended_bin.columns:
+            if protein not in base_bin.columns:
+                continue  # if protein in extended but not in base continue
             was_0 = base_bin.at[genome_id, protein] == 0
             now_1 = extended_bin.at[genome_id, protein] == 1
             if was_0 and now_1:
@@ -925,6 +927,7 @@ def main_presence_absence_matrix_filter(options):
     
     # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
     #TODO option für liberal und konservativ
+    #TODO regression lernen von sng0 mit grp0 und nicht nur von grp0 damit auch eine regression für diese einheiten besteht.
     # Conservative with new hits against base grp0 hits in the genome
     #grp1_non_plausible_hits = check_new_presences(basis_matrix_filepath,grp1_matrix_filepath) # Learn from base and check individually new hits against genome base hits
     #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)

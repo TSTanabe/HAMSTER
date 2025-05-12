@@ -189,10 +189,6 @@ def process_keyword_domains(args):
 
     with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
-        con.execute('PRAGMA journal_mode=WAL;')
-        con.execute('PRAGMA synchronous=NORMAL;')
-        con.execute('PRAGMA temp_store=MEMORY;')
-        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
         
         # Schritt 1: Alle Proteins.proteinID für das Keyword abrufen
         cur.execute("""

@@ -132,7 +132,6 @@ def parse_arguments(arguments):
     
     csb.add_argument('-no_phylogeny', dest='csb_distinct_grouping', action='store_false', help='Skip phylogenetic supported training dataset clustering')
     csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
-    csb.add_argument('-only_fasta', dest='only_fasta_for_clustering', action='store_true', help='Generate only fasta file for MCL')
     csb.add_argument('-exclude_csb_hitscore', dest='low_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Exclude csb with all hits below this deviation from the query self-hits. Default: 0.3')
     csb.add_argument('-group_csb_hitscore', dest='group_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Group hits from csb above this deviation from the query self-hit. Default: 0.3')
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
@@ -268,13 +267,17 @@ def generate_csb_sequence_fasta(options):
     # Collect proteins from singular distantly related keywords
     if options.sglr:
         print("Processing dissimilar homologs with specific genomic context")
+        
         singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
+        
         Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singular, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
+        
         singular = {}
     
     
     ### Collect proteins from grouped keywords
     print("Processing highly similar homologs with specific genomic context")
+    
     grouped = Csb_proteins.load_cache(
         os.path.join(options.result_files_directory, "pkl_cache"),
         'grp_training_proteinIDs.pkl'
@@ -300,19 +303,13 @@ def generate_csb_sequence_fasta(options):
     print("Collecting highly similar homologs from query hits correlated to csb")
     sng_score_limit_dict, sng_ref_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options) # Pulls seqs directly from the fasta/tsv files
 
-    # --- Merge score_limit_dicts ---
+    # Merge groups and limits from csb and sng
     merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
 
-    # --- Merge grouped dictionaries ---
     merged_grouped = {**grouped, **sng_ref_seqs_dict}
 
-    # --- Debugging output ---
-    #print("----## Merged Score Limits ----")
-    #print(merged_score_limit_dict)
-    #print("----## Merged Grouped ----")
-    #print(merged_grouped)
 
-    # --- Save merged grouped ---
+    # Pickle the merged groups
     Csb_proteins.save_cache(
         os.path.join(options.result_files_directory, "pkl_cache"),
         'merged_grouped.pkl',
@@ -324,7 +321,8 @@ def generate_csb_sequence_fasta(options):
         'merged_score.pkl',
         merged_score_limit_dict
     )
-    # --- Update options ---
+    
+    # Update options object with the fetched proteinID groups and score limits
     options.grouped = merged_grouped
     options.score_limit_dict = merged_score_limit_dict
     
@@ -340,54 +338,75 @@ def decorate_training_sequences(options):
     Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
         
         
-    # Phylogeny clustering
+    # Phylogeny clustering for lca fasta files
     if options.csb_distinct_grouping:
+        
         # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
         print("\nCalculating phylogeny for each protein family")
+        
         decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+        
         Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
     
-    # Markov chain clustering 
+    # Markov chain clustering for grp1 fasta files
     if options.csb_mcl_clustering:
+        
         print("\nCalculating Markov Chain Clustering")            
+        
         Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
 def demote_orphan_training_sequences(options):
-
+    
+    # Presence absence matrix support for grp3
     Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
 
     return
         
 def model_alignment(options):
+    
     Alignment.initial_alignments(options, options.fasta_output_directory)
 
+    return
 
 def cross_validation(options):
+
     print("Initialize training data subsamples")
+
     Validation.create_hmms_from_msas(options.fasta_output_directory, options.Hidden_markov_model_directory, "fasta_aln","hmm",options.cores) #create the full hmms for later use
+
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
     Csb_proteins.fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory) #Target file for each HMM excluding seqs already below threshold
+
     Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
 
+
     print("Initialize target sequence sets")
+    
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
+    
     options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)
+    
+
     print(f"From {options.cross_validation_directory} the following target files were selected {options.targeted_sequence_faa_file_dict}")
     
     Validation.parallel_cross_validation(options)
 
-
+    return
        
 def report_cv_performance(options):
+    
     #Initial validation
     print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
+    
     Reports.concat_and_sort_files(options.fasta_alignment_directory, '_MCC.txt', options.Hidden_markov_model_directory, "_ini_performance_matrices.txt")
+    
     Reports.concat_and_sort_files(options.fasta_alignment_directory, '_thresholds.txt', options.Hidden_markov_model_directory, "_ini_cutoffs.txt")
     
 
     #cross validation
     print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
+    
     options.reports = Reports.parse_matrices_to_report(options.cross_validation_directory,"_cv_matrices.txt")
     
     options.standard_performance_report_file = Reports.create_performance_file(options,options.reports,options.Hidden_markov_model_directory,"/cutoff_performance.txt")

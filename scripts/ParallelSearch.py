@@ -50,7 +50,7 @@ def initial_genomize_search(options):
         
         p_writer.get()
     print("\nFinished searching")
-    print(f"Saved hits to database {options.database_directory}")
+    print(f"Saved BLASTp hits to database {options.database_directory}")
     print(f"Saved individual hit lists to {options.fasta_initial_hit_directory}")
     return    
 
@@ -81,8 +81,8 @@ def process_parallel_search(args_tuple):
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"\tWARNING: Skipped {faa_file} due to an error - {error_message}")
-        print(f"\tTraceback details:\n{traceback_details}")
+        print(f"Warning: Skipped {faa_file} due to an error - {error_message}")
+        print(f"Traceback details:\n{traceback_details}")
         return
 
     return
@@ -115,7 +115,7 @@ def initial_glob_search(options):
     # Step 1: Perform self BLAST query to establish reference scores for blast score ratio
     self_blast_report = self_blast_query(options)
 
-    # Step 2: Run DIAMOND BLASp if no precomputed BLAST table is provided or exists
+    # Step 2: Run DIAMOND BLASTp if no precomputed BLAST table is provided or exists
     blast_results_table = options.glob_table
     if not blast_results_table:
         print(f"Initilize DIAMOND BLASTp against target")
@@ -126,7 +126,7 @@ def initial_glob_search(options):
         )
     
     # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
-    print("Filtering BLASTp results according to general limit values")   
+    print("Filtering raw BLASTp results with given parameters")   
     query_length_dict = get_sequence_legth(options.self_query) # Retrieve sequence lengths
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
     
@@ -169,7 +169,7 @@ def initial_glob_search(options):
             data_queue.put(None)
         
         p_writer.get()
-    print("Finished parsing reports")
+    print("Finished parsing BLASTp results")
     return
 
 
@@ -672,7 +672,7 @@ def filter_blast_table(output_file, blast_file, evalue_cutoff, score_cutoff, cov
                     buffer.clear()  # Reset buffer
 
             except ValueError as ve:
-                print(f"Skipping malformed row: {row} (ValueError: {ve})")
+                print(f"Warning: Skipping malformed row: {row} (ValueError: {ve})")
                 continue  # Skip invalid rows gracefully
 
         # Final flush: Write any remaining data in the buffer
