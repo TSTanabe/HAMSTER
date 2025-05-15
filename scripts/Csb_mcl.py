@@ -177,7 +177,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
     n_ref_total = len(reference_sequences)
 
     if n_ref_total == 0:
-        raise ValueError(f"[{domain}] No reference sequences provided.")
+        return fixed_density_threshold,fixed_reference_threshold
 
     cluster_metrics = []
     for cluster in clusters:
@@ -200,7 +200,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
         })
 
     if not cluster_metrics:
-        raise ValueError(f"[{domain}] No informative clusters found.")
+        return fixed_density_threshold,fixed_reference_threshold
 
     # Threshold grids
     x_bins = [fixed_reference_threshold] if fixed_reference_threshold is not None else np.round(np.arange(0.001, 1.01, 0.005), 3)
@@ -231,9 +231,6 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
                 best_score = f1
                 best_coords = (x_thresh, y_thresh)
 
-    if best_coords[0] is None or best_coords[1] is None:
-        print(f"[{domain}] No optimal threshold combination found for mcl cluster selection. Returning fallback (0.0, 0.0).")
-        return 0.0, 0.0
 
     print(f"[{domain}] Optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
     return best_coords[1], best_coords[0]  # Return in order: (density, reference)
@@ -266,7 +263,7 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
             # Compute reference sequence statistics
             ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
             cluster_size = len(seqs) # absoulte number of sequences in the cluster
-            ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequencse in the current mcl cluster
+            ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequences in the current mcl cluster
             ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
 
             # Store clusters that exceed both thresholds
@@ -274,6 +271,11 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
                 cluster_dict[f"mcl{cluster_index}_{domain}"] = seqs
                 cluster_index += 1
 
+
+        total_seqs = sum(len(seqs) for seqs in cluster_dict.values())
+        print(f"Anzahl der referenz Sequenzen {len(reference_sequences)}")
+        print(f"Anzahl der neuen    Sequenzen {total_seqs - len(reference_sequences)}")
+        print(f"Anzahl der Sequenzen in allen Clustern: {total_seqs}")
     return cluster_dict
 
 
@@ -315,14 +317,27 @@ def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshol
         # Step 1 Calculate the optimal density and reference thresholds
         local_density_thrs, local_reference_thrs = calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,fixed_density_threshold=local_density_thrs, fixed_reference_threshold=local_reference_thrs)
         
+        # Get fallback values if thresholds were not provided
+        if local_density_thrs is None:
+            print("Warning: MCL density threshold was not calculated for {domain}, fallback 0.0")
+            local_density_thrs = 0.1
+        if local_reference_thrs is None:
+            print("Warning: MCL reference threshold was not calculated for {domain}, fallback 0.0")
+            local_reference_thrs = 0.01
+        
+        
+        print(f"Domain {domain} with local_density_thrs {local_density_thrs} and reference thrs {local_reference_thrs}")
+        
         # Step 1 Process the MCL file for this domain
         mcl_domain_clusters_dict = process_single_mcl_file(mcl_file, domain, reference_sequences, local_density_thrs, local_reference_thrs)
         
-        # Step 2 Combine all individual cluster sets into one merged set
         
+        # Step 2 Combine all individual cluster sets into one merged set
         combined_set = set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
 
         grp1_dict = {f"grp1_{domain}": combined_set}
+        
+        print(f"Length combined set {domain}: {len(combined_set)}")
         
         # Step 5 Write down the clusters (including the combined one)
         Csb_proteins.fetch_seqs_to_fasta_parallel(
@@ -334,29 +349,29 @@ def iterate_mcl_files(options, mcl_output_dict, reference_dict, density_threshol
             options.cores
         )
         
-        continue
-        
-        # Currently out of order. Individual HMMs for each MCL cluster are not made
-        # Step 3 Replace if only one cluster and it's equal to combined
-        if len(mcl_domain_clusters_dict) == 1:
-            only_cluster = next(iter(mcl_domain_clusters_dict.values()))
-            if only_cluster == combined_set:
-                print(f"All reference grp0 are present in a single mcl cluster. Using grp1_{domain} only.")
-                mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
-        else:
-            # Add combined set additionally
-            mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set # adds the grp1 to the mclx keys
-                
-        # Step 5 Write down the clusters (including the combined one)
-        Csb_proteins.fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            mcl_domain_clusters_dict,  # Now contains both individual clusters + combined set
-            options.fasta_output_directory,
-            options.min_seqs,
-            options.max_seqs,
-            options.cores
-        )
-        
+
+        """
+            # Currently out of order. Individual HMMs for each MCL cluster are not made
+            # Step 3 Replace if only one cluster and it's equal to combined
+            if len(mcl_domain_clusters_dict) == 1:
+                only_cluster = next(iter(mcl_domain_clusters_dict.values()))
+                if only_cluster == combined_set:
+                    print(f"All reference grp0 are present in a single mcl cluster. Using grp1_{domain} only.")
+                    mcl_domain_clusters_dict = {f"grp1_{domain}": combined_set} # makes new dict
+            else:
+                # Add combined set additionally
+                mcl_domain_clusters_dict[f"grp1_{domain}"] = combined_set # adds the grp1 to the mclx keys
+                    
+            # Step 5 Write down the clusters (including the combined one)
+            Csb_proteins.fetch_seqs_to_fasta_parallel(
+                options.database_directory,
+                mcl_domain_clusters_dict,  # Now contains both individual clusters + combined set
+                options.fasta_output_directory,
+                options.min_seqs,
+                options.max_seqs,
+                options.cores
+            )
+        """
         
 
 

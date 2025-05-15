@@ -541,7 +541,7 @@ def generate_singleton_reference_seqs(options):
 
 ###############################################################################
 ####### Main routines for the regression of presence absence matrices #########
-####### Step 7                                                        #########
+####### Step 7  in main routine                                       #########
 ###############################################################################
 
 
@@ -879,26 +879,28 @@ def main_presence_absence_matrix_filter(options):
     basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
 
     # Step 1: Create presence/absence matrix for grp0 as basis co-occurence
-    create_presence_absence_matrix(
-        faa_dir=options.fasta_output_directory,
-        database_directory=options.database_directory,
-        output_path=basis_matrix_filepath,
-        chunk_size=990,
-        extensions=(".faa",), # has to be a tuple
-        prefixes=("grp0",), # has to be a tuple
-        cores = options.cores
-    )
+    if not os.path.isfile(basis_matrix_filepath):
+        create_presence_absence_matrix(
+            faa_dir=options.fasta_output_directory,
+            database_directory=options.database_directory,
+            output_path=basis_matrix_filepath,
+            chunk_size=990,
+            extensions=(".faa",), # has to be a tuple
+            prefixes=("grp0",), # has to be a tuple
+            cores = options.cores
+        )
 
     # Step 2: Create presence/absence matrix for grp1
-    create_presence_absence_matrix(
-        faa_dir=options.fasta_output_directory,
-        database_directory=options.database_directory,
-        output_path=grp1_matrix_filepath,
-        chunk_size=990,
-        extensions=(".faa",), # has to be a tuple
-        prefixes=("grp1",), # has to be a tuple
-        cores = options.cores
-    )
+    if not os.path.isfile(grp1_matrix_filepath):
+        create_presence_absence_matrix(
+            faa_dir=options.fasta_output_directory,
+            database_directory=options.database_directory,
+            output_path=grp1_matrix_filepath,
+            chunk_size=990,
+            extensions=(".faa",), # has to be a tuple
+            prefixes=("grp1",), # has to be a tuple
+            cores = options.cores
+        )
 
     # Step 2.5 check if presence absence matrices are available
     basis_exists = os.path.isfile(basis_matrix_filepath)
@@ -926,8 +928,6 @@ def main_presence_absence_matrix_filter(options):
     
     
     # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
-    #TODO option für liberal und konservativ
-    #TODO regression lernen von sng0 mit grp0 und nicht nur von grp0 damit auch eine regression für diese einheiten besteht.
     # Conservative with new hits against base grp0 hits in the genome
     #grp1_non_plausible_hits = check_new_presences(basis_matrix_filepath,grp1_matrix_filepath) # Learn from base and check individually new hits against genome base hits
     #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
