@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os
+import pickle
 import sys
 import gzip
 import shutil
@@ -224,3 +225,56 @@ def remove_directory(directory_path):
         print(f"Removed directory and all its contents: {directory_path}")
     else:
         print(f"Directory does not exist: {directory_path}")
+        
+
+def save_cache(options, name, data):
+    cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
+    os.makedirs(cache_dir, exist_ok=True)  # sicherer als os.system(mkdir ...)
+
+    file_path = os.path.join(cache_dir, name)
+    if os.path.exists(file_path):
+        return  # Nicht überschreiben, wenn bereits vorhanden
+
+    with open(file_path, "wb") as f:
+        pickle.dump(data, f)
+
+
+def load_cache(options, name):
+    cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
+    file_path = os.path.join(cache_dir, name)
+
+    if os.path.exists(file_path):
+        print(f"Loading from cache: {name}")
+        with open(file_path, "rb") as f:
+            return pickle.load(f)
+    else:
+        return None
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+        

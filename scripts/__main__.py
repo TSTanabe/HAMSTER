@@ -286,10 +286,7 @@ def generate_csb_sequence_fasta(options):
     ### Collect proteins from grouped keywords
     print("Processing highly similar homologs with specific genomic context")
     
-    grouped = Csb_proteins.load_cache(
-        os.path.join(options.result_files_directory, "pkl_cache"),
-        'grp_training_proteinIDs.pkl'
-    )
+    grouped = myUtil.load_cache(options,'grp_training_proteinIDs.pkl')
 
     if not grouped:
         grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp") #Warnung, dieser Wert hier hat einen iterator für die Zahl nach grp. Das kann einen konflikt mit grp1 und grp2 herstellen,falls mal mehr als bis 1 gezählt wird
@@ -318,17 +315,8 @@ def generate_csb_sequence_fasta(options):
 
 
     # Pickle the merged groups
-    Csb_proteins.save_cache(
-        os.path.join(options.result_files_directory, "pkl_cache"),
-        'merged_grouped.pkl',
-        merged_grouped
-    )
-
-    Csb_proteins.save_cache(
-        os.path.join(options.result_files_directory, "pkl_cache"),
-        'merged_score.pkl',
-        merged_score_limit_dict
-    )
+    myUtil.save_cache(options, 'merged_grouped.pkl', merged_grouped)
+    myUtil.save_cache(options, 'merged_score.pkl', merged_score_limit_dict)
     
     # Update options object with the fetched proteinID groups and score limits
     options.grouped = merged_grouped
@@ -337,8 +325,8 @@ def generate_csb_sequence_fasta(options):
     return
 
 def decorate_training_sequences(options):
-    grouped = options.grouped if hasattr(options, 'grouped') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"),'merged_grouped.pkl')
-    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else Csb_proteins.load_cache(os.path.join(options.result_files_directory, "pkl_cache"), 'merged_score.pkl')
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'merged_grouped.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'merged_score.pkl')
     
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     print("Including homologs without genomic context based on protein sequence phylogeny")

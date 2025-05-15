@@ -344,7 +344,7 @@ def process_single_genome(data_queue,genomeID,options,report,score_threshold_dic
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"\tWARNING: Skipped {faa_file} due to an error - {error_message}")
+        print(f"\tWarning: Skipped {faa_file} due to an error - {error_message}")
         print(f"\tTraceback details:\n{traceback_details}")
         return
 
@@ -480,7 +480,7 @@ def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=1
                         )
 
                 except ValueError as ve:
-                    print(f"\tWARNING: Skipped malformed line in {filepath}: {line.strip()} (ValueError: {ve})")
+                    print(f"\tWarning: Skipped malformed line in {filepath}: {line.strip()} (ValueError: {ve})")
                     continue
 
     except Exception as e:

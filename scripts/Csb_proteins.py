@@ -1,11 +1,10 @@
 #!/usr/bin/python
 import sqlite3
 import os
-import pickle
 import multiprocessing
 from multiprocessing import Pool, Manager, Value, Lock
 
-from . import Csb_cluster
+from . import myUtil
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
@@ -18,12 +17,8 @@ def csb_proteins_datasets(options, sglr_dict):
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     options.csb_dictionary = csb_dictionary # save the patterns for later use
 
-    # Try to retrieve saved dictionary
-    cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
-    os.makedirs(cache_dir, exist_ok=True)
-    
     # Load existing data
-    dictionary = load_cache(cache_dir, "csb_protein_dataset.pkl")
+    dictionary = myUtil.load_cache(options, "csb_protein_dataset.pkl")
     
     if dictionary:
         print("Loaded existing protein dataset")
@@ -43,9 +38,9 @@ def csb_proteins_datasets(options, sglr_dict):
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
     
-    save_cache(cache_dir, "csb_protein_dataset.pkl", dictionary)
+    myUtil.save_cache(options, "csb_protein_dataset.pkl", dictionary)
     
-    #Remove domains that are excluded by user options
+    # Remove domains that are excluded by user options
     dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
     
     dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
@@ -269,45 +264,6 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
 
 ######################################################################################################
 
-
-def fetch_query_clusters(database, dictionary):
-    """
-    First selects the protein domain types that were assigned by the selfblast.
-    Then removes every protein from the dictionary that is not equal to the
-    domain types from the selfblast.
-    
-    Args:
-        database (str): Path to the SQLite database.
-        dictionary (dict): A dictionary where the keys are tuples, and the second
-                           element in each tuple represents a protein domain.
-    
-    Returns:
-        dict: A dictionary with only the entries where the domain matches one
-              of the domains from the query in the database.
-    """
-    query_domains = set()  # Set to hold the selected domains
-
-    
-    # Connect to the SQLite database
-    with sqlite3.connect(database, timeout=120.0) as con:
-        cur = con.cursor()
-        con.execute('PRAGMA journal_mode=WAL;')
-        # Query to get distinct domains from the selfblast associated with genomeID 'QUERY'
-        query = """
-            SELECT DISTINCT Domains.domain
-            FROM Proteins
-            LEFT JOIN Domains ON Proteins.proteinID = Domains.proteinID
-            WHERE Proteins.genomeID = ?;
-        """
-        # Execute the query with 'QUERY' as the genomeID
-        cur.execute(query, ('QUERY',))
-        rows = cur.fetchall()
-        
-        # Add each domain to the query_domains set
-        for row in rows:
-            query_domains.add(row[0])
-    return query_domains
-
     
 def remove_non_query_clusters(database, dictionary):
     """
@@ -358,108 +314,6 @@ def remove_non_query_clusters(database, dictionary):
     
     return selected_dictionary
 
-###################################################################################################
-
-def group_proteinID_sets(csb_proteinIDs_dict):
-    """
-    Groups keyword-domain pairs by their sets of protein IDs.
-
-    Args:
-        csb_proteinIDs_dict: Dictionary returned by fetch_proteinIDs_dict, where the keys are (keyword, domain) tuples and the values are sets of protein IDs.
-
-    Returns:
-        A dictionary where the keys are frozensets of protein IDs and the values are lists of keyword-domain pairs that share the same set.
-    """
-    # Dictionary to store groups of keyword-domain pairs by their sets
-    grouped_sets = {}
-
-    # Iterate over the csb_proteinIDs_dict and group by proteinID sets
-    for (keyword, domain), proteinIDs in csb_proteinIDs_dict.items():
-        # Convert the set to a frozenset to use it as a key in the dictionary
-        proteinID_frozenset = frozenset(proteinIDs)
-        
-        # Add the keyword-domain pair to the corresponding group
-        if proteinID_frozenset not in grouped_sets:
-            grouped_sets[proteinID_frozenset] = []
-        grouped_sets[proteinID_frozenset].append((keyword, domain))
-    
-    # This loop is for debugging
-    #for proteinID_set, keyword_domain_pairs in grouped_sets.items():
-    #    print(f"Group with protein IDs: {proteinID_set}")
-    #    print("Keyword-Domain Pairs:", keyword_domain_pairs)
-    #    print()
-    
-    return grouped_sets #key: frozenset of proteinIDs value: list of tuples with (keyword,domain) pairs
-
-
-def merge_similar_groups(grouped_sets, epsilon, merge_extension="m"):
-    #epsilon is the acceptable dissimilarity to merge points
-    
-    # Step 1: Extract the frozen sets (keys) from the dictionary
-    cluster_columns = list(grouped_sets.keys())
-    cluster_columns.sort(key=lambda fs: tuple(sorted(fs))) #sort the list to have consistent input order between runs
-
-    # Step 2: Calculate the Jaccard similarity matrix for the frozen sets
-    similarity_matrix = Csb_cluster.calculate_similarity_matrix_jaccard(cluster_columns)
-    
-    # Step 3: Apply DBSCAN to get the cluster labels based on the similarity matrix
-    labels = Csb_cluster.apply_dbscan_on_similarity_matrix(similarity_matrix, eps=epsilon, min_samples=2)
-    
-    # Step 4: Create two dictionaries: one for merged groups and one for noise points
-    merged_groups = {}
-    noise_points = {}
-    
-    # Step 5: Group sets by their DBSCAN label
-    visited_labels = set()
-    for idx, label in enumerate(labels):  # Loop through unique labels
-        merged_set = set()  # Will contain the union of the sets
-        merged_list = []  # Will contain the merged list of tuples
-        
-        if label == -1:
-            # Handle noise points (label -1)
-            modified_identifiers = [("s" + item[0], item[1]) for item in grouped_sets[cluster_columns[idx]]]
-            noise_points[cluster_columns[idx]] = modified_identifiers
-        elif not label in visited_labels:
-            # For non-noise points that were not already visited, merge sets with the same label
-        
-        
-            for idx2, set_label in enumerate(labels):
-                if set_label == label:
-                    # Merge the sets with the same label
-                    merged_set = merged_set.union(cluster_columns[idx2])  # Union of frozen sets
-                
-                    # Extend merged_list, adding merge_extension to each identifier in the list
-                    modified_identifiers = [(merge_extension + item[0], item[1]) for item in grouped_sets[cluster_columns[idx2]]]
-                    merged_list.extend(modified_identifiers)  # Merge with modified identifiers
-                    visited_labels.add(set_label)
-
-            # Store the merged set (converted to frozenset to make it a valid dictionary key)
-            merged_groups[frozenset(merged_set)] = merged_list
-    
-    # Return both the merged groups and the noise points
-    return merged_groups, noise_points
-
-def print_grouping_report(description, group, output):
-    """
-    Writes a description followed by a linewise print of the group dictionary values to the output file,
-    separating lines by a blank line.
-
-    :param description: A string containing the description to be printed.
-    :param group: A dictionary where the values are lists or other iterables.
-    :param output: The file object to write the report to.
-    """
-    with open(output, 'w') as file:
-        # Write the description to the file
-        file.write(f"{description}\n\n")
-
-        # Iterate over the group dictionary
-        for key, values in group.items():
-            # Write the key and values to the file
-            file.write(f"Group: {key}\n")
-            for value in values:
-                file.write(f"{value}\n")
-            file.write("\n")  # Add a blank line between groups
-
 
 
 
@@ -494,11 +348,11 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
 
         # Check limits and file existence
         if num_sequences < min_seq:
-            print(f"WARNING: Domain '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
+            print(f"Warning: Domain '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
             continue  # Skip this domain
 
         if num_sequences > (max_seq + 5000):
-            print(f"WARNING: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
+            print(f"Warning: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
             continue  # Skip this domain
 
         if os.path.exists(output_file):
@@ -608,7 +462,7 @@ def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit, max
             break
 
     if tie_count > 0:
-        print(f"WARNING: max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
+        print(f"Warning: max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
               f"with the same score ({last_score}) were included.")
 
     return domain, protein_ids
@@ -679,65 +533,6 @@ def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
 
 
 
-
-
-
-
-
-
-
-
-def fetch_protein_to_fasta(options, grouped, prefix=""):
-    #Currently not in use
-    """
-    Fetches protein sequences from the Proteins table for protein IDs in the grouped sets,
-    and writes the sequences directly to a FASTA file.
-
-    Args:
-        options: Object containing configuration options, including the database directory.
-        grouped: Dictionary where the keys are frozensets of protein IDs and the values are lists of keyword-domain pairs.
-
-    Returns:
-        None, but writes the sequences to a FASTA file.
-    """
-    with sqlite3.connect(options.database_directory, timeout=120.0) as con:
-        cursor = con.cursor()
-        con.execute('PRAGMA journal_mode=WAL;')
-        con.execute('PRAGMA synchronous=NORMAL;')
-        con.execute('PRAGMA temp_store=MEMORY;')
-        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
-
-        for proteinID_frozenset, keyword_domain_pairs in grouped.items():
-            # Convert frozenset to a tuple for the SQL IN clause
-            proteinID_tuple = tuple(proteinID_frozenset)
-            
-            #Do not fetch if the minimal number of sequences is not reached
-            if len(proteinID_tuple) < options.min_seqs:
-                print(f"Info: Less than {options.min_seqs} with {keyword_domain_pairs}. Skipping this set.")
-                continue
-                
-            # Fetch protein sequences for the given protein IDs
-            query = """
-                SELECT proteinID, sequence
-                FROM Proteins
-                WHERE proteinID IN ({})
-            """.format(','.join(['?'] * len(proteinID_tuple)))
-
-            cursor.execute(query, proteinID_tuple)
-            rows = cursor.fetchall()
-
-            # Write the sequences directly to the FASTA file
-            keyword, domain = keyword_domain_pairs[0]
-            filename = f"{prefix}{keyword}_{domain}.faa"
-            output_fasta_path = os.path.join(options.fasta_output_directory, filename)
-            with open(output_fasta_path, 'w') as fasta_file:
-                for proteinID, sequence in rows:
-                    # Create a header with keyword-domain information
-                    header = f">{proteinID}"
-                    
-                    # Write the header and sequence to the file
-                    fasta_file.write(f"{header}\n")
-                    fasta_file.write(f"{sequence}\n")
 
     
     
@@ -890,26 +685,6 @@ def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
     
     
     
-##################################################################################################
-    
-    
-def save_cache(directory, filename, data):
-    """
-    Speichert Daten in einer Datei im Pickle-Format.
-    """
-    with open(os.path.join(directory, filename), "wb") as f:
-        pickle.dump(data, f)
-
-def load_cache(directory, filename):
-    """
-    Lädt zwischengespeicherte Daten aus einer Datei, falls vorhanden.
-    """
-    file_path = os.path.join(directory, filename)
-    if os.path.exists(file_path):
-        print("Loading from cache")
-        with open(file_path, "rb") as f:
-            return pickle.load(f)
-    return None
     
     
     

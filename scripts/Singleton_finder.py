@@ -2,7 +2,7 @@
 
 import os
 from . import Csb_proteins
-
+from . import myUtil
 
     
 def extract_protein_ids_from_fasta(fasta_path):
@@ -71,10 +71,8 @@ def get_min_bitscore_for_query(report_path, query_id, blast_score_ratio = 0.9):
 def singleton_reference_sequences(options):
 
     # Load cache if available
-    cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
-    os.makedirs(cache_dir, exist_ok=True)
-    domain_score_limits = Csb_proteins.load_cache(cache_dir, "sng_domain_score_limits.pkl")
-    singleton_reference_seqs_dict = Csb_proteins.load_cache(cache_dir, "sng_reference_seqs_dict.pkl")
+    domain_score_limits = myUtil.load_cache(options, "sng_domain_score_limits.pkl")
+    singleton_reference_seqs_dict = myUtil.load_cache(options, "sng_reference_seqs_dict.pkl")
     
     if domain_score_limits and singleton_reference_seqs_dict:
         print("Loaded existing reference sequences for genes without conserved genomic context")
@@ -99,12 +97,12 @@ def singleton_reference_sequences(options):
             "upper_limit": max_cutoff
         }
     
-    Csb_proteins.save_cache(cache_dir, "sng_domain_score_limits.pkl", domain_score_limits)
+    myUtil.save_cache(options, "sng_domain_score_limits.pkl", domain_score_limits)
     
     # fetch proteins with the singleton domain and above thrs score to fasta
     singleton_reference_seqs_dict = Csb_proteins.fetch_protein_ids_parallel(options.database_directory,domain_score_limits, options.cores)
     singleton_reference_seqs_dict = {f"sng0_{k}": v for k, v in singleton_reference_seqs_dict.items()} # Add prefix
-    Csb_proteins.save_cache(cache_dir, "sng_reference_seqs_dict.pkl", singleton_reference_seqs_dict)
+    myUtil.save_cache(options, "sng_reference_seqs_dict.pkl", singleton_reference_seqs_dict)
     Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singleton_reference_seqs_dict, options.fasta_output_directory, 5, options.max_seqs, options.cores)
     
     return domain_score_limits, singleton_reference_seqs_dict

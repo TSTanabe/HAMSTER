@@ -9,7 +9,7 @@ import pickle
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from pprint import pprint
-
+from . import myUtil
 
 
 
@@ -26,16 +26,13 @@ def group_gene_cluster_statistic(options):
             - grouped_keywords (dict)
             - clustered_excluded_keywords (dict)
     """
-    cache_dir = os.path.join(options.result_files_directory, "pkl_cache") 
-    os.makedirs(cache_dir, exist_ok=True)
-    # Load cache if available
     #TODO für die bessere Übersicht diesen pkl einen prefix voranstellen, erleidgen solbald debugging der singleton routine durchgeführt ist
-    filtered_stats_dict = load_cache(cache_dir, "filtered_stats.pkl")
-    domain_score_limits = load_cache(cache_dir, "domain_score_limits.pkl")
-    grouped_keywords = load_cache(cache_dir, "grouped_keywords.pkl")
-    distant_keywords = load_cache(cache_dir, "distant_keywords.pkl")
-    clustered_excluded_keywords = load_cache(cache_dir, "clustered_excluded_keywords.pkl")
-    query_score_dict = load_cache(cache_dir, "query_score_dict.pkl")  # Try loading from cache first
+    filtered_stats_dict = myUtil.load_cache(options, "stat_filtered_stats.pkl")
+    domain_score_limits = myUtil.load_cache(options, "stat_domain_score_limits.pkl")
+    grouped_keywords = myUtil.load_cache(options, "stat_grouped_keywords.pkl")
+    distant_keywords = myUtil.load_cache(options, "stat_distant_keywords.pkl")
+    clustered_excluded_keywords = myUtil.load_cache(options, "stat_clustered_excluded_keywords.pkl")
+    query_score_dict = myUtil.load_cache(options, "stat_query_score_dict.pkl")  # Try loading from cache first
     
     
     if domain_score_limits and filtered_stats_dict and grouped_keywords and clustered_excluded_keywords:
@@ -50,13 +47,13 @@ def group_gene_cluster_statistic(options):
         # Schritt 2: Extrahiere das höchste Bitscore pro Domain in QUERY
         print("Extracting highest bitscores per hit")
         query_score_dict = get_highest_bitscores_for_genome(options.database_directory, "QUERY")
-        save_cache(cache_dir, "query_score_dict.pkl", query_score_dict)
+        myUtil.save_cache(options, "stat_query_score_dict.pkl", query_score_dict)
 
         # Schritt 3: Entferne CSBs, deren Domains alle unter 70% der Query-Referenz liegen
         print("Filtering out hits with low scores")
         filtered_stats_dict = filter_out_low_quality_csb(stats_dict, query_score_dict, options.low_hitscore_csb_cutoff, min(10,options.min_seqs))
         
-        save_cache(cache_dir, "filtered_stats.pkl", filtered_stats_dict)
+        myUtil.save_cache(options, "stat_filtered_stats.pkl", filtered_stats_dict)
     
     # Schritt 4: Speichere gefilterte Statistiken als TSV
     save_stats_to_tsv(filtered_stats_dict, options.Csb_directory)
@@ -66,22 +63,22 @@ def group_gene_cluster_statistic(options):
         print("Grouping keywords by domain")
 
         grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, options.group_hitscore_csb_cutoff)
-        save_cache(cache_dir, "grouped_keywords.pkl", grouped_keywords)
-        save_cache(cache_dir, "distant_keywords.pkl", distant_keywords)
+        myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
+        myUtil.save_cache(options, "stat_distant_keywords.pkl", distant_keywords)
 
     # Schritt 6: Clustere ausgeschlossene Keywords basierend auf statistischer Ähnlichkeit
     if not clustered_excluded_keywords:
         print("Clustering gene clusters with low hitscores by similarity")
 
         clustered_excluded_keywords = group_excluded_keywords_by_similarity(filtered_stats_dict, distant_keywords)
-        save_cache(cache_dir, "clustered_excluded_keywords.pkl", clustered_excluded_keywords)
+        myUtil.save_cache(options, "stat_clustered_excluded_keywords.pkl", clustered_excluded_keywords)
 
     # Schritt 7: Oberes und unteres Score-Limit der gruppierten CSBs ohne Outliers
     if not domain_score_limits:
         print("Computing hitscore limits for grouped csbs")
  
         domain_score_limits = compute_score_limits(filtered_stats_dict, grouped_keywords)
-        save_cache(cache_dir, "domain_score_limits.pkl", domain_score_limits)
+        myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
 
     return domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
 
@@ -101,7 +98,7 @@ def wrapped_fetch_keyword_scores(database, chunk, progress_counter, lock):
     result = fetch_keyword_scores(database, chunk)
     with lock:
         progress_counter.value += 1
-        print(f"Progress: {progress_counter.value} genecluster statistics completed", end="\r")
+        print(f"Progress: {progress_counter.value} cluster statistics completed", end="\r")
     return result
 
 def get_keyword_statistics_parallel(database, num_workers=4):
@@ -330,44 +327,6 @@ def filter_out_low_quality_csb(stats_dict, query_score_dict, threshold=0.2, min_
 
     return filtered_csb
 
-def group_keywords_by_domain(stats_dict, query_score_dict,acceptable_deviation=0.30,score_type='max'):
-    """
-    Compares median bitscores from stats_dict with QUERY values and groups keywords by domain 
-    if the deviation is ≤ 30%. Also provides ungrouped keywords.
-
-    Args:
-        stats_dict (dict): { keyword: { domain: { 'n': int, 'min': float, 'max': float, 
-                                                  'mean': float, 'median': float, 'std_dev': float } } }
-        query_score_dict (dict): { domain: max_bitscore }
-
-    Returns:
-        tuple: 
-            - grouped_domains (dict): { domain: [grouped_keywords] }
-            - excluded_domains (dict): { domain: [excluded_keywords] }
-    """
-    grouped_domains = {}
-    excluded_domains = {}
-
-    for keyword, domain_dict in stats_dict.items():
-        for domain, stats in domain_dict.items():
-            if stats and domain in query_score_dict:
-                query_score = query_score_dict[domain]  # Max score from QUERY
-                median_score = stats[score_type]  # Median score for this keyword-domain
-
-                # Calculate deviation
-                deviation = abs(median_score - query_score) / query_score
-
-                # Group keyword under domain if deviation is ≤ 30%
-                if deviation <= acceptable_deviation:
-                    if domain not in grouped_domains:
-                        grouped_domains[domain] = [[]]
-                    grouped_domains[domain][0].append(keyword)
-                else:
-                    if domain not in excluded_domains:
-                        excluded_domains[domain] = []
-                    excluded_domains[domain].append(keyword)
-
-    return grouped_domains, excluded_domains
 
 def group_keywords_by_domain_extended(stats_dict, query_score_dict, acceptable_deviation=0.30,score_type='max'):
     """
@@ -448,7 +407,7 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
                 ])
 
     if not keyword_vectors:
-        print("WARNING: There were no keyword statistics for distinct keywords")
+        print("Warning: There were no keyword statistics for distinct keywords")
         return {}
 
     keyword_vectors = np.array(keyword_vectors)
@@ -478,7 +437,7 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
         try:
             clustered_keywords[domain][cluster_mapping[label]].append(keyword)
         except IndexError:
-            print(f"WARNING: Skipping domain {domain} with label {label} with keyword {keyword} due to high dissimilarity.")
+            print(f"Warning: Skipping domain {domain} with label {label} with keyword {keyword} due to high dissimilarity.")
             #print("Clustered Keywords")
             #pprint(clustered_keywords)
             #print("Mapping")
@@ -532,31 +491,6 @@ def compute_score_limits(filtered_stats_dict, grouped_keywords_dict):
 
 
 
-####################################################################################
-# serilize dictionaries
-
-    
-def save_cache(directory, filename, data):
-    """
-    Speichert Daten in einer Datei im Pickle-Format.
-    """
-    with open(os.path.join(directory, filename), "wb") as f:
-        pickle.dump(data, f)
-
-def load_cache(directory, filename):
-    """
-    Lädt zwischengespeicherte Daten aus einer Datei, falls vorhanden.
-    """
-    file_path = os.path.join(directory, filename)
-    if os.path.exists(file_path):
-        with open(file_path, "rb") as f:
-            return pickle.load(f)
-    return None
-    
-    
-    
-    
-    
     
     
 

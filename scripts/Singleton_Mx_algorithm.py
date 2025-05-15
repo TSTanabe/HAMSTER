@@ -6,7 +6,7 @@ import warnings
 
 from . import Csb_proteins
 from . import Csb_phylogeny
-
+from . import myUtil
 import pandas as pd
 from collections import defaultdict
 from multiprocessing import Pool
@@ -854,6 +854,22 @@ def write_plausible_fasta_sequences(faa_dir, unplausible_proteins_by_domain, out
                 outfile.write(current_header)
                 outfile.writelines(current_seq_lines)
 
+def summarize_domain_filtering(grp1_hits_dict, basis_hits_dict, unplausible_hits_dict):
+    """
+    Gibt eine Übersicht über die gefilterten und enthaltenen Kandidaten pro Domain aus.
+
+    Parameters:
+        grp1_hits_dict (dict): Neue Protein-Hits pro Domain.
+        basis_hits_dict (dict): Referenzhits (grp0) pro Domain.
+        unplausible_hits_dict (dict): Ausgeschlossene (unplausible) Hits pro Domain.
+    """
+    for domain in sorted(unplausible_hits_dict.keys()):
+        total = len(grp1_hits_dict[domain]) - len(basis_hits_dict[domain])
+        excluded = len(unplausible_hits_dict.get(domain, set()))
+        included = total - excluded
+
+        print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")
+
 
 def main_presence_absence_matrix_filter(options):
     """
@@ -933,47 +949,48 @@ def main_presence_absence_matrix_filter(options):
     #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
  
     # Liberal with new hits against base grp0 hits in the genome + new hits in the genome
-    cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
-    
-    if os.path.exists(cache_dir+"/grp1_non_plausible_hits2.pkl") and os.path.exists(cache_dir+"/protein_mapping2.pkl"):
-        grp1_non_plausible_hits2 = Csb_proteins.load_cache(cache_dir, "grp1_non_plausible_hits2.pkl")
-        protein_mapping2 = Csb_proteins.load_cache(cache_dir, "protein_mapping2.pkl")
-    else:
+    grp1_non_plausible_hits = myUtil.load_cache(options, "grp1_non_plausible_hits.pkl")
+    protein_mapping = myUtil.load_cache(options, "grp1_protein_mapping.pkl")
+    if not grp1_non_plausible_hits or not protein_mapping:
         print("\nCalculating logistic regression of grp0 presence/absence matrix")
-        grp1_non_plausible_hits2 = check_new_presences_with_combined_context(
+        grp1_non_plausible_hits = check_new_presences_with_combined_context(
             basis_matrix_filepath,
             grp1_matrix_filepath,
             options.pam_threshold
         )
-        protein_mapping2 = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits2)
+        protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
 
-        Csb_proteins.save_cache(cache_dir, "grp1_non_plausible_hits2.pkl", grp1_non_plausible_hits2)
-        Csb_proteins.save_cache(cache_dir, "protein_mapping2.pkl", protein_mapping2)
-    
+        myUtil.save_cache(options, "grp1_non_plausible_hits.pkl", grp1_non_plausible_hits)
+        myUtil.save_cache(options, "grp1_protein_mapping.pkl", protein_mapping)
+
     grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
     basis_hits_dict = extract_domain_to_proteins(basis_matrix_filepath)
-    unplausible_hits_dict = invert_protein_mapping_by_domain(protein_mapping2)
+    unplausible_hits_dict = invert_protein_mapping_by_domain(protein_mapping)
 
 
     print("\nSelection of grp1 training sequence by computed regression of the presence/absence matrix of grp0")
-    for domain in sorted(unplausible_hits_dict.keys()):
-        total = len(grp1_hits_dict[domain]) - len(basis_hits_dict[domain]) # Number of all added proteinIDs by MCL
-        excluded = len(unplausible_hits_dict.get(domain, set()))
-        included = total - excluded
-        
-        print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")    
+    summarize_domain_filtering(grp1_hits_dict, basis_hits_dict, unplausible_hits_dict)
     
     # Step 4: Check unplausible hits in the phylogenetic tree
-    # options für branch distances als zahlen in den dateinamen einfügen
     print("\nCross-check of included training sequences by phylogenetic placement")
-    if os.path.exists(cache_dir+f"/Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl"):
-        include_hits_dict = Csb_proteins.load_cache(cache_dir, f"Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl")
-        
-    else:
+
+    cache_name = f"grp2_included_hits_pd_{options.pam_phylogenetic_distance}.pkl"
+
+    include_hits_dict = myUtil.load_cache(options, cache_name)
+    if not include_hits_dict:
         grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
-        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(options.phylogeny_directory, unplausible_hits_dict, grp1_hits_dict, options.pam_long_branch_thres, options.pam_phylogenetic_distance, options.cores)
-    
-        Csb_proteins.save_cache(cache_dir, f"Mx_included_hits_{str(options.pam_phylogenetic_distance)}.pkl", include_hits_dict) # proteinIDs in included hits set are below thrs distance to a plausible grp1 sequence
+
+        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(
+            options.phylogeny_directory,
+            unplausible_hits_dict,
+            grp1_hits_dict,
+            options.pam_long_branch_thres,
+            options.pam_phylogenetic_distance,
+            options.cores
+        )
+
+        # proteinIDs in included hits set are below threshold distance to a plausible grp1 sequence
+        myUtil.save_cache(options, cache_name, include_hits_dict)
 
     # Delete the included hits from the unplausible dict
     for domain, included_proteins in include_hits_dict.items():
@@ -985,12 +1002,7 @@ def main_presence_absence_matrix_filter(options):
     
     # Print out the number of excluded sequences
     print("\nSelection of grp1 training sequence by computed regression of the presence/absence matrix and phylogenetic placement")
-    for domain in sorted(unplausible_hits_dict.keys()):
-        total = len(grp1_hits_dict[domain]) - len(basis_hits_dict[domain]) # Number of all added proteinIDs by MCL
-        excluded = len(unplausible_hits_dict.get(domain, set()))
-        included = total - excluded
-        
-        print(f"Total {domain} candidates {total}\tIncluded: {included}\tRemoved: {excluded}")
+    summarize_domain_filtering(grp1_hits_dict, basis_hits_dict, unplausible_hits_dict)
 
     # Step 5: Copy grp1 files without unplausible proteinIDs to the grp2 files
     print("\nWriting grp0 and included grp1 sequences to grp2 fasta files")
