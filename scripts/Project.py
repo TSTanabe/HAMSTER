@@ -74,6 +74,8 @@ def prepare_result_space(options, project="project"):
     options.cross_validation_directory = options.result_files_directory + "/Cross_validation"
     options.phylogeny_directory = options.result_files_directory + "/Protein_Phylogeny"
     options.Csb_directory = options.result_files_directory + "/Collinear_syntenic_blocks"
+    options.filtered_blast_table = options.result_files_directory + "/filtered_blast_results_table"
+
 
     options.divergent_output_file = options.result_files_directory + "/div_output_file.faa"
     options.csb_output_file = options.Csb_directory + "/Csb_output.txt"

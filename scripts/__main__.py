@@ -26,7 +26,6 @@ from . import Reports
 from . import myUtil
 
 from . import Singleton_finder
-from . import Singleton_Mx_algorithm
 
 
 if getattr(sys, 'frozen', False):
@@ -264,53 +263,24 @@ def csb_finder(options):
 
 
 
-def generate_csb_sequence_fasta(options):
-    #prepares the sequence fasta files for the alignments
+def basis_sequence_fasta(options):
+    """
+        prepare the sequence fasta and identifier lists. Seqs are derived from
+        named gene clusters and csb finder gene clusters that encode a protein sequence
+        highly similar to the input reference sequence.
+        
+        Input: Database, options
+        Output
+    """
     Database.index_database(options.database_directory)
-    
-    grp_score_limit_dict, filtered_stats_dict, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options) #keywords are in list of lists with the
-    print("Fetching sequences for training datasets")
-    csb_proteins_dict = Csb_proteins.csb_proteins_datasets(options, clustered_excluded_keywords_dict) # groups training data, excluding the keywords in the clust_ex_key_dict argument
-
-    # Collect proteins from singular distantly related keywords
-    if options.sglr:
-        print("Processing dissimilar homologs with specific genomic context")
-        
-        singular = Csb_proteins.csb_proteins_datasets_combine(clustered_excluded_keywords_dict, csb_proteins_dict, "sglr")
-        
-        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, singular, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
-        
-        singular = {}
-    
-    
-    ### Collect proteins from grouped keywords
-    print("Processing highly similar homologs with specific genomic context")
-    
-    grouped = myUtil.load_cache(options,'grp_training_proteinIDs.pkl')
-
-    if not grouped:
-        grouped = Csb_proteins.csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp") #Warnung, dieser Wert hier hat einen iterator für die Zahl nach grp. Das kann einen konflikt mit grp1 und grp2 herstellen,falls mal mehr als bis 1 gezählt wird
-        grouped = Csb_proteins.add_query_ids_to_proteinIDset(grouped, options.database_directory)
-        Csb_proteins.fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            grouped,
-            options.fasta_output_directory,
-            10,
-            options.max_seqs,
-            options.cores
-        )
-
+    grp_score_limit_dict, grouped = Csb_proteins.prepare_csb_grouped_training_proteins(options)
     
     ### Collect singletons without any conserved csb
-    print("Collecting highly similar homologs from query hits without any conserved genomic context")
-    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_finder.singleton_reference_sequences(options) #Very strict reference seqs with 0.95 blast score ratio
-
-    print("Collecting highly similar homologs from query hits correlated to csb")
-    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_Mx_algorithm.generate_singleton_reference_seqs(options) # Pulls seqs directly from the fasta/tsv files
+    print("\n\nCollecting highly similar homologs from query hits without any conserved genomic context")
+    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_finder.singleton_reference_finder(options, grouped) #Very strict reference seqs with 0.95 blast score ratio
 
     # Merge groups and limits from csb and sng
     merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
-
     merged_grouped = {**grouped, **sng_ref_seqs_dict}
 
 
@@ -321,7 +291,7 @@ def generate_csb_sequence_fasta(options):
     # Update options object with the fetched proteinID groups and score limits
     options.grouped = merged_grouped
     options.score_limit_dict = merged_score_limit_dict
-    
+
     return
 
 def decorate_training_sequences(options):
@@ -451,7 +421,8 @@ def main(args=None):
 #5
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
-        generate_csb_sequence_fasta(options)   
+        basis_sequence_fasta(options)
+        # Generates dict with grp0_ : set(proteinIDs)
 
 #6
     if options.stage <= 6 and options.end >= 6:

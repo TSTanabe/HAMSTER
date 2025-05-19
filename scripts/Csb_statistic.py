@@ -45,7 +45,7 @@ def group_gene_cluster_statistic(options):
         stats_dict = get_keyword_statistics_parallel(options.database_directory, options.cores)
 
         # Schritt 2: Extrahiere das höchste Bitscore pro Domain in QUERY
-        print("Extracting highest bitscores per hit")
+        print("\nExtracting highest bitscores per hit")
         query_score_dict = get_highest_bitscores_for_genome(options.database_directory, "QUERY")
         myUtil.save_cache(options, "stat_query_score_dict.pkl", query_score_dict)
 

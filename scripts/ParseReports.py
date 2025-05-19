@@ -19,7 +19,7 @@ class Protein:
     """
 
 
-    def __init__(self,proteinID,HMM,start=0,end=0,score=1,genomeID=""): 
+    def __init__(self,proteinID,HMM,start=0,end=0,score=1,genomeID="",ident=25,bsr=1.0): 
         #Protein attributes
         self.proteinID = proteinID
         self.genomeID = genomeID
@@ -37,7 +37,7 @@ class Protein:
         self.keywords = {} #reziprok mit Cluster class
         
         self.domains = {}   # dictionary start coordinate => Domain object
-        self.add_domain(HMM,start,end,score)
+        self.add_domain(HMM,start,end,score,ident,bsr)
         
 
     ##### Getter ####
@@ -134,7 +134,7 @@ class Protein:
         return None
         
 
-    def add_domain(self,HMM,start,end,score):
+    def add_domain(self,HMM,start,end,score,ident=25,bsr=1.0):
         """
         2.9.22
         Adds a domain to an existing protein. Only if there is no overlap with a 
@@ -163,7 +163,7 @@ class Protein:
         
         for key in del_domains:
             self.domains.pop(key)
-        self.domains.update({start:Domain(HMM,start,end,score)}) # if loop complete
+        self.domains.update({start:Domain(HMM,start,end,score,ident,bsr)}) # if loop complete
         
         return 1
         
@@ -173,11 +173,13 @@ class Protein:
 
 class Domain:
 #2.9.22
-    def __init__(self,HMM,start,end,score):
+    def __init__(self,HMM,start,end,score,ident=1,bsr=1.0):
         self.HMM = HMM
         self.start = int(start)
         self.end = int(end)
         self.score = int(score)
+        self.identity = int(ident)
+        self.bsr = float(bsr)
     
     def __hash__(self):
         return hash((self.HMM, self.start, self.end, self.score))

@@ -4,15 +4,66 @@ import os
 import multiprocessing
 from multiprocessing import Pool, Manager, Value, Lock
 
+from . import Csb_statistic
 from . import myUtil
 
 #first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 #do not compare the csb appearences as they jaccard itself should have managed it.
+
+def prepare_csb_grouped_training_proteins(options):
+    """
+    Prepares grouped protein sequences for training by analyzing gene clusters (CSBs)
+    and extracting associated proteins with conserved genomic context.
+
+    This function:
+    1. Computes score limits and cluster keyword groupings.
+    2. Extracts training protein sequences.
+    3. Loads or computes grouped training sets from cache.
+    4. Writes grouped sequences to FASTA files if needed.
+
+    Args:
+        options (argparse.Namespace): The runtime configuration.
+
+    Returns:
+        tuple:
+            - grp_score_limit_dict (dict): Domain-wise score limits.
+            - grouped (dict): Mapping from group label → set of protein IDs.
+    """
+
+    # Step 1: Compute score limits and keyword clusters
+    grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
+
+    print("Fetching sequences for training datasets")
+    csb_proteins_dict = csb_proteins_datasets(options, clustered_excluded_keywords_dict)
+
+    print("Processing highly similar homologs with specific genomic context")
+
+    # Step 2: Try loading cached grouped training data
+    grouped = myUtil.load_cache(options, 'grp_training_proteinIDs.pkl')
+
+    # Step 3: If cache is missing, recompute and export FASTAs
+    if not grouped:
+        grouped = csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp")
+        grouped = add_query_ids_to_proteinIDset(grouped, options.database_directory)
+        fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            grouped,
+            options.fasta_output_directory,
+            min_seq=options.min_seqs,
+            max_seq=options.max_seqs,
+            cores=options.cores
+        )
+        myUtil.save_cache(options, 'grp_training_proteinIDs.pkl', grouped)
+
+    return grp_score_limit_dict, grouped
+    
+    
+    
 def csb_proteins_datasets(options, sglr_dict):
     
-    #Get the domain types as set per csb and predefined pattern
+    # Get the domain types as set per csb and predefined pattern
     print("Reading collinear syntenic block files")
-    csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) #dictionary with cbs_name => csb items
+    csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) # dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
     options.csb_dictionary = csb_dictionary # save the patterns for later use

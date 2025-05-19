@@ -86,6 +86,8 @@ def create_database(database):
         proteinID   varchar(32)                     NOT NULL,
         domain      varchar(32)                     DEFAULT NULL,
         score       smallint(6)                     DEFAULT NULL,
+        blast_score_ratio       smallint(6)                     DEFAULT NULL,
+        identity       smallint(6)                     DEFAULT NULL,
         domStart    int(11)                             DEFAULT NULL,
         domEnd      int(11)                             DEFAULT NULL,
         CONSTRAINT fk_proteinID FOREIGN KEY (proteinID) REFERENCES Proteins(proteinID) ON DELETE CASCADE ON UPDATE CASCADE
@@ -156,12 +158,7 @@ def insert_database_genomeIDs(database, genomeIDs):
     con.close()
     return    
         
-def insert_database_proteins(database, protein_dict):
-    """
-        Inserts for concated glob hmmsearches. GenomeId must be defined within the protein object
-        Args:
-            protein_dict    dictionary with protein objects
-    """
+
 def insert_database_proteins(database, protein_dict):
     """
     Inserts for concated glob hmmsearches. GenomeId must be defined within the protein object
@@ -199,7 +196,7 @@ def insert_database_proteins(database, protein_dict):
                 # Prepare domain records
                 for domain in domains.values():
                     domain_record = (
-                        proteinID, domain.HMM, domain.start, domain.end, domain.score
+                        proteinID, domain.HMM, domain.start, domain.end, domain.score, domain.identity, domain.bsr
                     )
                     domain_records.append(domain_record)
 
@@ -210,8 +207,8 @@ def insert_database_proteins(database, protein_dict):
             
             # Batch insert for domains
             cur.executemany('''INSERT OR IGNORE INTO Domains
-                (proteinID, domain, domStart, domEnd, score)
-                VALUES (?, ?, ?, ?, ?)''', domain_records)
+                (proteinID, domain, domStart, domEnd, score, identity, blast_score_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?)''', domain_records)
 
             # No need to manually call con.commit() — 'with' will handle it
 

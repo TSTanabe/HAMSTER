@@ -131,7 +131,7 @@ def initial_glob_search(options):
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
     
     blast_results_table = filter_blast_table(
-        options.result_files_directory + f"/filtered_{os.path.basename(blast_results_table)}",
+        options.filtered_blast_table,
         blast_results_table, options.evalue, options.thrs_score, 
         options.searchcoverage, options.minseqid, options.thrs_bsr, 
         query_length_dict, selfblast_scores_dict
@@ -469,6 +469,12 @@ def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=1
                     hit_bitscore = int(float(columns[3]))  # Bitscore as integer
                     hsp_start = int(columns[4])  # Start position
                     hsp_end = int(columns[5])  # End position
+                    hsp_ident = int(float(columns[6]))
+                    try:
+                        hsp_bsr = float(columns[7])
+                    except IndexError:
+                        hsp_bsr = 1.0  # oder ein anderer sinnvoller Default-Wert
+
 
                     # If protein already exists, add domain info
                     if hit_protein_id in protein_dict:
@@ -476,7 +482,7 @@ def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=1
                     else:
                         # Create new protein object
                         protein_dict[hit_protein_id] = ParseReports.Protein(
-                            hit_protein_id, query_id, hsp_start, hsp_end, hit_bitscore, genome_id
+                            hit_protein_id, query_id, hsp_start, hsp_end, hit_bitscore, genome_id, hsp_ident, hsp_bsr
                         )
 
                 except ValueError as ve:
@@ -664,6 +670,7 @@ def filter_blast_table(output_file, blast_file, evalue_cutoff, score_cutoff, cov
                         pident >= identity_cutoff and
                         bsr >= bsr_cutoff
                     ):
+                        row.append(f"{bsr:.3f}")
                         buffer.append(row)
 
                 # **Write buffer to disk when it reaches buffer_size**
