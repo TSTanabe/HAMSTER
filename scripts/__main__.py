@@ -25,7 +25,7 @@ from . import Validation
 from . import Reports
 from . import myUtil
 
-from . import Singleton_finder
+from . import Pam_Singleton_finder
 
 
 if getattr(sys, 'frozen', False):
@@ -285,8 +285,8 @@ def basis_sequence_fasta(options):
 
 
     # Pickle the merged groups
-    myUtil.save_cache(options, 'merged_grouped.pkl', merged_grouped)
-    myUtil.save_cache(options, 'merged_score.pkl', merged_score_limit_dict)
+    myUtil.save_cache(options, 'basis_merged_grouped.pkl', merged_grouped)
+    myUtil.save_cache(options, 'basis_merged_score.pkl', merged_score_limit_dict)
     
     # Update options object with the fetched proteinID groups and score limits
     options.grouped = merged_grouped
@@ -294,9 +294,28 @@ def basis_sequence_fasta(options):
 
     return
 
+def pam_defragmentation(options):
+    # Diese routinen sollen basierend auf der presence absence matrix zusätzliche plausible hits finden
+    # TODO plausibilitäts cutoff und blast score ratio cutoff müssen definiert werden und dann auch als option zur verfügung stehen
+    basis_grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'basis_merged_grouped.pkl')
+    basis_score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
+    
+    options.grouped = Pam_defragmentation.pam_defragmentation_finder(options, basis_grouped, basis_score_limit_dict)
+    
+    # Result dictionary is stores in options.grouped, overwriting the grp0 with grp1 key_domain pairs
+    return
+
+#TODO decorate training sequences with MCL data (cluster selection optimization?)
+
+#TODO fetch seqs to grp2
+
+#TODO seqs from below cutoff mcl clusters for seqs that have fragmentation in csb grp3
+
+
+
 def decorate_training_sequences(options):
-    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'merged_grouped.pkl')
-    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'merged_score.pkl')
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'basis_merged_grouped.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
     
     # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
     print("Including homologs without genomic context based on protein sequence phylogeny")
