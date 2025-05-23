@@ -43,11 +43,14 @@ def prepare_csb_grouped_training_proteins(options):
 
     # Step 3: If cache is missing, recompute and export FASTAs
     if not grouped:
-        grouped = csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict, "grp")
+        grouped = csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict)
         grouped = add_query_ids_to_proteinIDset(grouped, options.database_directory)
+        
+        
+        extended_grouped_prefixed = {f"grp0_{key}": value for key, value in grouped.items()}
         fetch_seqs_to_fasta_parallel(
             options.database_directory,
-            grouped,
+            extended_grouped_prefixed,
             options.fasta_output_directory,
             min_seq=options.min_seqs,
             max_seq=options.max_seqs,
@@ -100,7 +103,7 @@ def csb_proteins_datasets(options, sglr_dict):
 
 ################################################################################################
 
-def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
+def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict):
     """
     Kombiniert Protein-IDs basierend auf den gruppierten und ausgeschlossenen Keywords.
     
@@ -108,7 +111,6 @@ def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
         keyword_lists (dict): Dictionary mit gruppierten Keywords als Listen von Listen.
         csb_proteins_dict (dict): Das Rückgabedictionary aus csb_proteins_datasets, 
                                   das (keyword, domain) als Schlüssel und Protein-IDs als Werte enthält.
-        category (str): Kategorie der Keywords (z. B. "grouped" oder "excluded").
     
     Returns:
         dict: Ein Dictionary mit kombinierten Protein-IDs pro Schlüsselgruppe.
@@ -123,7 +125,7 @@ def csb_proteins_datasets_combine(keyword_lists, csb_proteins_dict, category):
                 if key in csb_proteins_dict:
                     protein_set.update(csb_proteins_dict[key])
             if protein_set:  # Nur hinzufügen, wenn nicht leer
-                combined_protein_sets[f"{category}{i}_{domain}"] = protein_set
+                combined_protein_sets[domain] = protein_set
     
     return combined_protein_sets
 
@@ -186,6 +188,7 @@ def decorate_training_data(options, score_limit_dict, grouped):
     score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
     decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores, options.max_seqs) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
+    print(decorated_grouped_dict.keys())
     fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
     
     return

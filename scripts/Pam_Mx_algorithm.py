@@ -15,6 +15,9 @@ from multiprocessing import Pool
 from sklearn.linear_model import LogisticRegression
 from sklearn.exceptions import ConvergenceWarning
 
+
+# Routines for the logistic regression based on presence absence matrices
+
 def train_logistic_from_pam_with_scores(pam, hit_scores, cores=4, target_domains=None):
     """
     Trains logistic regression models using both presence/absence and hit scores.
@@ -322,7 +325,71 @@ def train_logistic_models_from_tsv(tsv_path):
 
 
 
+##################
+# Routines for the fetching of hits from genomes where the hit would be plausible
 
+#move this processing to the PAM_MX_ALGORITHM.py
+
+
+def process_domain_hits_pool(args):
+    domain, genome_list, database_path, bsr_threshold = args
+    best_hits = {}
+    con = sqlite3.connect(database_path)
+    cur = con.cursor()
+
+    for i in range(0, len(genome_list), 900):
+        chunk = genome_list[i:i + 900]
+        placeholders = ','.join(['?'] * len(chunk))
+        query = f"""
+            SELECT genomeID, Proteins.proteinID, score, blast_score_ratio
+            FROM Proteins LEFT JOIN Domains ON Proteins.proteinID = Domains.proteinID
+            WHERE blast_score_ratio > ?
+              AND domain = ?
+              AND genomeID IN ({placeholders})
+        """
+        cur.execute(query, (bsr_threshold, domain, *chunk))
+        for genome_id, proteinID, score, bsr in cur.fetchall():
+            if genome_id not in best_hits or bsr > best_hits[genome_id][0]:
+                best_hits[genome_id] = (bsr, proteinID, score)
+
+    con.close()
+
+    # Aggregate result
+    proteinIDs = set()
+    bitscores = []
+    for genome_id, (bsr, proteinID, score) in best_hits.items():
+        proteinIDs.add(proteinID)
+        bitscores.append(score)
+
+    score_limits = {}
+    if bitscores:
+        score_limits = {"lower_limit": min(bitscores), "upper_limit": max(bitscores)}
+
+    return domain, proteinIDs, score_limits
+
+
+def collect_predicted_singleton_hits_from_db_parallel(predictions_all, database_path, plausible_cutoff=0.6, bsr_cutoff=0.5, max_parallel=4):
+    domain_to_genomes = defaultdict(list)
+    for singleton, prediction_series in predictions_all.items():
+        domain = singleton.split('_', 1)[-1]
+        plausible_genomes = prediction_series[prediction_series > plausible_cutoff].index
+        domain_to_genomes[domain].extend(plausible_genomes)
+
+    task_args = [(domain, genome_list, database_path, bsr_cutoff) for domain, genome_list in domain_to_genomes.items()]
+
+    singleton_hits = {}
+    singleton_score_limits = {}
+
+    with Pool(processes=max_parallel) as pool:
+        results = pool.map(process_domain_hits_pool, task_args)
+
+    for domain, proteinIDs, limits in results:
+        if proteinIDs:
+            singleton_hits[domain] = proteinIDs
+        if limits:
+            singleton_score_limits[domain] = limits
+
+    return singleton_score_limits, singleton_hits
 
 
 

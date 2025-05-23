@@ -251,11 +251,60 @@ def load_cache(options, name):
         return None
     
     
+def merge_grouped_refseq_dicts_simple(grouped_3_dict, grouped_4_dict):
+    """
+    Merge grouped_3_dict and grouped_4_dict assuming they have the same domain keys.
+
+    Args:
+        grouped_3_dict (dict): {domain: set(proteinIDs)}
+        grouped_4_dict (dict): {domain: set(proteinIDs)}
+
+    Returns:
+        dict: {domain: set(proteinIDs)} — unified non-redundant sets
+    """
+    merged = {}
+
+    all_domains = set(grouped_3_dict.keys()) | set(grouped_4_dict.keys())
+
+    for domain in all_domains:
+        set_3 = grouped_3_dict.get(domain, set())
+        set_4 = grouped_4_dict.get(domain, set())
+        merged[domain] = set_3 | set_4  # union of both sets
+
+    return merged
     
     
-    
-    
-    
+def merge_score_limits(dict1, dict2):
+    """
+    Merges two dictionaries of score limits by taking the minimum lower_limit
+    and maximum upper_limit for each domain key.
+
+    Args:
+        dict1 (dict): {domain: {"lower_limit": int, "upper_limit": int}}
+        dict2 (dict): {domain: {"lower_limit": int, "upper_limit": int}}
+
+    Returns:
+        dict: Merged score limits with min lower_limit and max upper_limit
+    """
+    merged = {}
+    all_keys = set(dict1.keys()).union(dict2.keys())
+
+    for key in all_keys:
+        val1 = dict1.get(key, {})
+        val2 = dict2.get(key, {})
+
+        lower1 = val1.get("lower_limit", float('inf'))
+        upper1 = val1.get("upper_limit", float('-inf'))
+        lower2 = val2.get("lower_limit", float('inf'))
+        upper2 = val2.get("upper_limit", float('-inf'))
+
+        merged[key] = {
+            "lower_limit": min(lower1, lower2),
+            "upper_limit": max(upper1, upper2)
+        }
+
+    return merged
+
     
     
     

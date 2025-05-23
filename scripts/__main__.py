@@ -26,6 +26,8 @@ from . import Reports
 from . import myUtil
 
 from . import Pam_Singleton_finder
+from . import Pam_defragmentation
+from . import Pam_mcl
 
 
 if getattr(sys, 'frozen', False):
@@ -136,6 +138,12 @@ def parse_arguments(arguments):
     csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
     csb.add_argument('-csb_singleton_correlation', dest='csb_singleton_correlation', type=float,default = 0.3, metavar='<float>', help='Required correlation of singletons to existing csb. Default: 0.5')
 
+    pam_search = parser.add_argument_group("Optional presence/absence matrix parameters")
+    pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.3, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.3')
+    pam_search.add_argument('-mx_bsr', dest='pam_bsr_threshold', type=float, default=0.6, metavar = '<float>', help='Blast score ratio inclusion cutoff from PAM prediction [0.0,1.0]. Default: 0.6')
+    #pam_search.add_argument('-mx_long_branch_thrs', dest='pam_long_branch_thres', type=float, default=0.5, metavar = '<float>', help='Do not consider hits with this branch length in the phylogenetic tree. Default: 0.5')
+    #pam_search.add_argument('-mx_max_phylo_distance', dest='pam_phylogenetic_distance', type=float, default=0.05, metavar = '<float>', help='Max. phylogenetic distance to reference sequence. Default: 0.05')
+
     mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
     mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]. Default: 1e-10')
     mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=50, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]. Default: 50')
@@ -153,11 +161,6 @@ def parse_arguments(arguments):
     #ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
     #ref_density >= density_threshold and ref_fraction >= reference_fraction_threshold:
     
-    
-    pam_search = parser.add_argument_group("Optional presence/absence matrix and phylogenetic placement parameters")
-    pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.6, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.6')
-    pam_search.add_argument('-mx_long_branch_thrs', dest='pam_long_branch_thres', type=float, default=0.5, metavar = '<float>', help='Do not consider hits with this branch length in the phylogenetic tree. Default: 0.5')
-    pam_search.add_argument('-mx_max_phylo_distance', dest='pam_phylogenetic_distance', type=float, default=0.05, metavar = '<float>', help='Max. phylogenetic distance to reference sequence. Default: 0.05')
     
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment. Default: 5')
@@ -270,82 +273,159 @@ def basis_sequence_fasta(options):
         highly similar to the input reference sequence.
         
         Input: Database, options
-        Output
+        Output are the grp0 fasta files
     """
     Database.index_database(options.database_directory)
     grp_score_limit_dict, grouped = Csb_proteins.prepare_csb_grouped_training_proteins(options)
     
     ### Collect singletons without any conserved csb
     print("\n\nCollecting highly similar homologs from query hits without any conserved genomic context")
-    sng_score_limit_dict, sng_ref_seqs_dict = Singleton_finder.singleton_reference_finder(options, grouped) #Very strict reference seqs with 0.95 blast score ratio
+    sng_score_limit_dict, sng_ref_seqs_dict = Pam_Singleton_finder.singleton_reference_finder(options, grouped) #Very strict reference seqs with 0.95 blast score ratio
 
     # Merge groups and limits from csb and sng
     merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
     merged_grouped = {**grouped, **sng_ref_seqs_dict}
 
 
-    # Pickle the merged groups
+    # Save the merged groups
     myUtil.save_cache(options, 'basis_merged_grouped.pkl', merged_grouped)
     myUtil.save_cache(options, 'basis_merged_score.pkl', merged_score_limit_dict)
     
     # Update options object with the fetched proteinID groups and score limits
     options.grouped = merged_grouped
     options.score_limit_dict = merged_score_limit_dict
-
+    
     return
 
 def pam_defragmentation(options):
-    # Diese routinen sollen basierend auf der presence absence matrix zusätzliche plausible hits finden
-    # TODO plausibilitäts cutoff und blast score ratio cutoff müssen definiert werden und dann auch als option zur verfügung stehen
+    """
+        Try to find additional hits based on presence absence patterns
+        
+        Prepare the presence absence matrix for grp0 and train logistic regression on the matrix        
+        With the trained matrix exclude each column and predict presence.
+        For predicted presences select from the genome the best hit
+
+        Output: are the grp1 fasta files
+    """
     basis_grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'basis_merged_grouped.pkl')
     basis_score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
     
-    options.grouped = Pam_defragmentation.pam_defragmentation_finder(options, basis_grouped, basis_score_limit_dict)
+    merged_grouped, merged_score_limit_dict = Pam_defragmentation.pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_limit_dict)
+    
+    # Save computed grp1 datasets
+    myUtil.save_cache(options, 'grp1_merged_grouped.pkl', merged_grouped)
+    myUtil.save_cache(options, 'grp1_merged_score_limits.pkl', merged_score_limit_dict)
     
     # Result dictionary is stores in options.grouped, overwriting the grp0 with grp1 key_domain pairs
+    options.grouped = merged_grouped
+    options.score_limit_dict = merged_score_limit_dict
+    
     return
 
-#TODO decorate training sequences with MCL data (cluster selection optimization?)
-
-#TODO fetch seqs to grp2
-
-#TODO seqs from below cutoff mcl clusters for seqs that have fragmentation in csb grp3
 
 
 
-def decorate_training_sequences(options):
-    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'basis_merged_grouped.pkl')
-    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
-    
-    # Like before per TPs per csb, erscheint mir nicht sinnvoll, weil bisher waren diese ergebnisse immer etwas schlechter als die plcsb
+
+def mcl_family_clustering_sequences(options):
+    """
+        Try to find additional hits based on Markov Chain Clustering
+        
+        Prepare protein family file, including all hits above 25% identity.
+        All vs. all diamond blast (Can this be accellerated like in orthofinder?)
+        
+        With the trained matrix exclude each column and predict presence.
+        For predicted presences select from the genome the best hit
+
+        Output: are the grp1 fasta files
+    """
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
+
     print("Including homologs without genomic context based on protein sequence phylogeny")
     print("Generating protein family fasta files")
     Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
         
-        
-    # Phylogeny clustering for lca fasta files
-    if options.csb_distinct_grouping:
-        
-        # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-        print("\nCalculating phylogeny for each protein family")
-        
-        decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
-        
-        Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
-    
     # Markov chain clustering for grp1 fasta files
-    if options.csb_mcl_clustering:
-        
-        print("\nCalculating Markov Chain Clustering")            
-        
-        Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
+    print("\nCalculating Markov Chain Clustering")            
+    mcl_clustering_results_dict = Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
-def demote_orphan_training_sequences(options):
+    myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict)
+
+    options.mcl_clusterin_results_dict = mcl_clustering_results_dict
     
-    # Presence absence matrix support for grp3
-    Singleton_Mx_algorithm.main_presence_absence_matrix_filter(options)
+    
+    
+def mcl_decorate_training_sequences(options):
 
-    return
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
+    score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
+    mcl_clustering_results_dict = options.mcl_clusterin_results_dict if hasattr(options, 'mcl_clusterin_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
+    
+    # MCL cluster analysis, cluster selection with F1 optimized density for basic grouped sequences
+    extended_grouped = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, grouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    extended_grouped_prefixed = {f"grp1_{key}": value for key, value in extended_grouped.items()}
+    
+    # Write down the extended
+    Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            extended_grouped_prefixed,
+            options.fasta_output_directory,
+            options.min_seqs,
+            options.max_seqs,
+            options.cores
+        )
+    
+    # MCL cluster analysis with pam and csb selection
+    regrouped = Pam_mcl.select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, grouped)
+    
+    # MCL cluster analysis, cluster selection with F1 optimized density for extended grouped
+    extended_grouped = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    extended_grouped_prefixed = {f"grp2_{key}": value for key, value in extended_grouped.items()}
+    # Write down the extended
+    Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            extended_grouped_prefixed,
+            options.fasta_output_directory,
+            options.min_seqs,
+            options.max_seqs,
+            options.cores
+        )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+           
+    # Phylogeny clustering for lca fasta files
+    #if options.csb_distinct_grouping:
+        
+    #    # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
+    #    print("\nCalculating phylogeny for each protein family")
+        
+    #    decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
+        
+    #    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
+    
+
+
+
+
+
         
 def model_alignment(options):
     
@@ -442,16 +522,20 @@ def main(args=None):
         myUtil.print_header("\n 5. Preparing training data fasta files")
         basis_sequence_fasta(options)
         # Generates dict with grp0_ : set(proteinIDs)
+        #TODO vielleicht auch eigener step
+        pam_defragmentation(options)
 
 #6
     if options.stage <= 6 and options.end >= 6:
-        myUtil.print_header("\n 6. Add Markov chain cluster sequences to reference training datasets")
-        decorate_training_sequences(options)
+        myUtil.print_header("\n 6. Markov chain clustering for protein family sequences")
+        mcl_family_clustering_sequences(options)
+        
+        
 
 #7   
     if options.stage <= 7 and options.end >= 7:
-        myUtil.print_header("\n 7. Recruiting singleton sequences to reference training datasets")
-        demote_orphan_training_sequences(options)
+        myUtil.print_header("\n 7. Selecting MCL clusters with reference sequences")
+        mcl_decorate_training_sequences(options)
 
 #8    
     #align

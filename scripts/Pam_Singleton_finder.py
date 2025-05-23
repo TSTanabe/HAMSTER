@@ -20,7 +20,7 @@ def singleton_reference_finder(options, grouped):
     singleton_reference_seqs_dict = myUtil.load_cache(options, 'sng_training_proteinIDs.pkl')
     domain_score_limits = myUtil.load_cache(options, 'sng_training_proteinIDs_limits.pkl')
     
-    if singleton_reference_seqs_dict and domain_score_limit:
+    if singleton_reference_seqs_dict and domain_score_limits:
         return domain_score_limits, singleton_reference_seqs_dict
 
     domain_score_limits, singleton_reference_seqs_dict = get_singleton_reference_sequences(options)
@@ -29,21 +29,20 @@ def singleton_reference_finder(options, grouped):
 
     limits_dict, sng_reference_seq_dict = collect_predicted_singleton_hits_from_db(predictions_all, options.database_directory, plausible_cutoff = 0.02)
     
-    sng_reference_seq_dict = {f"grp0_{k}": v for k, v in sng_reference_seq_dict.items()}
-
     myUtil.save_cache(options, 'sng_training_proteinIDs.pkl', sng_reference_seq_dict)
     myUtil.save_cache(options, 'sng_training_proteinIDs_limits.pkl', limits_dict)
 
-    # Step 3: If cache is missing, recompute and export FASTAs
-    if sng_reference_seq_dict:
-        Csb_proteins.fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            sng_reference_seq_dict,
-            options.fasta_output_directory,
-            min_seq=10,
-            max_seq=options.max_seqs,
-            cores=options.cores
-        )
+    sng_reference_seq_dict_prefixed = {f"grp0_{k}": v for k, v in sng_reference_seq_dict.items()}
+    
+    # Step 3: compute and export FASTAs
+    Csb_proteins.fetch_seqs_to_fasta_parallel(
+        options.database_directory,
+        sng_reference_seq_dict_prefixed,
+        options.fasta_output_directory,
+        min_seq=10,
+        max_seq=options.max_seqs,
+        cores=options.cores
+    )
     
 
     return limits_dict, sng_reference_seq_dict
