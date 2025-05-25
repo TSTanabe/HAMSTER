@@ -80,7 +80,7 @@ def train_logistic_from_pam_with_scores(pam, hit_scores, cores=4, target_domains
         feature_cols = [col for col in combined_matrix.columns if not col.startswith(domain + "_")]
         X = combined_matrix[feature_cols]
 
-        model = LogisticRegression(n_jobs=cores, max_iter=1000)
+        model = LogisticRegression(max_iter=1000)
         model.fit(X, y)
 
         models[domain] = model
