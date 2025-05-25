@@ -5,7 +5,6 @@ import csv
 import warnings
 
 from . import Csb_proteins
-from . import Csb_phylogeny
 from . import myUtil
 import pandas as pd
 from collections import defaultdict
@@ -275,60 +274,6 @@ def chunked(iterable, size):
 #########################################################################################
 ################## Train logistic model on presence absence matrix file #################
 #########################################################################################
-
-def train_logistic_models_from_tsv(tsv_path):
-    """
-    Reads a TSV file containing a presence/absence matrix, removes the 'grp0_' or 'sng0_' prefix
-    from column names, converts values to binary ("" = 0, everything else = 1),
-    and trains a logistic regression model for each column based on the remaining columns.
-
-    Returns:
-        - Dictionary of trained models
-        - DataFrame of regression coefficients
-    """
-    # Read the TSV file
-    df = pd.read_csv(tsv_path, sep="\t")
-
-    # Clean column names
-    df.columns = [col.replace("grp0_", "").replace("sng0_", "") for col in df.columns]
-
-    # Convert to binary matrix (presence/absence)
-    binary_matrix = df.apply(lambda col: col.map(lambda x: 1 if isinstance(x, str) and x != "" else 0))
-
-    # Initialize results
-    models = {}
-    coefficients_table = {}
-
-    # Suppress warnings (e.g., when small datasets do not converge)
-    warnings.filterwarnings("ignore", category=ConvergenceWarning)
-
-    for target_protein in binary_matrix.columns:
-        # Use all other proteins as features
-        X = binary_matrix.drop(columns=[target_protein])
-        y = binary_matrix[target_protein]
-
-        # Train model only if the target has both 0 and 1 classes
-        if y.nunique() > 1:
-            model = LogisticRegression()
-            model.fit(X, y)
-            models[target_protein] = model
-
-            # Extract coefficients
-            coefs = pd.Series(model.coef_[0], index=X.columns)
-            coefs["(Intercept)"] = model.intercept_[0]
-            coefficients_table[target_protein] = coefs
-
-    # Convert the coefficients to a DataFrame
-    coef_df = pd.DataFrame(coefficients_table).T
-    return models, coef_df
-
-
-
-
-##################
-# Routines for the fetching of hits from genomes where the hit would be plausible
-
-#move this processing to the PAM_MX_ALGORITHM.py
 
 
 def process_domain_hits_pool(args):

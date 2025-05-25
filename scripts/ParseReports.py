@@ -49,17 +49,6 @@ class Protein:
             listing.append(self.domains[key].get_HMM())
         return '-'.join(listing)
     
-    def get_domains_dict(self):
-    #return dict
-        return self.domains
-            
-    def get_domain_listing(self):
-    #return list
-        listing = []
-        for key in sorted(self.domains):
-            listing.append(self.domains[key])
-        return listing
-                        
     def get_domain_coordinates(self):
     #return string
         listing = []
@@ -74,42 +63,9 @@ class Protein:
             listing.append(f"{self.domains[key].get_score()}")
         return '-'.join(listing)   
 
-    def get_domain_count(self):
-        return len(self.domains)
-        
-    def get_protein_string(self):
-        #3.9.22 representation of the whole protein in one line
-        a = self.proteinID
-        b = self.get_domains()
-        c = self.get_domain_scores()
-        d = self.gene_contig
-        e = self.gene_start
-        f = self.gene_end
-        #d = self.get_protein_sequence()
-        string = f"{a} {b} {c} {d} {e} {f}"
-        return string
-        
-    def get_protein_list(self):
-        #3.9.22 representation of the whole protein in one line
-        listing = []
-        listing.append(self.proteinID)
-        listing.append(self.get_domains())
-        listing.append(str (self.get_domain_scores()))
-        listing.append(str (self.get_domain_coordinates()))
-        listing.append(self.gene_contig)
-        listing.append(str (self.gene_start))
-        listing.append(str (self.gene_end))
-        listing.append(self.gene_strand)
-        listing.append(self.gene_locustag)
-        #d = self.get_protein_sequence()
-        #string = f"{a} {b} {c} {d} {e} {f}"
-        return listing
-            
     def get_sequence(self):
         return str(self.protein_sequence)
         
-    def get_length(self):
-        return len(self.protein_sequence)
     ##### Setter #####
 
     def check_domain_overlap(self,new_start, new_end,\
@@ -225,7 +181,7 @@ def parseGFFfile(Filepath, protein_dict):
         stdout, stderr = grep_process.communicate()
 
         if stderr:
-            print("Error in grep process:", stderr)
+            print("[ERROR] in grep process:", stderr)
             return protein_dict
         
         for line in stdout.decode('utf-8').split('\n'):
@@ -248,7 +204,7 @@ def parseGFFfile(Filepath, protein_dict):
                 protein.gene_locustag = str(locustag)
     except Exception as e:
         error_message = f"\nError occurred: {str(e)}"
-        print(f"\tWARNING: Skipped {faa_file} due to an error - {error_message}")
+        print(f"[WARN] Skipped {faa_file} due to an error - {error_message}")
         return protein_dict
     return protein_dict
 
@@ -302,7 +258,7 @@ def getProteinSequence(Filepath, protein_dict):
             protein.protein_sequence = sequence
     
     except IOError:
-        print(f"Error: File {Filepath} could not be opened.")
+        print(f"[ERROR] File {Filepath} could not be opened.")
     
     finally:
         if reader is not None:

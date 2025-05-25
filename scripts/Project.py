@@ -106,7 +106,7 @@ def create_project(directory, projectname="project"):
     try:
         os.mkdir(directory)
     except Exception:
-        raise Exception("\nERROR: No writing rights.")
+        raise Exception("\n[ERROR]: No writing rights. Project was not created.")
     
     return directory
     
@@ -121,7 +121,7 @@ def isProjectFolder(options):
         database_path = os.path.join(options.result_files_directory, "database.db")
 
         if not os.path.isfile(database_path):
-            print("No database file found in expected directory. Searching recursively...")
+            print("[WARN] No database file found in expected directory. Searching recursively...")
 
             # Recursive search for database.db
             found_db = None
@@ -131,10 +131,10 @@ def isProjectFolder(options):
                     break
 
             if found_db:
-                print(f"Found database at {found_db}")
+                print(f"[INFO] Found database at {found_db}")
                 options.result_files_directory = os.path.dirname(found_db)
             else:
-                print("No database found at all. Creating new project folder structure.")
+                print("[WARN] No database found at all. Creating new project folder structure.")
 
         # Now ensure required directories exist
         required_dirs = [
@@ -157,7 +157,7 @@ def isProjectFolder(options):
         if os.path.isfile(self_query_path):
             options.self_query = self_query_path
         else:
-            print("No internal query file (self_blast.faa) found. Will need to create later.")
+            print("[WARN] No internal query file (self_blast.faa) found. Will need to create it later.")
 
         # Find blast table if not already defined
         if options.glob_table is None:
@@ -167,7 +167,7 @@ def isProjectFolder(options):
                     break
 
     except Exception as e:
-        raise Exception(f"An error occurred while checking project folder: {e}")
+        raise Exception(f"[ERROR] An error occurred while checking project folder: {e}")
 
     return 1
     
@@ -201,7 +201,7 @@ def write_options_to_tsv(options, output_directory, filename="parameters_summary
         for key, value in vars(options).items():
             writer.writerow([key, value])
     
-    print(f"Parameters saved: {output_path}")   
+    print(f"[INFO] Parameters saved: {output_path}")   
      
 
 

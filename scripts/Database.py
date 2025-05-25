@@ -108,7 +108,7 @@ def index_database(database):
     Indexes the relevant columns in the database to improve search and join performance.
     This is especially important for large databases (> 3000 genomes).
     """
-    print(f"Indexing database {database}", end="\r")
+    print(f"[INFO] Indexing database {database}")
     
     # List of indexes to create, each represented as a tuple (index_name, create_statement)
     indexes = [
@@ -132,11 +132,11 @@ def index_database(database):
                     cur.execute(create_stmt)
                 
     except sqlite3.Error as e:
-        print(f"An error occurred while indexing the database: {e}")
+        print(f"[ERROR] An error occurred while indexing the database: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"[ERROR] An unexpected error occurred: {e}")
 
-    print(f"Indexing database {database} -- ok")
+    print(f"[INFO] Finished indexing database {database}")
 
 def insert_database_genomeIDs(database, genomeIDs):
     """
@@ -182,7 +182,7 @@ def insert_database_proteins(database, protein_dict):
                 proteinID = f"{genomeID}-{protein.proteinID}"
                 domains = protein.domains
                 if not genomeID or not proteinID:
-                    print(f"Warning error annotated protein {protein.proteinID}")
+                    print(f"[WARN] Undefined error for {protein.proteinID}")
                     continue
 
                 # Prepare the protein record
@@ -215,7 +215,7 @@ def insert_database_proteins(database, protein_dict):
     except Exception as e:
         error_message = f"\nError occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"\tWARNING: Due to an error - {error_message}")
+        print(f"[WARN] Due to an error - {error_message}")
         print(f"\tTraceback details:\n{traceback_details}")
 
     return
@@ -265,7 +265,7 @@ def insert_database_clusters(database, cluster_dict):
     except Exception as e:
         error_message = f"\nError occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"\tWARNING: Due to an error - {error_message}")
+        print(f"[WARN] Due to an error - {error_message}")
         print(f"\tTraceback details:\n{traceback_details}")
  
 
@@ -299,7 +299,7 @@ def insert_taxonomy_data(database, taxonomy_file):
                     fields = line.strip().split('\t')
                    
                     if len(fields) < 8:
-                        print(f"Skipping line due to insufficient columns: {line}")
+                        print(f"[SKIP] Line has insufficient columns: {line}")
                         continue                
                    
                     # Prepare the data for insertion
@@ -332,15 +332,15 @@ def insert_taxonomy_data(database, taxonomy_file):
             con.commit()
     
     except sqlite3.OperationalError as e:
-        print(f"SQLite Operational Error: {e}")
+        print(f"[ERROR] SQLite Operational Error: {e}")
         print(f"Database path: {database}")
         print(f"Ensure the file exists and you have read/write permissions.")
     except sqlite3.Error as e:
-        print(f"SQLite Error: {e}")
+        print(f"[ERROR] SQLite Error: {e}")
     except FileNotFoundError as e:
-        print(f"File Not Found Error: {e}")
+        print(f"[ERROR] File Not Found Error: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"[ERROR] An unexpected error occurred: {e}")
         
         
         
@@ -425,7 +425,7 @@ def delete_keywords_from_csb(database, options):
             cur.execute(delete_query, (pattern,))
             con.commit()
         except sqlite3.Error as e:
-            print("SQLite error:", e)
+            print("[ERROR] SQLite error:", e)
             raise
 
     return
@@ -463,19 +463,19 @@ def clean_database_locks(database_path, wait_seconds=10):
     wal_path = database_path + "-wal"
     shm_path = database_path + "-shm"
 
-    print(f"Checking database for locks: {database_path}")
+    print(f"[INFO] Checking database for locks: {database_path}")
 
     # Step 1: Check if WAL and SHM files exist
     wal_exists = os.path.exists(wal_path)
     shm_exists = os.path.exists(shm_path)
 
     if wal_exists or shm_exists:
-        print(f"Found WAL/SHM files. WAL: {wal_exists}, SHM: {shm_exists}")
+        print(f"[INFO] Found WAL/SHM files. WAL: {wal_exists}, SHM: {shm_exists}")
     else:
-        print("No WAL/SHM files found. Database seems clean.")
+        print("[INFO] No WAL/SHM files found. Database seems clean.")
 
     # Step 2: Try to connect and perform a WAL checkpoint
-    print("Attempting to checkpoint database")
+    print("[INFO] Attempting to checkpoint database")
     success = False
     start_time = time.time()
 
@@ -486,10 +486,10 @@ def clean_database_locks(database_path, wait_seconds=10):
                 con.execute("PRAGMA wal_checkpoint(FULL);")
                 con.commit()
                 success = True
-                print("Checkpoint successful. Database flushed.")
+                print("[INFO] Checkpoint successful. Database flushed.")
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
-                print("Database is locked. Waiting a bit...")
+                print("[WARN] Database is locked. Waiting a bit...")
                 time.sleep(1)
             else:
                 print(f"Unexpected SQLite error: {e}")
@@ -503,13 +503,13 @@ def clean_database_locks(database_path, wait_seconds=10):
     shm_exists = os.path.exists(shm_path)
 
     if not wal_exists and not shm_exists:
-        print("WAL/SHM files cleaned up successfully.")
+        print("[INFO] WAL/SHM files cleaned up successfully.")
     else:
-        print("WAL/SHM files still exist. Database might have unclean shutdown earlier.")
+        print("[WARN] WAL/SHM files still exist. Database might have unclean shutdown earlier.")
         # Optional: Force delete them if you are absolutely sure
         # os.remove(wal_path)
         # os.remove(shm_path)
 
-    print("Database cleaning routine finished.")
+    print("[INFO] Database cleaning routine finished.")
 
 

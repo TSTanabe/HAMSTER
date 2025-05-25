@@ -21,7 +21,7 @@ def parallel_translation(directory,cores):
     FnaFiles = myUtil.compareFileLists(directory,".fna",".faa")
     fastaFiles = myUtil.getAllFiles(directory,".fasta")
     NucleotideFastaFiles = zipFnaFiles + FnaFiles + fastaFiles
-    print(f"Found {len(NucleotideFastaFiles)} assemblies in nucleotide or ambigous format for prodigal")
+    print(f"[INFO] Found {len(NucleotideFastaFiles)} assemblies in nucleotide or ambigous format for prodigal")
     
     manager  = multiprocessing.Manager()
     counter = manager.Value('i',0)
@@ -52,11 +52,11 @@ def translate_fasta(args):
     try:
         os.system(string)
     except Exception as e:
-        print(f"\tWARNING: Could not translate {fasta} - {e}")
+        print(f"[WARN] Could not translate {fasta} - {e}")
         
     with lock:
         counter.value += 1
-        print(f"\rProcessing assembly {counter.value} of {length}", end ='',flush=True)        
+        print(f"[INFO] Processing assembly {counter.value} of {length}", end ='',flush=True)        
     return
 
 
@@ -83,8 +83,8 @@ def parallel_transcription(directory,cores):
 
     gzfaaFiles = myUtil.getAllFiles(directory,".faa.gz")
     gzgffFiles = myUtil.getAllFiles(directory,".gff.gz")
-    print(f"Found {len(gzfaaFiles)} zipped faa files")
-    print(f"Found {len(gzgffFiles)} zipped gff files")
+    print(f"[INFO] Found {len(gzfaaFiles)} zipped faa files")
+    print(f"[INFO] Found {len(gzgffFiles)} zipped gff files")
 
     with multiprocessing.Pool(processes=cores) as pool:
         pool.map(unpacker,gzgffFiles)
@@ -93,11 +93,11 @@ def parallel_transcription(directory,cores):
     
     faaFiles = myUtil.getAllFiles(directory,".faa")
     gffFiles = myUtil.getAllFiles(directory,".gff")   
-    print(f"Found {len(gffFiles)} gff files")
-    print(f"Found {len(faaFiles)} faa files")    
+    print(f"[INFO] Found {len(gffFiles)} gff files")
+    print(f"[INFO] Found {len(faaFiles)} faa files")    
         	
     FaaFiles = myUtil.compareFileLists(directory,".faa",".gff")
-    print(f"Found {len(FaaFiles)} protein fasta files without gff")
+    print(f"[INFO] Found {len(FaaFiles)} protein fasta files without gff")
     
     manager = multiprocessing.Manager()
     counter = manager.Value('i',0)
@@ -108,7 +108,7 @@ def parallel_transcription(directory,cores):
         args_list = [(fasta, length, counter, lock) for fasta in FaaFiles]
         pool.map(transcripe_fasta, args_list)
     
-    print("\nFinished faa and gff file preparation")
+    print("[INFO] Finished faa and gff file preparation")
     return
 
 
@@ -121,7 +121,7 @@ def transcripe_fasta(args):
     
         with lock:
             counter.value += 1
-            print(f"\rProcessing file {counter.value} of {length}", end='', flush=True)
+            print(f"[INFO] Processing file {counter.value} of {length}", end='', flush=True)
   
     return
 
@@ -170,7 +170,7 @@ def prodigalFaaToGff(filepath):
                     strand = '+' if ar[3] == ' 1 ' else '-'
                     writer.write(contig[0]+"\tprodigal\tcds\t"+ar[1]+"\t"+ar[2]+"\t0.0\t"+strand+"\t0\tID=cds-"+ar[0]+";Genome="+genomeID+"\n")
                 except Exception as e:
-                    print(f"Error: Missformated header\n {line} - {e}")
+                    print(f"[ERROR] Missformated header\n {line} - {e}")
     writer.close()
     return Gff
 
@@ -325,7 +325,7 @@ def deconcatenate_faa(input_filepath, output_directory):
             else:
                 output_handle.write(line)
     close_current_handle()
-    print(f"Deconcatenation of faa complete. Files saved to {output_directory}")
+    print(f"[INFO] Deconcatenation of faa complete. Files saved to {output_directory}")
 
   
  

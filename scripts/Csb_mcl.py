@@ -2,7 +2,6 @@
 
 import csv
 import os
-import itertools
 import numpy as np
 from . import Csb_proteins
 from . import myUtil
@@ -55,15 +54,15 @@ def run_diamond_self_blast(options, directory):
 
         # Debugging output: Check if files exist before processing
         if os.path.exists(mcl_output_file):
-            print(f"Found existing MCL results for {input_prefix}. Skipping BLAST.")
+            print(f"[SKIP] Found existing MCL results for {input_prefix}")
             continue
 
         if os.path.exists(output_file_path):
-            print(f"DIAMOND BLAST results already exist: {output_file_path}. Skipping BLAST.")
+            print(f"[SKIP] DIAMOND BLAST results already exist: {output_file_path}")
             output_files_dict[input_prefix] = output_file_path
             continue
 
-        print(f"Starting DIAMOND self-BLASTp for: {faa_file}")
+        print(f"[INFO] Starting DIAMOND self-BLASTp for {faa_file}")
 
         # Run DIAMOND BLASTp self-search
         blast_results_path = DiamondSearch(
@@ -74,7 +73,7 @@ def run_diamond_self_blast(options, directory):
 
         # Debugging: Check if DIAMOND output was actually created
         if not os.path.exists(blast_results_path):
-            print(f"Error: DIAMOND output file {blast_results_path} not found after search!")
+            print(f"[ERROR] DIAMOND output file {blast_results_path} not found after self-BLASTp for MCL")
             continue
 
         # If DIAMOND produces an output file, rename it to match the input file prefix
@@ -97,11 +96,11 @@ def run_mcl_clustering(mcl_input_file, mcl_output_file, mcl_inflation, domain='u
     """
     
     if os.path.isfile(mcl_output_file):
-        print(f"Found existing MCL clustering for {domain}")
+        print(f"[SKIP] Found existing MCL clustering for {domain}")
         return mcl_output_file
     
     # Step 2: Run MCL clustering
-    print(f"Running MCL clustering for {domain}")
+    print(f"[INFO] Starting MCL clustering for {domain}")
     mcl = myUtil.find_executable("mcl")
     os.system(f"{mcl} {mcl_input_file} --abc -I {mcl_inflation} -o {mcl_output_file} > /dev/null 2>&1")
 
@@ -152,6 +151,7 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
     """
     Iterates over multiple MCL output files, extracts reference sequences, 
     and processes them using process_single_mcl_file.
+    Selection is based on F1 score optimized density and reference threshold
 
     Args:
     - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths. These are either grp0_ or without prefix
@@ -162,19 +162,19 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
     - all_clusters (dict): Merged dictionary of all high-density clusters.
     """
     all_clusters = {}
-    
+    all_cutoffs = {}
     # Process reference_dict to extract the actual domain names
     processed_reference_dict = {
         key.split("_", 1)[-1]: value for key, value in reference_dict.items()
     }
 
     for domain, mcl_file in mcl_output_dict.items():
-        print(f"Processing domain: {domain}")
+        print(f"\n[INFO] Selecting hits by csb for {domain}")
 
         # Get reference sequences for the domain (if exists in processed reference dict)
         reference_sequences = processed_reference_dict.get(domain, set())
         if not reference_sequences:
-            print(f"Warning: No reference sequences found for domain '{domain}', skipping.")
+            print(f"[WARN] No reference sequences found for {domain}")
             continue
         
         
@@ -186,14 +186,14 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
         
         # Get fallback values if thresholds were not provided
         if local_density_thrs is None:
-            print("Warning: MCL density threshold was not calculated for {domain}, fallback 0.1")
+            print("[WARN] MCL density threshold was not calculated for {domain}, fallback 0.1")
             local_density_thrs = 0.1
         if local_reference_thrs is None:
-            print("Warning: MCL reference threshold was not calculated for {domain}, fallback 0.001")
+            print("[WARN] MCL reference threshold was not calculated for {domain}, fallback 0.001")
             local_reference_thrs = 0.01
         
         
-        print(f"Domain {domain} with local_density_thrs {local_density_thrs} and reference thrs {local_reference_thrs}")
+        #print(f"[INFO] {domain} with local_density_thrs {local_density_thrs} and reference thrs {local_reference_thrs}")
         
         # Step 1 Process the MCL file for this domain
         mcl_domain_clusters_dict = process_single_mcl_file(mcl_file, domain, reference_sequences, local_density_thrs, local_reference_thrs)
@@ -203,10 +203,10 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
         combined_set = set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
 
         all_clusters[domain] = combined_set
+        all_cutoffs[domain] = {'density_threshold': local_density_thrs, 'reference_threshold': local_reference_thrs}
         
-        print(f"Length combined set {domain}: {len(combined_set)}")
-        
-    return all_clusters
+    return all_clusters, all_cutoffs
+
 
 def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences, 
                                       fixed_density_threshold=None, 
@@ -288,7 +288,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
                 best_coords = (x_thresh, y_thresh)
 
 
-    print(f"[{domain}] Optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
+    print(f"[INFO] {domain} optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
     return best_coords[1], best_coords[0]  # Return in order: (density, reference)
 
 
@@ -328,10 +328,13 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
                 cluster_index += 1
 
 
-        total_seqs = sum(len(seqs) for seqs in cluster_dict.values())
-        print(f"Anzahl der referenz Sequenzen {len(reference_sequences)}")
-        print(f"Anzahl der neuen    Sequenzen {total_seqs - len(reference_sequences)}")
-        print(f"Anzahl der Sequenzen in allen Clustern: {total_seqs}")
+    total_seqs = sum(len(seqs) for seqs in cluster_dict.values())
+    new_seqs = total_seqs - len(reference_sequences)
+
+    print(f"  Reference sequences provided:    {len(reference_sequences)}")
+    print(f"  Total sequences in kept clusters:{total_seqs}")
+    print(f"     ├─ from references:           {len(reference_sequences)}")
+    print(f"     └─ newly selected sequences:  {new_seqs}")
     return cluster_dict
 
 
@@ -353,11 +356,10 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
     # Suchergebnisse-Dateien
     output_results_tab = f"{path}.diamond.tab"
 
-    # Durchführen der Diamond-Suche
-    #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    #print(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     os.system(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid bitscore 1>/dev/null 0>/dev/null')
+    
     #output format hit query evalue score identity alifrom alito
+    
     return output_results_tab
 
 

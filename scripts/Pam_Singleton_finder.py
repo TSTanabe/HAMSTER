@@ -55,14 +55,14 @@ def get_singleton_reference_sequences(options):
     singleton_reference_seqs_dict = myUtil.load_cache(options, "sng_reference_seqs_dict.pkl")
     
     if domain_score_limits and singleton_reference_seqs_dict:
-        print("Loading existing reference sequences for genes without conserved genomic context")
+        print("[LOAD] Loaded existing reference sequences for genes without conserved genomic context")
         return domain_score_limits, singleton_reference_seqs_dict
 
     # Get domains present in query but missing from training sets
     query_names = extract_protein_ids_from_fasta(options.self_query)
     training_set_domains = extract_domain_names_from_directory(options.fasta_output_directory)
     singletons = query_names - training_set_domains
-    print(f"Proteins without recognized genomic context {singletons}")
+    print(f"[INFO] Proteins without recognized genomic context {singletons}")
 
     # Step 3: Query database instead of BLAST file
     singleton_hits = defaultdict(set)
@@ -128,7 +128,7 @@ def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, sin
     predictions_all = {}
 
     for sng_domain, sng_proteins in singleton.items():
-        print(f"\n[INFO] Processing singleton domain: {sng_domain}")
+        print(f"[INFO] Processing protein without conserved context {sng_domain}")
 
         # 1. Kombiniertes grouped: Basis + aktuelles Singleton
         grouped_plus = copy.deepcopy(grouped)

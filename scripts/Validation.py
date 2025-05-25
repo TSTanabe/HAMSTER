@@ -8,6 +8,7 @@ import os
 import sqlite3
 import subprocess
 import pickle
+from . import myUtil
 
 from collections import defaultdict
 from multiprocessing import Pool, Manager
@@ -16,81 +17,98 @@ import numpy as np
 
 
 
-def parallel_cross_validation(options):
+def initial_self_recognition_validation(options):
     #####
     # MAIN VALIDATION ROUTINE
     #####
-    print("Initilizing cross-validation")
+    print("[INFO] Initilize validation of training dataset recognition")
     
-    #Prepare shared data
-    all_seq_number = count_fasta_headers(options.sequence_faa_file)
+    # Prepare shared data
+    all_seq_number = count_fasta_headers(options.sequence_faa_file) # Number of all TP + TN
     alignment_files = [os.path.join(options.fasta_output_directory, f) for f in os.listdir(options.fasta_output_directory) if f.endswith(".fasta_aln")]
     files_number = len(alignment_files)
     
-    print("Cutoff and performance validation without folds")
+    print("[INFO] Calculate cutoffs and performance on training dataset without folds")
 
-    #Prepare task-specific arguments
-    #TODO only include the ones that are in the included and exlude the ones that are excluded by options
-    args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
+    # Prepare task-specific arguments
+    args_list = [(options, alignment_file, all_seq_number, files_number) for alignment_file in alignment_files]
 
     # Initial validation of full HMMs and assigning cutoffs
     with Pool(processes=options.cores) as pool:
-        pool.starmap(initial_process_folds, args_list)
-    
-    if options.cross_validation_deactivated: # if deactivated skip the cross validation
-        return
-        
-    print(f"Filter HMMs by performance MCC >{options.MCC_threshold} and prepare for cross-validation")
+        results = pool.starmap(initial_training_data_performance, args_list)
     
     
-    # Filter out the HMMs with a performance below threshold
-    initial_HMM_validation_MCC_dict = process_MCC_files(options.fasta_alignment_directory,"_MCC.txt")
-    initial_HMM_validation_MCC_dict = filter_dict_by_value(initial_HMM_validation_MCC_dict,options.MCC_threshold)
-    
-    alignment_files = filter_filepaths(alignment_files, initial_HMM_validation_MCC_dict)
-    files_number = len(alignment_files)
-    
-    args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
+    results_sorted = sorted([res for res in results if res is not None], key=lambda x: x[0])
 
-    print("Cross-validation initilized")
-    #Makes the cross validation and assigns the cutoff values 
-    with Pool(processes=options.cores) as pool:
-        
-        #starts the workers
-        pool.starmap(process_cross_folds,args_list)
-    print(f"Processed all validations.")
-
+    output_file = os.path.join(options.Hidden_markov_model_directory, "_ini_cutoffs.txt")
+    with open(output_file, "w") as out:
+        out.write("hmm_protein_name\toptimized_cutoff\ttrusted_cutoff\tnoise_cutoff\tMCC\n")
+        for res in results_sorted:
+            out.write("\t".join(str(x) for x in res) + "\n")
     return
-
     
-def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="hmm_cv", cores=1):
-    # Ensure the target directory exists
-    os.makedirs(target_dir, exist_ok=True)
 
-    # Get a list of all MSA files with the specified ending in the directory
-    msa_files = [f for f in os.listdir(directory) if f.endswith(ending)]
+####################################################################################
+####################  Initial validation procedure start  ##########################
+####################################################################################
 
-    # Run hmmbuild on each MSA file
-    for msa_file in msa_files:
-        msa_path = os.path.join(directory, msa_file)
-        hmm_file = os.path.join(target_dir, msa_file.replace(ending, extension))
+def initial_training_data_performance(options, alignment_file, all_sequence_number, files_number):
+    """
+    Runs in parallel to test the full HMM against a single test target.
+    Calculates the confusion matrix and returns:
+    - HMM name
+    - MCC
+    - Cutoffs
+    - Confusion matrix from validation
+    """
+    
+    # Define directory and protein name
+    initial_validation_directory = options.fasta_alignment_directory
+    hmm_protein_name = os.path.splitext(os.path.basename(alignment_file))[0]
+    protein_name = hmm_protein_name.split('_',1)[-1]
+    
+    load = os.path.join(initial_validation_directory, f"{hmm_protein_name}.ini_cutoffs_pkl")
 
-        # Skip if the HMM file already exists in the target directory
-        if os.path.isfile(hmm_file):
-            print(f"HMM {hmm_file} already exists. Skipping...")
-            continue
+    # Skip if results are already present
+    data = myUtil.load_cache(options, hmm_protein_name, load)
+    if data is not None:
+        hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, matrix = data
+        return hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, matrix
+    
+    # Define HMM for the test
+    if not (hmm := os.path.join(options.Hidden_markov_model_directory, f"{hmm_protein_name}.hmm")) or not os.path.isfile(hmm):
+        print(f"[WARN] HMM file not found for {hmm_protein_name}: {hmm}")
+        return
+    # Define target file    
+    if not (sequence_faa_file := options.targeted_sequence_faa_file_dict.get(protein_name, options.sequence_faa_file)):
+        print(f"[WARN] No target sequence file found for {protein_name}")
+        return
+    
+    print(f"[INFO] Initial validation of HMM {hmm_protein_name}")    
+    
+    # Define the output report path
+    output_report = os.path.join(initial_validation_directory, f"{hmm_protein_name}.hmmreport")
+    
+    # Run the HMMsearch
+    HMMsearch(hmm, sequence_faa_file, output_report, 1)
 
-        # Construct the hmmbuild command
-        hmmbuild_cmd = f"hmmbuild --amino --cpu {cores} {hmm_file} {msa_path}"
+    # Extract true positives from the alignment file
+    TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
+    TN = all_sequence_number - len(TP_seqIDs)
         
-        # Run the hmmbuild command
-        print(f"Running hmmbuild for {msa_file} -> {hmm_file}")
-        subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Calculate cutoff thresholds and MCC
+    optimized_cutoff, trusted_cutoff, noise_cutoff, report, best_MCC, matrix = cutoffs(TP_seqIDs, TN, output_report)
+    
+    # Save the labelling at the optimal position for the bigger report
+    myUtil.save_cache(options, f"{hmm_protein_name}.ini_performance_pkl", report, initial_validation_directory)
+    myUtil.save_cache(options, f"{hmm_protein_name}.ini_cutoffs_pkl", (hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, matrix), initial_validation_directory)
+    
+    print(f"[INFO] Finished HMM {hmm_protein_name} optimized cutoff: {optimized_cutoff} trusted cutoff: {trusted_cutoff} noise cutoff: {noise_cutoff} and MCC: {best_MCC}")
+    
+    return hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC
 
 
-def count_fasta_headers(fasta_file):
-    with open(fasta_file, "r") as f:
-        return sum(1 for line in f if line.startswith(">"))
+
 
 def get_target_sets(directory):
     """
@@ -113,165 +131,59 @@ def get_target_sets(directory):
             result[key] = os.path.join(directory, file_name)
     
     return result
-    
-####################################################################################
-####################  Initial validation procedure start  ##########################
-####################################################################################
-
-def initial_process_folds(alignment_file, options, all_sequence_number, files_number):
-    """
-    Runs in parallel to test the full HMM against a single test target.
-    Calculates the confusion matrix and returns:
-    - HMM name
-    - MCC
-    - Cutoffs
-    - Confusion matrix from validation
-    """
-    
-    # Unpacking arguments
-    #alignment_file, options, all_sequence_number, files_number = args_tuple
-
-    # Define directory and file paths
-    initial_validation_directory = options.fasta_alignment_directory 
-    hv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
-    hv_directory = os.path.join(initial_validation_directory, hv_subfolder_name)
-    
-    hmm = os.path.join(options.Hidden_markov_model_directory, f"{hv_subfolder_name}.hmm")
-    
-    # Check if the HMM file exists
-    if not os.path.isfile(hmm):
-        return
-    
-    os.makedirs(hv_directory, exist_ok=True)
-    
-    if os.path.exists(os.path.join(hv_directory, f"{hv_subfolder_name}_matrices.tsv")):
-        return None  # This was already finished return to next HMM validation
-    
-    print(f"Initial validation of HMM {hv_subfolder_name}")    
-    
-    # Determine target file
-    name = hv_subfolder_name.split('_')[-1]
-    sequence_faa_file = options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
-
-    # Define the output report path
-    report_name = os.path.splitext(os.path.basename(alignment_file))[0]
-    output_report = os.path.join(hv_directory, f"{report_name}.report")
-    
-    # Run the HMMsearch
-    HMMsearch(hmm, sequence_faa_file, output_report, 1)
-
-    # Check if the report file was generated    
-    hv_report = output_report
-
-    if not os.path.exists(hv_report):
-        return None  # Skip if no report was created
-
-        
-    # Extract true positives from the alignment file
-    TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
-    TN = all_sequence_number - len(TP_seqIDs)
-        
-    # Calculate cutoff thresholds and MCC
-    optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution, all_matrices = cutoffs(TP_seqIDs, TN, hv_report)
-    print(f"Finished HMM {hv_subfolder_name} cutoffs: {optimized_cutoff} {trusted_cutoff} {noise_cutoff} and MCC: {MCC}")
-    
-    #Write down the matrices
-    save_matrices_to_tsv(all_matrices, os.path.join(hv_directory, f"{hv_subfolder_name}_matrices.tsv"))
-        
-    #Calculate the optimum        
-    strict_report = calculate_performance_and_sum_matrices([[optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix]])  # Returns a tuple
-        
-    # Write down the matrices and cutoffs in the CV subfolder
-    with open(os.path.join(hv_directory, f"{hv_subfolder_name}_thresholds.txt"), 'w') as writer:
-        writer.write(f"{hv_subfolder_name}\t{strict_report[2]}\t{strict_report[3]}\t{strict_report[4]}\n")
-        
-    with open(os.path.join(hv_directory, f"{hv_subfolder_name}_MCC.txt"), 'w') as writer:
-        fold_matrix = strict_report[1]
-        writer.write(f"{hv_subfolder_name}\t{MCC}\t{matrix}\n")
-
-    # Save the hit id distribution for later report
-    hit_id_distribution_file = os.path.join(hv_directory, f"{hv_subfolder_name}_hit_id_distribution.pkl")
-    with open(hit_id_distribution_file, 'wb') as f:
-        pickle.dump(hit_id_distribution, f)
-
-    print(f"Saved hit_id_distribution for {hv_subfolder_name} to {hit_id_distribution_file}")
-
-    return None
 
 
 
-def process_MCC_files(directory, file_ending):
-    """
-    Recursively finds all files with a specified ending, concatenates their content, 
-    splits into the first and last column, and filters the entries to return a dictionary.
 
-    Parameters:
-        directory (str): Path to the root directory to search.
-        file_ending (str): File extension to look for (e.g., ".txt").
 
-    Returns:
-        dict: A dictionary with the first column (name) as keys and the last column (float) as values.
-    """
-    result_dict = {}
 
-    # Recursively find all files with the specified ending
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(file_ending):
-                file_path = os.path.join(root, file)
 
-                # Process each file
-                with open(file_path, 'r') as f:
-                    for line in f:
-                        # Split line into columns, assuming tab-separated
-                        columns = line.strip().split('\t')
-                        if len(columns) >= 2:  # Ensure there are at least two columns
-                            name = columns[0].strip()  # First column (name)
-                            try:
-                                value = float(columns[1].strip())  # Last column (float)
-                                result_dict[name] = value  # Add to dictionary
-                            except ValueError:
-                                # Skip lines where the last column is not a float
-                                print(f"Skipping line due to invalid float value: {line.strip()}")
 
-    return result_dict
 
-def filter_dict_by_value(d, threshold):
-    """
-    Removes all key-value pairs from a dictionary where the values are below a given threshold.
 
-    Parameters:
-    d (dict): The dictionary to filter.
-    threshold (float): The threshold value. Key-value pairs with values below this will be removed.
 
-    Returns:
-    dict: A new dictionary with only the key-value pairs meeting the threshold criteria.
-    """
-    return {key: value for key, value in d.items() if isinstance(value, (int, float)) and value >= threshold}
 
-    
-def filter_filepaths(filepaths, name_dict):
-    """
-    Removes file paths from a list if the filename (without extension) is not in the keys of the given dictionary.
 
-    Parameters:
-    filepaths (list): A list of file paths to filter.
-    name_dict (dict): A dictionary whose keys will be used to determine whether to keep a file path.
 
-    Returns:
-    list: A filtered list of file paths.
-    """
-    valid_names = set(name_dict.keys())
-    filtered_filepaths = [
-        filepath for filepath in filepaths
-        if os.path.splitext(os.path.basename(filepath))[0] in valid_names
-    ]
-    return filtered_filepaths
-    
+
+
+
+
+
+
+
+
+
+
 ####################################################################################
 ####################  Cross Validation procedure start  ############################
 ####################################################################################
 
+    
+def parallel_cross_validation(options):    
+
+        
+    all_seq_number = count_fasta_headers(options.sequence_faa_file) # Number of all TP + TN
+    alignment_files = [os.path.join(options.fasta_output_directory, f) for f in os.listdir(options.fasta_output_directory) if f.endswith(".fasta_aln")]
+    files_number = len(alignment_files)
+
+    args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
+
+    print("Cross-validation initilized")
+    #Makes the cross validation and assigns the cutoff values 
+    with Pool(processes=options.cores) as pool:
+        
+        #starts the workers
+        pool.starmap(process_cross_folds,args_list)
+
+    return
+
+
+
+
+
+
+    
 def process_cross_folds(alignment_file, options, all_sequence_number, files_number):
     # This process is running in parallel
     # Prepare the folds and HMMs
@@ -314,6 +226,33 @@ def setup_cross_validation_directory(alignment_file, cross_validation_directory)
     cv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
     cv_directory = os.path.join(cross_validation_directory, cv_subfolder_name)
     return cv_directory, cv_subfolder_name   
+
+    
+def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="hmm_cv", cores=1):
+    # Ensure the target directory exists
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Get a list of all MSA files with the specified ending in the directory
+    msa_files = [f for f in os.listdir(directory) if f.endswith(ending)]
+
+    # Run hmmbuild on each MSA file
+    for msa_file in msa_files:
+        msa_path = os.path.join(directory, msa_file)
+        hmm_file = os.path.join(target_dir, msa_file.replace(ending, extension))
+
+        # Skip if the HMM file already exists in the target directory
+        if os.path.isfile(hmm_file):
+            print(f"HMM {hmm_file} already exists. Skipping...")
+            continue
+
+        # Construct the hmmbuild command
+        hmmbuild_cmd = f"hmmbuild --amino --cpu {cores} {hmm_file} {msa_path}"
+        
+        # Run the hmmbuild command
+        print(f"Running hmmbuild for {msa_file} -> {hmm_file}")
+        subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
     
 def get_cv_hmms(cv_directory):
     """Returns a list of all HMM files used in cross-validation."""
@@ -342,11 +281,9 @@ def process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_nu
 
     # Calculate cutoffs for each report
     model_values = []
-    model_hit_distribution = []
 
     for report in cv_reports:
-        optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix, hit_id_distribution, all_matrices = cutoffs(TP_seqIDs, TN, report)
-        model_hit_distribution.append(hit_id_distribution)  # Save distribution
+        optimized_cutoff, trusted_cutoff, noise_cutoff, report, MCC, matrix = cutoffs(TP_seqIDs, TN, report)
         model_values.append([optimized_cutoff, trusted_cutoff, noise_cutoff, MCC, matrix])
 
     # Determine final performance metrics
@@ -357,7 +294,6 @@ def process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_nu
     save_matrices(cv_directory, cv_subfolder_name, strict_report[1])
 
     # Generate detailed hit reports
-    # hit_id_reports(cv_directory, database_directory, model_hit_distribution)
 
 def save_thresholds(cv_directory, cv_subfolder_name, strict_report):
     """Writes the calculated cutoff thresholds to a file."""
@@ -423,7 +359,16 @@ def create_cross_validation_sets(alignment_file, output_directory, ending=".cv",
             for record_id in train_record_ids:
                 train_f.write(f">{record_id}\n{sequences[record_id]}\n")
 
-                
+
+
+
+
+
+
+####################################################################################
+############################  Common subroutines  ##################################
+####################################################################################
+
 
 def extract_record_ids_from_alignment(alignment_file):
     record_ids = set()
@@ -463,107 +408,113 @@ def calculateMetric(metric, TP, FP, FN, TN):
         mcc = numerator / denominator if denominator != 0 else 0
         return mcc
     else:
-        raise ValueError("Unsupported metric. Only 'MCC' is supported.")
+        raise ValueError("[ERROR] Unsupported metric. Only 'MCC' is supported.")
 
 
-def cutoffs(true_positives,true_negatives,report_filepath):
+
+
+def cutoffs(true_positives, true_negatives, report_filepath):
     """
-    Calculate the cutoffs and the confusion matrix. Sort the proteinIDs into the categories TP,FP,FN,TN
+    Calculate the optimal cutoff based on MCC, sort proteinIDs into TP, FP, FN, TN.
+    Returns:
+        optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, best_matrix, hit_id_distribution, all_matrices
     """
-    
-    # Initialize confusion matrix variables and identifier data structures
-    sum_TP = len(true_positives) #true_positives is a set, sum_TP is the total number of TP
+
+    sum_TP = len(true_positives)
     TP, FP, FN, TN = 0, 0, 0, true_negatives
-    
     trusted_cutoff = float("-inf")
-    noise_cutoff = 10
-    optimized_cutoff = 0
-    MCC = 0
-    matrix = []
-    all_matrices = []
-
+    noise_cutoff = float("inf")  # start high for minimum search!
+    optimized_cutoff = None      # None to signal "not found yet"
+    best_MCC = float("-inf")
+    best_matrix = []
     true_positives_set = set(true_positives)
-    processed_TPs = set()  # Speichert bereits verarbeitete TPs
+    processed_IDs = set()
 
-    # Track hit occurrences and their lowest scores
-    true_positive_dict = defaultdict(float)
-    false_positive_dict = defaultdict(float)
-    false_negative_dict = {key: 0 for key in true_positives}
-        
+    # Hit-Score Dictionaries
+    hit_report = {}
+
     with open(report_filepath, 'r') as file:
-        
         for line in file:
-            if line.startswith('#'):
+            if line.startswith('#'): continue
+            fields = line.strip().split()
+            if len(fields) < 8:
+                print(f"[WARN] Malformed line (skipped): {line.strip()}")
                 continue
 
-            # Split the line by any whitespace, treating consecutive spaces as a single separator
-            fields = line.strip().split()
-            hit_id, bitscore = fields[0], float(fields[13])
+            hit_id, bitscore = fields[0], float(fields[7])
             
-            # Process true positives                        
+            if hit_id in processed_IDs:
+                continue
+            
+            processed_IDs.add(hit_id)
+
+            
+            # Increase counters in confusion matrix
             if hit_id in true_positives_set:
-                if hit_id in processed_TPs:
-                    continue #skip doublicate hit
                 
                 TP += 1
-                true_positive_dict[hit_id] = bitscore # collect the positive hit identifiers set
-                processed_TPs.add(hit_id)  # Ensure TPs are only counted once
-
-                FN = sum_TP - TP #wenn tp die hit_ids speichert dann könnte man hier direkt die FN hit IDs rausfiltern über vergleiche von sets
-                
-                # Store last TP as trusted bitscore                
-                if FP == 0:
+                FN = sum_TP - TP
+                if FP == 0:  # first TP (highest bitscore, da absteigend sortiert)
                     trusted_cutoff = bitscore
-                
-                # Update false negative dict
-                if hit_id in false_negative_dict: #track the bitscores, TPs will be removed from here when better MCC is found
-                    false_negative_dict[hit_id] = bitscore
-                    
-            # Process false positives
+
+                true_value = 'TP' # This hit_id is actually a true positive
+
             else:
-                if hit_id in false_positive_dict:
-                    continue #skip doublicate hit
-                
+
                 FP += 1
-                false_positive_dict[hit_id] = bitscore # collect the false positive hit identifiers
                 TN = true_negatives - FP
-            
-            # Calculate matthews correlation coefficient            
-            new_MCC = calculateMetric("MCC",TP,FP,FN,TN)
-            #print(f"{TP},{FP},{FN},{TN} with hit_id {hit_id} as next positive hit")
-            #print(new_MCC, " > ", MCC)
-            
-            # Store the confusion matrix     
-            all_matrices.append([TP, FP, FN, TN, bitscore, new_MCC])
-            
-            # Update MCC if improved
-            if new_MCC > MCC:
-                MCC = new_MCC
+                
+                true_value = 'TN' # This hit_id is actually a true positive
+                
+            # Calculate MCC
+            current_MCC = calculateMetric("MCC", TP, FP, FN, TN)
+            #print(f"[DEBUG] TP={TP} FP={FP} FN={FN} TN={TN} MCC={current_MCC:.3f} bitscore={bitscore:.2f} hit_id={hit_id}")
+
+            # Get best MCC
+            if current_MCC > best_MCC:
+                best_MCC = current_MCC
                 optimized_cutoff = bitscore
-                matrix = [TP,FP,FN,TN]
-                
-                # Remove all TPs at this point from the false_negative_dict thus scores can be recorded for all hits but only those in the
-                # below the threshold will be returned              
-                false_negative_dict = {k: v for k, v in false_negative_dict.items() if k not in processed_TPs}
-                
-                if FN != len(false_negative_dict): # This should never happen
-                    print(f"ERROR: Asynchrone false negative count and dictionary in the cutoff routine {FN}/{len(false_negative_dict)}")
+                best_matrix = [TP, FP, FN, TN]
             
-            # Stop if all TPs are found
+
+            # Save hit_id for report
+            hit_report[hit_id] = {
+                "bitscore": bitscore,
+                "MCC": current_MCC,
+                "TP": TP,
+                "FP": FP,
+                "FN": FN,
+                "TN": TN,
+                "assignment": 'None',
+                "true_value": true_value,
+            }
+            
             if TP == sum_TP:
                 noise_cutoff = bitscore
-                break #MCC there is no better MCC without more TP
-                
-            if noise_cutoff > bitscore:
+                break
+            if bitscore < noise_cutoff:
                 noise_cutoff = bitscore
-    
-    # Filter false positives above cutoff
-    false_positive_dict_filtered = {key: value for key, value in false_positive_dict.items() if value >= optimized_cutoff}
-    
-    # Prepare hit id distribution for return
-    hit_id_distribution = [true_positive_dict, false_positive_dict_filtered, false_negative_dict] #distribution of hit ids at optimum MCC
-    
-    return optimized_cutoff,trusted_cutoff,noise_cutoff,MCC,matrix, hit_id_distribution, all_matrices
+
+
+
+
+    # Sanity-Check: Warn if no optimal cutoff was found
+    if optimized_cutoff is None:
+        print('[WARN] No optimized cutoff found')
+
+    # Second pass: assign based on optimized_cutoff
+    for hit_id, info in hit_report.items():
+        bs = info['bitscore']
+        true_val = info['true_value']
+        if bs >= optimized_cutoff:
+            info['assignment'] = 'TP' if true_val == 'TP' else 'FP'
+        else:
+            info['assignment'] = 'FN' if true_val == 'TP' else 'TN'
+
+    return optimized_cutoff, trusted_cutoff, noise_cutoff, hit_report, best_MCC, best_matrix
+
+
+
 
 
 def calculate_performance_and_sum_matrices(cross_validation_folds):
@@ -606,40 +557,9 @@ def calculate_performance_and_sum_matrices(cross_validation_folds):
     
     return (sum_matrix, fold_matrices, best_optimized_cutoff, highest_trusted_cutoff, lowest_noise_cutoff)
 
+def count_fasta_headers(fasta_file):
+    with open(fasta_file, "r") as f:
+        return sum(1 for line in f if line.startswith(">"))
 
-
-#######################################################################
-##################    Hit report routines      ########################
-#######################################################################
-
-
-
-
-def save_matrices_to_tsv(all_matrices, output_filepath):
-    """
-    Saves all confusion matrices to a tab-separated (.tsv) file.
-
-    Args:
-        all_matrices (list): List of confusion matrices, each in the format [TP, FP, FN, TN].
-        output_filepath (str): Path to the output TSV file.
-
-    Returns:
-        str: The path to the saved file.
-    """
-    # Define headers
-    headers = ["TP", "FP", "FN", "TN", "cutoff", "MCC"]
-    
-    # Write to TSV file
-    with open(output_filepath, mode="w", newline="") as file:
-        writer = csv.writer(file, delimiter="\t")
-        
-        # Write header row
-        writer.writerow(headers)
-        
-        # Write confusion matrices
-        for matrix in all_matrices:
-            writer.writerow(matrix)
-
-    return output_filepath
 
     

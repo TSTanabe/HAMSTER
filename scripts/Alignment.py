@@ -1,3 +1,4 @@
+#!/usr/bin/python
 import os
 import sys
 import shutil
@@ -6,59 +7,6 @@ import multiprocessing
 
 from . import myUtil
 
-
-
-def align_tcs(options,):
-    #input files need extension .faa
-    #t coffee in path
-    
-    
-    
-    current_dir = os.getcwd()
-    os.chdir(options.fasta_output_directory)
-    directory_to_clean = options.fasta_output_directory
-
-    # Überprüfen, ob das Verzeichnis existiert
-    if os.path.exists(directory_to_clean):
-        for filename in os.listdir(directory_to_clean):
-            if filename.endswith(".fasta_aln") or filename.endswith(f"tcs_residue_filter{options.tcs_filter}_fasta") or filename.endswith(".dnd"):
-                file_path = os.path.join(directory_to_clean, filename)
-                os.remove(file_path)
-               
-    
-    infiles = [os.path.join(options.fasta_output_directory, filename) for filename in os.listdir(options.fasta_output_directory) if filename.endswith(".faa")]
-    length = len(infiles)
-    for index,infile in enumerate(infiles):
-        
-        name, ext = os.path.splitext(os.path.basename(infile))
-        print(f"\tMcoffee Alignment for {name} {index+1} of {length}")
-
-        if ext != ".faa":
-            continue
-
-        # Alignment with t-coffee
-        # Filter with TCS 4 to improve phylogenetic tree Mprobcons_msa
-        # Mpcma_msa Mclustalw_msa Mdialigntx_msa Mpoa_msa Mmuscle_msa Mprobcons_msa Mt_coffee_msa Mclustalw_msa 
-        
-        output = f"tcs_residue_filter{options.tcs_filter}_fasta"
-        mcoffee = f"t_coffee -in={infile} Mmafft_msa Mclustalw_msa -output={output} -maxnseq={options.alnmax_seqs} -maxlen={options.alnmax_len} -case=upper -seqnos=off -outorder=input -run_name=Mcoffee-{name} -multi_core=[templates,jobs,relax,msa] -thread={options.cores} -quiet=stdout 1>/dev/null"
-        status = subprocess.run(mcoffee, shell=True).returncode
-        if status > 0:
-            print(f"\nERROR:\t{mcoffee}\nDied with exit code:\t{status}\n")
-            sys.exit("Terminating the process")
-
-        # Remove 90% gap columns with t-coffee
-        infile = f"Mcoffee-{name}.{output}"
-        #infile = output
-        output = f"{name}.fasta_aln"
-        
-        mcoffee = f"t_coffee -other_pg seq_reformat -in={infile}  -action +rm_gap {options.gap_col_remove} -output fasta_aln > {output} "
-        status = subprocess.run(mcoffee, shell=True).returncode
-        if status > 0:
-            print(f"\nERROR:\t{mcoffee}\nDied with exit code:\t{status}\n")
-            sys.exit("Terminating the process")
-
-    os.chdir(current_dir)
 
 ####################################################
 ##########   MAFFT Alignments routines    ##########
@@ -102,7 +50,7 @@ def make_alignments(options,fasta_output_directory):
         output_fasta = os.path.join(input_dir, f"{base_name}.faa_aln") # Create the output filename with .aln extension in the same directory as the input file
 
         if os.path.isfile(output_fasta):
-            print(f"Skipping. {output_fasta} already exists")
+            print(f"[SKIP] {output_fasta} already exists")
             continue
         #Align with default mafft
         align_fasta_with_mafft(fasta_file, output_fasta, options.cores)
@@ -158,14 +106,14 @@ def align_fasta_with_mafft(input_fasta, output_fasta, cores=2):
         with open(output_fasta, "w") as output_file:
             # Pass the file object to stdout and stderr
             subprocess.run([mafft, "--thread", str(cores), "--auto", input_fasta], stdout=output_file, stderr=subprocess.PIPE, check=True)
-        print(f"Alignment complete: {input_fasta} -> {output_fasta}")
+        print(f"[INFO] Alignment complete: {output_fasta}")
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
-        print(f"Error occurred during MAFFT alignment: {error_message}")
-        print(f"Skipping file {input_fasta} due to the error.")
+        print(f"[ERROR] occurred during MAFFT alignment: {error_message}")
+        print(f"[SKIP] file {input_fasta} due to the error.")
 
     except FileNotFoundError:
-        print("MAFFT executable not found. Please make sure MAFFT is installed and in your system's PATH.")
+        print("[ERROR] MAFFT executable not found. Please make sure MAFFT is installed and in your system's PATH.")
 
 
 
@@ -179,7 +127,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         gap_threshold: Proportion of gaps allowed in a column (default: 0.95).
     """
     trimal = find_executable("trimal")
-    print(f"Trimming {input_fasta} with {gap_threshold} gap threshold")
+    print(f"[INFO] Trimming {input_fasta} with {gap_threshold} gap threshold")
     try:
         # Run the trimAl command with the gap threshold
         subprocess.run([
@@ -193,8 +141,8 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         #print(f"Trimming complete: {input_fasta} -> {output_alignment}")
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
-        print(f"Error occurred during trimming with trimAl: {error_message}")
-        print(f"Skipping file {input_fasta} due to the error.")
+        print(f"[ERROR] occurred during trimming with trimAl: {error_message}")
+        print(f"[SKIP] file {input_fasta} due to the error.")
 
 
 

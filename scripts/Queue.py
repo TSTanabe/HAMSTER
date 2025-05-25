@@ -18,7 +18,7 @@ def queue_files(options):
         if both files present
         get the genome identifiers
     """
-    print("\nFilling the queue with faa files --", end="\r")
+    print("\n[INFO] Filling the queue with faa files --", end="\r")
     genomeID_queue = set()
     faa_files = {}
     gff_files = {}
@@ -37,8 +37,8 @@ def queue_files(options):
     options.queued_genomes = genomeID_queue
     options.faa_files = faa_files
     options.gff_files = gff_files
-    print("Filling the queue with faa files -- ok")
-    print(f"Queued {len(options.queued_genomes)} faa/gff pairs")
+    print("[INFO] Filling the queue with faa files -- ok")
+    print(f"[INFO] Queued {len(options.queued_genomes)} faa/gff pairs")
     return
     
 
@@ -53,14 +53,14 @@ def compare_with_existing_database(options,genomeIDs):
         genomeIDs = Database.fetch_genomeIDs(options.database_directory)
         for genomeID in genomeIDs:
             if genomeID in options.faa_files.keys():
-                print(f"\tFound assembly {genomeID} in database leaving out {myUtil.getFileName(options.faa_files[genomeID])}")
+                print(f"[INFO] Found assembly {genomeID} in database leaving out {myUtil.getFileName(options.faa_files[genomeID])}")
                 del options.faa_files[genomeID]
                 del options.gff_files[genomeID]
                 options.queued_genomes.remove(genomeID)
     
-    print(f"Queued {len(options.queued_genomes)} for processing")
+    print(f"[INFO] Queued {len(options.queued_genomes)} for processing")
     if len(options.queued_genomes) == 0:
-        print("There were 0 genomes queued. Use -redo_search option if genomes are already present in database")
+        print("[ERROR] There were 0 genomes queued. Use -redo_search option if genomes are already present in database")
     
     return
     

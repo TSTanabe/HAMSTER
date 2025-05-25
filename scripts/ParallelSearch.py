@@ -49,16 +49,16 @@ def initial_genomize_search(options):
             data_queue.put(None)
         
         p_writer.get()
-    print("\nFinished searching")
-    print(f"Saved BLASTp hits to database {options.database_directory}")
-    print(f"Saved individual hit lists to {options.fasta_initial_hit_directory}")
+    print("[INFO] Finished DIAMOND BLASTp search")
+    print(f"[SAVE] BLASTp hits to database {options.database_directory}")
+    print(f"[SAVE] individual hit lists to {options.fasta_initial_hit_directory}")
     return    
 
 def process_parallel_search(args_tuple):
 
     queue,genomeID,options,counter,score_threshold_diction, csb_patterns_diction,csb_pattern_names = args_tuple
     counter.value += 1
-    print(f"Searching assembly ({counter.value}/{len(options.queued_genomes)})", end="\r")
+    print(f"[INFO] Searching assembly ({counter.value}/{len(options.queued_genomes)})", end="\r")
     cluster_dict
     try:
         faa_file = myUtil.unpackgz(options.faa_files[genomeID])
@@ -81,7 +81,7 @@ def process_parallel_search(args_tuple):
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"Warning: Skipped {faa_file} due to an error - {error_message}")
+        print(f"[WARN] Skipped {faa_file} due to an error - {error_message}")
         print(f"Traceback details:\n{traceback_details}")
         return
 
@@ -110,7 +110,7 @@ def initial_glob_search(options):
     5. Batch process the genome hits in parallel using multiprocessing.
     """
     
-    print(f"Initilize DIAMOND BLASTp self-blast against query")
+    print(f"[INFO] Initilize DIAMOND BLASTp self-blast against query")
     
     # Step 1: Perform self BLAST query to establish reference scores for blast score ratio
     self_blast_report = self_blast_query(options)
@@ -118,7 +118,7 @@ def initial_glob_search(options):
     # Step 2: Run DIAMOND BLASTp if no precomputed BLAST table is provided or exists
     blast_results_table = options.glob_table
     if not blast_results_table:
-        print(f"Initilize DIAMOND BLASTp against target")
+        print(f"[INFO] Initilize DIAMOND BLASTp against target")
         blast_results_table = DiamondSearch(
             options.glob_faa, options.query_file, options.cores, 
             options.evalue, options.searchcoverage, options.minseqid, 
@@ -126,7 +126,7 @@ def initial_glob_search(options):
         )
     
     # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
-    print("Filtering raw BLASTp results with given parameters")   
+    print("[INFO] Filtering raw BLASTp results by score, e-value, identity and blast score ratio parameters")   
     query_length_dict = get_sequence_legth(options.self_query) # Retrieve sequence lengths
     selfblast_scores_dict = get_sequence_hits_scores(self_blast_report) # Get baseline BLAST scores
     
@@ -142,12 +142,12 @@ def initial_glob_search(options):
 
     # Step 4: Extract and store unique genome IDs
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
-    print(f"Found hits in {len(genomeIDs_set)} genomes")
+    print(f"[INFO] Found hits in {len(genomeIDs_set)} genomes")
     
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
     # Step 5: Process genome hits in parallel
-    print("Parsing hits from filtered results table per genome")
+    print("[INFO] Parsing hits from filtered results table per genome")
     genomeID_batches = split_genomeIDs_into_batches(list(genomeIDs_set), options.cores-1) # batch sets of genomeIDs for each worker
     
     manager = Manager()
@@ -169,7 +169,7 @@ def initial_glob_search(options):
             data_queue.put(None)
         
         p_writer.get()
-    print("Finished parsing BLASTp results")
+    print("[INFO] Finished parsing BLASTp results")
     return
 
 
@@ -210,7 +210,7 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
 
     # Durchführen der Diamond-Suche
     #{hit_id}\t{query_id}\t{e_value}\t{score}\t{bias}\t{hsp_start}\t{hsp_end}\t{description}
-    print(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
+    print(f'[INFO] {diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     os.system(f'{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null')
     #output format hit query evalue score identity alifrom alito
     return output_results_tab
@@ -344,7 +344,7 @@ def process_single_genome(data_queue,genomeID,options,report,score_threshold_dic
     except Exception as e:
         error_message = f"\nError: occurred: {str(e)}"
         traceback_details = traceback.format_exc()
-        print(f"\tWarning: Skipped {faa_file} due to an error - {error_message}")
+        print(f"\t[WARN] Skipped {faa_file} due to an error - {error_message}")
         print(f"\tTraceback details:\n{traceback_details}")
         return
 
@@ -371,7 +371,7 @@ def process_writer(queue, options, counter):
         
         else:
             counter.value += 1
-            print(f"Processed {counter.value} genomes ", end="\r")#
+            print(f"[INFO] Processed {counter.value} genomes ", end="\r")#
         
         genomeID, protein_dict, cluster_dict = tup
 
@@ -486,11 +486,11 @@ def parse_bulk_blastreport_genomize(genome_id, filepath, thresholds, cut_score=1
                         )
 
                 except ValueError as ve:
-                    print(f"\tWarning: Skipped malformed line in {filepath}: {line.strip()} (ValueError: {ve})")
+                    print(f"\t[SKIP] Skipped malformed line in {filepath}: {line.strip()} (ValueError: {ve})")
                     continue
 
     except Exception as e:
-        print(f"\nERROR: Failed to parse {filepath} for genome {genome_id}")
+        print(f"\n[ERROR] Failed to parse {filepath} for genome {genome_id}")
         print(f"Exception: {str(e)}")
         print(f"Traceback:\n{traceback.format_exc()}")
 
@@ -679,7 +679,7 @@ def filter_blast_table(output_file, blast_file, evalue_cutoff, score_cutoff, cov
                     buffer.clear()  # Reset buffer
 
             except ValueError as ve:
-                print(f"Warning: Skipping malformed row: {row} (ValueError: {ve})")
+                print(f"[WARN] Skipping malformed row: {row} (ValueError: {ve})")
                 continue  # Skip invalid rows gracefully
 
         # Final flush: Write any remaining data in the buffer

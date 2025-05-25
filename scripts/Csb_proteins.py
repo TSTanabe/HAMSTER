@@ -33,10 +33,10 @@ def prepare_csb_grouped_training_proteins(options):
     # Step 1: Compute score limits and keyword clusters
     grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
 
-    print("Fetching sequences for training datasets")
+    print("[INFO] Collecting sequences for training datasets with similar csb")
     csb_proteins_dict = csb_proteins_datasets(options, clustered_excluded_keywords_dict)
 
-    print("Processing highly similar homologs with specific genomic context")
+    print("[INFO] Processing highly similar homologs with specific genomic context")
 
     # Step 2: Try loading cached grouped training data
     grouped = myUtil.load_cache(options, 'grp_training_proteinIDs.pkl')
@@ -65,7 +65,7 @@ def prepare_csb_grouped_training_proteins(options):
 def csb_proteins_datasets(options, sglr_dict):
     
     # Get the domain types as set per csb and predefined pattern
-    print("Reading collinear syntenic block files")
+    print("[INFO] Initilize collinear syntenic block sorting")
     csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) # dictionary with cbs_name => csb items
     pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
     csb_dictionary = {**csb_dictionary, **pattern_dictionary}
@@ -75,7 +75,7 @@ def csb_proteins_datasets(options, sglr_dict):
     dictionary = myUtil.load_cache(options, "csb_protein_dataset.pkl")
     
     if dictionary:
-        print("Loaded existing protein dataset")
+        print("[LOAD] Loaded existing reference protein sequence dataset")
         dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
         dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
         return dictionary    
@@ -83,11 +83,10 @@ def csb_proteins_datasets(options, sglr_dict):
     #Fetch for each csb id all the domains in the csb that are query domains
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
     
-    if not options.sglr: #if not sglr is true, default sglr is false
-        csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
-        csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
+    csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
+    csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
 
-    print("Reading proteinIDs from database")
+    print("[INFO] Collecting protein sequence identifiers from local database")
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
@@ -156,12 +155,6 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
             return combined_protein_sets  # Falls leer, sofort zurückgeben
 
         for key in combined_protein_sets:
-            # Extract domain from key (assuming format 'categoryX_domain')
-            parts = key.split("_")
-            if len(parts) < 2:
-                continue  # Skip malformed keys
-
-            domain = "_".join(parts[1:])  # Reconstruct domain if it contains '_'
 
             # **Schritt 2: Hole proteinIDs aus Domains, aber nur, wenn sie in query_protein_ids sind**
             cursor.execute(
@@ -169,7 +162,7 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
                 SELECT proteinID FROM Domains 
                 WHERE domain = ? AND proteinID IN ({','.join(['?'] * len(query_protein_ids))})
                 """,
-                (domain, *query_protein_ids)
+                (key, *query_protein_ids)
             )
 
             # Add fetched proteinIDs to the protein set
@@ -188,7 +181,6 @@ def decorate_training_data(options, score_limit_dict, grouped):
     score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
     decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores, options.max_seqs) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-    print(decorated_grouped_dict.keys())
     fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
     
     return
@@ -299,7 +291,7 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
         results = []
         for i, result in enumerate(pool.imap(process_keyword_domains, tasks), start=1):
             # Print task start in order
-            print(f"{i}/{total_tasks}", end="\r")
+            print(f"  {i}/{total_tasks}", end="\r")
             results.append(result)
 
     # Combine results from all workers
@@ -310,7 +302,7 @@ def fetch_proteinIDs_dict_multiprocessing(database, csb_dictionary, min_seqs, nu
                 combined_dict[key] = set()
             combined_dict[key].update(value)
 
-    print("\nCompleted training data selection")
+    print("\n[INFO] Completed training data selection")
     return combined_dict
 
     
@@ -402,15 +394,15 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
 
         # Check limits and file existence
         if num_sequences < min_seq:
-            print(f"Warning: Domain '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
+            print(f"[WARN] Sequences for '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
             continue  # Skip this domain
 
         if num_sequences > (max_seq + 5000):
-            print(f"Warning: Domain '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
+            print(f"[WARN] Sequences for '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
             continue  # Skip this domain
 
         if os.path.exists(output_file):
-            print(f"Skipping '{domain}', FASTA file already exists: {output_file}")
+            print(f"[SKIP] '{domain}', FASTA file already exists: {output_file}")
             continue  # Skip existing files
 
         # If all checks pass, add to tasks
@@ -463,9 +455,9 @@ def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_si
                     for protein_id, sequence in rows:
                         fasta_file.write(f">{protein_id}\n{sequence}\n")
                 except sqlite3.InterfaceError as e:
-                    print(f"SQL Error in domain {domain}: {e}")  # Debugging message
+                    print(f"[ERROR] SQL Error in domain {domain}: {e}")  # Debugging message
 
-    print(f"FASTA file saved: {fasta_file_path}")
+    print(f"[INFO] FASTA file saved: {fasta_file_path}")
 
 
 
@@ -516,7 +508,7 @@ def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit, max
             break
 
     if tie_count > 0:
-        print(f"Warning: max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
+        print(f"[WARN] max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
               f"with the same score ({last_score}) were included.")
 
     return domain, protein_ids
@@ -625,10 +617,8 @@ def fetch_domains_superfamily_to_fasta(options, directory):
 
             # Skip if the file already exists
             if os.path.isfile(output_fasta_path):
-                print(f"Skipping. File {output_fasta_path} already exists.")
+                print(f"[SKIP] File {output_fasta_path} already exists.")
                 continue
-            else:
-                print(f"{output_fasta_path} did not exist")
 
             # Fetch all proteins associated with this domain
             query = '''

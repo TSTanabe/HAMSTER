@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 import pickle
 from collections import defaultdict
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 
 
 class ReportObject:
@@ -38,16 +38,6 @@ def concatenate_cv_cutoff_files(directory, file_extension, output_file):
                         outfile.write(infile.read())
     return output_file
             
-def create_cutoff_file(options,cutoff_dict,directory,filename = "/thresholds.txt"):
-    file_path = directory + filename
-    with open(file_path, 'w') as file:
-        sorted_keys = sorted(cutoff_dict.keys())
-        for key in sorted_keys:
-            report = cutoff_dict[key]
-            file.write(key+"\t"+str(report.optimized_cutoff)+"\t"+str(report.trusted_cutoff)+"\t"+str(report.noise_cutoff)+"\n")        
-    
-    return file_path            
-
 def parse_matrices_to_report(directory,file_extension):
     report_dict = dict()  # List to store folder names
 
@@ -138,119 +128,6 @@ def calculate_mcc(confusion_matrix):
 
 
 
-
-
-
-def read_grouped_csb(filepath):
-    # Initialize an empty dictionary to store the data
-    data = {}
-
-    # Read the tab-separated file
-    with open(filepath, 'r') as f:
-        for line in f:
-            # Split each line by tabs
-            elements = line.strip().split('\t')
-            if elements:
-                key = elements[0]
-                values = elements[1:]
-                data[key] = values
-
-    return data
-
-
-
-
-def csbs_report(input_string,csbs):
-    key = "csb_"+str(input_string.split('csb', 1))
-    result = csbs.get(key, "")
-    return str(result)
-
-
-def print_report(filepath):
-
-    input_file_path = 'sets_output.txt'
-    output_file_path = 'output_result.txt'
-
-    with open(input_file_path, 'r') as input_file, open(output_file_path, 'w') as output_file:
-
-        for line in input_file:
-
-            
-            values = line.strip().split('\t')
-            set1, set2, set3 = map(set, values[1:3])
-
-            # Iterate through elements in each set
-            for current_set in [set2,set3]:
-                # Initialize a defaultdict to store the count of last parts
-                last_part_count = defaultdict(int)
-                # Initialize a dictionary to store sets with last parts as keys
-                sets_with_last_parts = dict()
-
-                for element in current_set:
-                    # Split the element by '**'
-                    split_parts = element.split('**')
-
-                    # Get the last part
-                    last_part = split_parts[-1]
-
-                    # Update the count of last parts
-                    last_part_count[last_part] += 1
-
-                    # Store the leading part in an anonymous set in the dictionary
-                    if last_part not in sets_with_last_parts:
-                        sets_with_last_parts[last_part] = {split_parts[0]}
-                    else:
-                        sets_with_last_parts[last_part].add(split_parts[0])
-
-                # Write the results to the output file to the output file
-                output_file.write("FALSE POSITIVE HITS:\n")
-                for last_part, count in last_part_count.items():
-                    output_file.write(f"\t{last_part} was found {count} times\n")
-                    output_file.write(f"protein IDs\t {last_part}: {leading_parts_set}")
-
-
-def concat_and_sort_files(input_dir, file_extension, output_dir, output_filename="concatenated_sorted.tsv"):
-    """
-    Recursively concatenates all files with the given extension in a directory and its subdirectories,
-    sorts the resulting file by the first and second columns, and saves it to the output directory.
-
-    Parameters:
-        input_dir (str): Directory to search for files.
-        file_extension (str): File extension to filter (e.g., ".txt").
-        output_dir (str): Directory to save the concatenated sorted file.
-        output_filename (str): Name of the output file. Default is 'concatenated_sorted.tsv'.
-
-    Returns:
-        str: Path to the resulting output file.
-    """
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Collect all matching files recursively
-    files_to_concat = []
-    for root, _, files in os.walk(input_dir):
-        for file in files:
-            if file.endswith(file_extension):
-                files_to_concat.append(os.path.join(root, file))
-
-    if not files_to_concat:
-        raise ValueError(f"No files with extension '{file_extension}' found in directory: {input_dir}")
-
-    # Read all lines from the matching files
-    all_lines = []
-    for file in files_to_concat:
-        with open(file, 'r') as f:
-            all_lines.extend(f.readlines())
-
-    # Sort lines by the first and second columns
-    sorted_lines = sorted(all_lines, key=lambda line: tuple(line.split("\t")[:2]))
-
-    # Write the sorted lines to the output file
-    output_file_path = os.path.join(output_dir, output_filename)
-    with open(output_file_path, 'w') as f:
-        f.writelines(sorted_lines)
-
-    return output_file_path
     
     
     
@@ -269,54 +146,6 @@ def concat_and_sort_files(input_dir, file_extension, output_dir, output_filename
 #######################################################################
 ##################    Hit report routines      ########################
 #######################################################################
-
-
-def load_and_process_hit_distributions(directory, database_directory):
-    """
-    Recursively searches for serialized hit_id_distribution objects in a given directory, 
-    loads them, and executes `hit_id_reports` in the same directory where the `.pkl` file was found.
-
-    Args:
-    - directory (str): The root directory where serialized `.pkl` files are stored.
-    - database_directory (str): Path to the database directory for `hit_id_reports`.
-
-    Returns:
-    - hit_distributions (dict): A dictionary where keys are HMM subfolder names 
-                                and values are their corresponding hit_id_distribution data.
-    """
-
-    hit_distributions = {}
-
-    # Walk through all subdirectories and files in the given directory
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith("_hit_id_distribution.pkl"):
-                file_path = os.path.join(root, file)
-                
-                # Extract the exact directory where the `.pkl` file is located
-                hmm_directory = os.path.dirname(file_path)  
-
-                # Extract the HMM subfolder name from the filename
-                hv_subfolder_name = os.path.basename(file).replace("_hit_id_distribution.pkl", "")
-
-                # Load the serialized data
-                with open(file_path, 'rb') as f:
-                    try:
-                        hit_id_distribution = pickle.load(f)
-                        hit_distributions[hv_subfolder_name] = hit_id_distribution
-                        print(f"Successfully loaded {hv_subfolder_name} from {file_path}")
-
-                        # Execute hit_id_reports using the exact directory where the `.pkl` was found
-                        hit_id_reports(hmm_directory, database_directory, [hit_id_distribution])
-                        print(f"Processed hit_id_reports for {hv_subfolder_name} in {hmm_directory}")
-
-                    except Exception as e:
-                        print(f"Error: Failed to load {file_path}: {e}")
-
-    return hit_distributions
-
-
-
 
 
 def write_report_to_file(cv_directory, dict_label, sorted_data):
@@ -398,93 +227,6 @@ def hit_id_reports(cv_directory, database, data):
 
         write_report_to_file(cv_directory, dict_label, sorted_data)
         write_report_to_iTolBinary(cv_directory, dict_label, sorted_data)
-
-    
-
-
-
-def fetch_neighbouring_genes_with_domains_deprecated(database, protein_ids):
-    """
-    Fetches neighboring genes for a list of proteinIDs based on clusterID and gene order,
-    and returns the neighboring genes with their domains. For proteinIDs without clusterID,
-    only the entry for the proteinID itself is returned.
-
-    Args:
-        database (str): Pathway to the database file.
-        protein_ids (list): List of proteinIDs to fetch neighbors for.
-
-    Returns:
-        dict: A dictionary where each key is a proteinID, and the value is a list of 
-              neighboring genes in the same cluster, sorted by gene start position, or
-              just the entry for the proteinID if it has no cluster.
-              Each list entry contains the domains and the proteinID in the format 
-              '_domain_proteinID'.
-    """
-    if not protein_ids:
-        return {}
-    
-    chunk_size = 900    
-    
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-        cluster_ids = set()
-        
-        # Step 1: Fetch all relevant proteinID, clusterIDs (chunked)
-        for i in range(0, len(protein_ids), chunk_size):
-            chunk = protein_ids[i:i + chunk_size]
-            placeholders = ','.join('?' * len(chunk))
-
-            cur.execute(f"SELECT DISTINCT clusterID FROM Proteins WHERE proteinID IN ({placeholders})", chunk)
-            cluster_ids.update(row[0] for row in cur.fetchall() if row[0] is not None)
-            
-            
-            
-        # Step 2: Fetch all proteins that belong to these clusters (chunked)
-        protein_results = []
-        for i in range(0, len(cluster_ids), chunk_size):
-            chunk = list(cluster_ids)[i:i + chunk_size]  # Convert set to list for slicing
-            placeholders = ','.join('?' * len(chunk))
-
-            query = f"""
-            SELECT p.proteinID, p.clusterID, p.genomeID, p.start, COALESCE(d.domain, 'no_domain')
-            FROM Proteins p
-            LEFT JOIN Domains d ON p.proteinID = d.proteinID
-            WHERE p.clusterID IN ({placeholders})
-            ORDER BY p.clusterID, p.start
-            """
-            cur.execute(query, chunk)
-            protein_results.extend(cur.fetchall())
-
-
-    # Step 3: Organize results efficiently
-    cluster_dict = defaultdict(list)
-    protein_cluster_map = {}
-
-    for protein_id, cluster_id, genome_id, start, domain in protein_results:
-        domain_entry = f"{domain}_{protein_id}"
-        if cluster_id:
-            cluster_dict[cluster_id].append((start, domain_entry))
-            protein_cluster_map[protein_id] = cluster_id
-        else:
-            protein_cluster_map[protein_id] = None  # No cluster assigned
-
-    # Step 4: Sort by start position
-    for cluster_id in cluster_dict:
-        cluster_dict[cluster_id].sort()  # Sort by tuples first value: `start` position
-
-
-    # Step 5: Construct final output
-    neighbors_dict = {}
-    for protein_id in protein_ids:
-        cluster_id = protein_cluster_map.get(protein_id)
-        if cluster_id:
-            neighbors_dict[protein_id] = [protein for _, protein in cluster_dict[cluster_id]]
-        else:
-            neighbors_dict[protein_id] = [f"singleton_{protein_id}"]
-
-    return neighbors_dict
-
-
 
 
 ##############################################################################

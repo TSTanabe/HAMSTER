@@ -61,14 +61,14 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     
     if not grouped_3_dict:
         grouped_3_dict = {}
-        print("Selection truncated csb")
+        print("[INFO] Selecing sequences from mcl clusters with truncated csb")
         for i, (domain, mcl_file) in enumerate(mcl_clustering_results_dict.items(), 1):
-            print(f"[{i}/{total}] Processing domain: {domain}")
+            print(f"  [{i}/{total}] Processing: {domain}")
 
             # Get reference sequences for the domain (if exists in processed reference dict)
             reference_sequences = processed_reference_dict.get(domain, set())
             if not reference_sequences:
-                print(f"Warning: No reference sequences found for domain '{domain}', skipping.")
+                print(f"[WARN] No reference sequences found for domain '{domain}', skipping.")
                 continue
             
             mcl_cluster_protID_set = select_ref_seq_mcl_sequences(mcl_file, domain, reference_sequences)
@@ -85,12 +85,13 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
             grouped_3_dict[domain] = filtered_proteinIDs
 
     
-    print("Selection by PAM matrix")
+    print("[INFO] Selecing sequences from mcl clusters with plausible presence in the genome")
     # Select the proteins with plausible PAM
     if not grouped_4_dict:
-        grouped_4_dict = select_proteins_with_plausible_pam_from_mcl(options.database_directory, processed_reference_dict, extended_grouped, options.cores)
+        grouped_4_dict = select_proteins_with_plausible_pam_from_mcl(options.database_directory, options.pam_threshold, processed_reference_dict, extended_grouped, options.cores)
     
     # Print statistics on selection to the terminal
+    print("[INFO] Extended reference sequence datasets")
     log_all_mcl_cluster_statistics(processed_reference_dict, extended_grouped, grouped_3_dict, grouped_4_dict)
     
     merged_dict = myUtil.merge_grouped_refseq_dicts_simple(grouped_3_dict,grouped_4_dict)
@@ -223,9 +224,7 @@ def select_seqs_with_truncated_csb_vicinity(database_path, protein_ids, common_d
 
 
 
-def select_proteins_with_plausible_pam_from_mcl(database_path, basis_grouped, extended_grouped, cores, chunk_size=900):
-
-    pam_plausible_all = {}
+def select_proteins_with_plausible_pam_from_mcl(database_path, pam_threshold, basis_grouped, extended_grouped, cores, chunk_size=900):
 
     # 1. Basis PAM berechnen
     global_pam = Pam_Mx_algorithm.create_presence_absence_matrix(
@@ -256,7 +255,7 @@ def select_proteins_with_plausible_pam_from_mcl(database_path, basis_grouped, ex
     # 4. Calculate plausibility for the extended proteinIDs from the MCL
     extended_bsr_hit_scores = Pam_Mx_algorithm.fetch_bsr_scores(database_path, extended_grouped, chunk_size=chunk_size)
     
-    plausible_genomes_df = validate_existing_domains_with_models(database_path, extended_pam, models, extended_bsr_hit_scores, cutoff=0.5) #cutoff muss noch festgelegt werden
+    plausible_genomes_df = validate_existing_domains_with_models(database_path, extended_pam, models, extended_bsr_hit_scores, pam_threshold) #cutoff muss noch festgelegt werden
     
     
     # 5. Extract the proteinIDs from the PAM for each genome with a plausible hit
@@ -347,127 +346,6 @@ def extract_proteinIDs_from_plausible_predictions(plausible_results, extended_pa
 
 
 
-def dead_code():
-    # Define intermediate file paths
-    grp1_matrix_filepath = os.path.join(options.result_files_directory, "grp1_presence_absence_matrix.tsv")
-
-    basis_matrix_filepath = os.path.join(options.result_files_directory, "basis_presence_absence_matrix.tsv")
-
-    # Step 1: Create presence/absence matrix for grp0 as basis co-occurence
-    if not os.path.isfile(basis_matrix_filepath):
-        create_presence_absence_matrix(
-            faa_dir=options.fasta_output_directory,
-            database_directory=options.database_directory,
-            output_path=basis_matrix_filepath,
-            chunk_size=990,
-            extensions=(".faa",), # has to be a tuple
-            prefixes=("grp0",), # has to be a tuple
-            cores = options.cores
-        )
-
-    # Step 2: Create presence/absence matrix for grp1
-    if not os.path.isfile(grp1_matrix_filepath):
-        create_presence_absence_matrix(
-            faa_dir=options.fasta_output_directory,
-            database_directory=options.database_directory,
-            output_path=grp1_matrix_filepath,
-            chunk_size=990,
-            extensions=(".faa",), # has to be a tuple
-            prefixes=("grp1",), # has to be a tuple
-            cores = options.cores
-        )
-
-    # Step 2.5 check if presence absence matrices are available
-    basis_exists = os.path.isfile(basis_matrix_filepath)
-    grp1_exists = os.path.isfile(grp1_matrix_filepath)
-
-    basis_nonempty = os.path.getsize(basis_matrix_filepath) > 0 if basis_exists else False
-    grp1_nonempty = os.path.getsize(grp1_matrix_filepath) > 0 if grp1_exists else False
-
-    if basis_exists and basis_nonempty and grp1_exists and grp1_nonempty:
-        print("Presence/absence matrices generated and non-empty")
-    else:
-        print("WARNING: Presence/absence matrices missing or empty. Cannot proceed.")
-
-        if not basis_exists:
-            print(f"Missing file: {basis_matrix_filepath}")
-        elif not basis_nonempty:
-            print(f"File is empty: {basis_matrix_filepath}")
-
-        if not grp1_exists:
-            print(f"Missing file: {grp1_matrix_filepath}")
-        elif not grp1_nonempty:
-            print(f"File is empty: {grp1_matrix_filepath}")
-
-        return
-    
-    
-    # Step 3: Learn regression from grp0 hit distribution and check grp1 hits
-    # Conservative with new hits against base grp0 hits in the genome
-    #grp1_non_plausible_hits = check_new_presences(basis_matrix_filepath,grp1_matrix_filepath) # Learn from base and check individually new hits against genome base hits
-    #protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
-# 
-    # Liberal with new hits against base grp0 hits in the genome + new hits in the genome
-    grp1_non_plausible_hits = myUtil.load_cache(options, "grp1_non_plausible_hits.pkl")
-    protein_mapping = myUtil.load_cache(options, "grp1_protein_mapping.pkl")
-    if not grp1_non_plausible_hits or not protein_mapping:
-        print("\nCalculating logistic regression of grp0 presence/absence matrix")
-        grp1_non_plausible_hits = check_new_presences_with_combined_context(
-            basis_matrix_filepath,
-            grp1_matrix_filepath,
-            options.pam_threshold
-        )
-        protein_mapping = extract_protein_ids_for_hits(grp1_matrix_filepath, grp1_non_plausible_hits)
-
-        myUtil.save_cache(options, "grp1_non_plausible_hits.pkl", grp1_non_plausible_hits)
-        myUtil.save_cache(options, "grp1_protein_mapping.pkl", protein_mapping)
-
-    grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
-    basis_hits_dict = extract_domain_to_proteins(basis_matrix_filepath)
-    unplausible_hits_dict = invert_protein_mapping_by_domain(protein_mapping)
-
-
-    print("\nSelection of grp1 training sequence by computed regression of the presence/absence matrix of grp0")
-    summarize_domain_filtering(grp1_hits_dict, basis_hits_dict, unplausible_hits_dict)
-    
-    # Step 4: Check unplausible hits in the phylogenetic tree
-    print("\nCross-check of included training sequences by phylogenetic placement")
-
-    cache_name = f"grp2_included_hits_pd_{options.pam_phylogenetic_distance}.pkl"
-
-    include_hits_dict = myUtil.load_cache(options, cache_name)
-    if not include_hits_dict:
-        grp1_hits_dict = extract_domain_to_proteins(grp1_matrix_filepath)
-
-        include_hits_dict, exluded_hits_dict = Csb_phylogeny.analyze_unplausible_proteins_in_trees_parallel(
-            options.phylogeny_directory,
-            unplausible_hits_dict,
-            grp1_hits_dict,
-            options.pam_long_branch_thres,
-            options.pam_phylogenetic_distance,
-            options.cores
-        )
-
-        # proteinIDs in included hits set are below threshold distance to a plausible grp1 sequence
-        myUtil.save_cache(options, cache_name, include_hits_dict)
-
-    # Delete the included hits from the unplausible dict
-    for domain, included_proteins in include_hits_dict.items():
-        if domain in unplausible_hits_dict:
-            unplausible_hits_dict[domain] -= included_proteins
-            # Clean up domains with empty sets
-            if not unplausible_hits_dict[domain]:
-                del unplausible_hits_dict[domain]
-    
-    # Print out the number of excluded sequences
-    print("\nSelection of grp1 training sequence by computed regression of the presence/absence matrix and phylogenetic placement")
-    summarize_domain_filtering(grp1_hits_dict, basis_hits_dict, unplausible_hits_dict)
-
-    # Step 5: Copy grp1 files without unplausible proteinIDs to the grp2 files
-    print("\nWriting grp0 and included grp1 sequences to grp2 fasta files")
-    write_plausible_fasta_sequences(options.fasta_output_directory, unplausible_hits_dict, options.fasta_output_directory)
-    
-    return
 
 
 
@@ -487,7 +365,6 @@ def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, groupe
         mcl_cluster_protID_set = cluster_proteins_dict.get(domain, set())
         group3_set = grouped_3_dict.get(domain, set())
         group4_set = grouped_4_dict.get(domain, set())
-        union_set = group3_set | group4_set
 
         total_clusters_with_refs = len(mcl_cluster_protID_set)
         total_reference_count = len(reference_sequences)

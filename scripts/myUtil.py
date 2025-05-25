@@ -222,13 +222,17 @@ def remove_directory(directory_path):
                 dir_path = os.path.join(root, dir)
                 os.rmdir(dir_path)  # Remove empty subdirectory
         os.rmdir(directory_path)  # Remove the main directory itself
-        print(f"Removed directory and all its contents: {directory_path}")
+        print(f"[INFO] Removed directory and all its contents: {directory_path}")
     else:
-        print(f"Directory does not exist: {directory_path}")
+        print(f"[INFO] Directory does not exist: {directory_path}")
         
 
-def save_cache(options, name, data):
+def save_cache(options, name, data, redirect=None):
+
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
+    if redirect:
+        cache_dir = redirect
+
     os.makedirs(cache_dir, exist_ok=True)  # sicherer als os.system(mkdir ...)
 
     file_path = os.path.join(cache_dir, name)
@@ -239,12 +243,14 @@ def save_cache(options, name, data):
         pickle.dump(data, f)
 
 
-def load_cache(options, name):
+def load_cache(options, name, file_path = None):
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
-    file_path = os.path.join(cache_dir, name)
 
+    if not file_path:
+        file_path = os.path.join(cache_dir, name)
+    
     if os.path.exists(file_path):
-        print(f"Loading from cache: {name}")
+        print(f"[LOAD] Loading from cache: {name}")
         with open(file_path, "rb") as f:
             return pickle.load(f)
     else:

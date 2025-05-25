@@ -8,7 +8,6 @@ import sqlite3
 from . import Database
 from . import Csb_Mp_Algorithm
 from scipy.spatial import distance
-from sklearn.cluster import DBSCAN
 from sklearn.cluster import AgglomerativeClustering
 from collections import defaultdict
 
@@ -288,7 +287,7 @@ def jaccard(set1,set2):
             set1 = set(set1)
             set2 = set(set2)
         except Exception as e:
-            print("An error occurred while converting to sets for jaccard clustering of csb:", e)
+            print("[ERROR] An error occurred while converting to sets for jaccard clustering of csb:", e)
             return 0
             
     intersection = len(set1.intersection(set2))
@@ -411,31 +410,6 @@ def csb_collapse_to_longest_pattern(input_dict):
 
     return filtered_dict
 
-######################################################################
-################ For proteinID clustering ############################
-################ in Csb_proteins          ############################
-######################################################################
-
-def apply_dbscan_on_similarity_matrix(similarity_matrix, eps=0.5, min_samples=2):
-    """
-    Applies DBSCAN clustering on a Jaccard similarity matrix.
-
-    Args:
-        similarity_matrix (numpy.ndarray): A square matrix of Jaccard similarities between sets.
-        eps (float): The maximum distance between two points to be considered as neighbors.
-        min_samples (int): The minimum number of points required to form a cluster.
-
-    Returns:
-        numpy.ndarray: An array of cluster labels, where -1 indicates noise.
-    """
-    # Step 1: Convert similarity matrix to distance matrix (1 - similarity)
-    distance_matrix = 1 - similarity_matrix
-
-    # Step 2: Apply DBSCAN with the precomputed distance matrix
-    dbscan = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
-    labels = dbscan.fit_predict(distance_matrix)
-
-    return labels    
 
 
 

@@ -118,8 +118,6 @@ def merge_dicts_of_sets(dict1, dict2):
 
     all_keys = set(dict1) | set(dict2)  # Vereinigung aller Keys
     for key in all_keys:
-        print(dict1.get(key, set()))
-        print(dict2.get(key, set()))
         merged[key] = dict1.get(key, set()) | dict2.get(key, set())
 
     return merged
@@ -130,7 +128,7 @@ def report_added_only_counts(grp1_merged_dict, grp1_added_reference_seq_dict, gr
         basis_set = grp1_basis_grouped_dict.get(key, set())
 
         added_only = added_set - basis_set
-        print(f"[INFO] For {key}: {len(added_only)} sequences were added due to the presence absence matrix")
+        print(f"[INFO] {len(added_only)} {key} sequences were added due to the presence absence matrix")
 
 
 

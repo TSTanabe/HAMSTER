@@ -3,8 +3,6 @@
 import os
 import sys
 import argparse
-import pprint
-#from datetime import datetime
 
 from . import Project
 from . import Queue
@@ -15,20 +13,19 @@ from . import ParallelSearch
 
 from . import Csb_cluster
 from . import Csb_proteins
-from . import Csb_phylogeny
 from . import Csb_statistic
 from . import Csb_mcl
 
 from . import Alignment
-
 from . import Validation
-from . import Reports
 from . import myUtil
 
 from . import Pam_Singleton_finder
 from . import Pam_defragmentation
 from . import Pam_mcl
 
+from . import Reports_plotting
+from . import Reports
 
 if getattr(sys, 'frozen', False):
     __location__ = os.path.split(sys.executable)[0]
@@ -56,8 +53,6 @@ class Options:
 
         self.sequence_faa_file = None #dictionary to the target files for the validation
         self.reports = dict()
-        self.standard_cutoff_report_file = None
-        self.standard_performance_report_file = None
         
         self.csb_name_prefix = "csb-" #prefix of clusterIDs determined by csb finder algorithm
         self.csb_name_suffix = "_" #suffix of clusterIDs determined by csb finder algorithm
@@ -65,8 +60,6 @@ class Options:
         self.self_query = None #Query fasta like concatenated fasta
         self.self_seqs = None #Query sequences
 
-        self.MCC_threshold = 0.8 #TODO move this to options, below this threshold the HMMs are not validated to save runtime
-        
         self.deconcat_flag = 0 #Memorize if a deconcatenation was done
         self.glob_flag = 0 #Memorize if a concatenation was done
         
@@ -81,7 +74,7 @@ def parse_arguments(arguments):
     parser.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Query sequences fasta file')
 
     resources = parser.add_argument_group("Optional parameters")
-    resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9], metavar='<int>', help='Start at stage')
+    resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='Start at stage')
     resources.add_argument('-x', dest='end', type=int, default = 10, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='End at stage')
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file')
@@ -135,12 +128,12 @@ def parse_arguments(arguments):
     csb.add_argument('-no_mcl', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
     csb.add_argument('-exclude_csb_hitscore', dest='low_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Exclude csb with all hits below this deviation from the query self-hits. Default: 0.3')
     csb.add_argument('-group_csb_hitscore', dest='group_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Group hits from csb above this deviation from the query self-hit. Default: 0.3')
-    csb.add_argument('-distant_homologs', dest='sglr', action='store_true', help='Include alignments for distantly related proteins with conserved genomic vicinity')
     csb.add_argument('-csb_singleton_correlation', dest='csb_singleton_correlation', type=float,default = 0.3, metavar='<float>', help='Required correlation of singletons to existing csb. Default: 0.5')
 
     pam_search = parser.add_argument_group("Optional presence/absence matrix parameters")
     pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.3, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]. Default: 0.3')
     pam_search.add_argument('-mx_bsr', dest='pam_bsr_threshold', type=float, default=0.6, metavar = '<float>', help='Blast score ratio inclusion cutoff from PAM prediction [0.0,1.0]. Default: 0.6')
+    
     #pam_search.add_argument('-mx_long_branch_thrs', dest='pam_long_branch_thres', type=float, default=0.5, metavar = '<float>', help='Do not consider hits with this branch length in the phylogenetic tree. Default: 0.5')
     #pam_search.add_argument('-mx_max_phylo_distance', dest='pam_phylogenetic_distance', type=float, default=0.05, metavar = '<float>', help='Max. phylogenetic distance to reference sequence. Default: 0.05')
 
@@ -205,13 +198,13 @@ def fasta_preparation(options):
     
    
     if not options.glob_search:
-        print("Not concatenating protein fasta files")
+        print("[INFO] Not concatenating protein fasta files")
         Queue.queue_files(options)
         return
     
     # Concatenate the fasta files, in case of a glob fasta file is provided deconcat it
     if options.glob_faa and options.glob_gff:
-        print(f"Preparing separate files from {options.glob_faa}")
+        print(f"[INFO] Preparing separate files from {options.glob_faa}")
         #create separated files
         Translation.deconcat(options)
         Queue.queue_files(options)
@@ -225,9 +218,9 @@ def fasta_preparation(options):
         # concat to to globfile if search results are not already provided
         Queue.queue_files(options)
         if not options.glob_table:
-            print("Generating concatenated glob faa file", end="\r")
+            print("[INFO] Generating concatenated glob faa file", end="\r")
             Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier
-            print("Generating concatenated glob faa file -- ok")
+            print("[INFO] Generating concatenated glob faa file -- ok")
             options.glob_flag = 1   
     
     # Create self query file
@@ -279,7 +272,7 @@ def basis_sequence_fasta(options):
     grp_score_limit_dict, grouped = Csb_proteins.prepare_csb_grouped_training_proteins(options)
     
     ### Collect singletons without any conserved csb
-    print("\n\nCollecting highly similar homologs from query hits without any conserved genomic context")
+    print("\n\n[INFO] Collecting highly similar homologs from query hits without any conserved genomic context")
     sng_score_limit_dict, sng_ref_seqs_dict = Pam_Singleton_finder.singleton_reference_finder(options, grouped) #Very strict reference seqs with 0.95 blast score ratio
 
     # Merge groups and limits from csb and sng
@@ -341,12 +334,12 @@ def mcl_family_clustering_sequences(options):
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
 
-    print("Including homologs without genomic context based on protein sequence phylogeny")
-    print("Generating protein family fasta files")
+    print("\n[INFO] Including homologs without genomic context based on protein sequence clustering")
+    print("[INFO] Generating protein family fasta files")
     Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
         
     # Markov chain clustering for grp1 fasta files
-    print("\nCalculating Markov Chain Clustering")            
+    print("\n[INFO] Calculating Markov Chain Clustering")            
     mcl_clustering_results_dict = Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
 
     myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict)
@@ -362,8 +355,12 @@ def mcl_decorate_training_sequences(options):
     mcl_clustering_results_dict = options.mcl_clusterin_results_dict if hasattr(options, 'mcl_clusterin_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
     
     # MCL cluster analysis, cluster selection with F1 optimized density for basic grouped sequences
-    extended_grouped = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, grouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    print("\n[INFO] Generating grp1: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
+    extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, grouped, options.mcl_density_thrs, options.mcl_reference_thrs)
     extended_grouped_prefixed = {f"grp1_{key}": value for key, value in extended_grouped.items()}
+
+    # Save the mcl cluster selection cutoffs    
+    myUtil.save_cache(options, 'mcl_grp1_cluster_selection_cutoffs.pkl', mcl_cutoffs)
     
     # Write down the extended
     Csb_proteins.fetch_seqs_to_fasta_parallel(
@@ -375,12 +372,20 @@ def mcl_decorate_training_sequences(options):
             options.cores
         )
     
+    print("\n[INFO] Generating grp2: Extended MCL cluster selection by csb and presence plausibility")
     # MCL cluster analysis with pam and csb selection
     regrouped = Pam_mcl.select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, grouped)
     
+    # Save the regrouped reference seqs used to select inclusion of the grp2 mcl clusters
+    myUtil.save_cache(options, 'grp2_selection_ref_seqs.pkl', regrouped)
+    
     # MCL cluster analysis, cluster selection with F1 optimized density for extended grouped
-    extended_grouped = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
     extended_grouped_prefixed = {f"grp2_{key}": value for key, value in extended_grouped.items()}
+    
+    # Save the mcl cluster selection cutoffs
+    myUtil.save_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl', mcl_cutoffs)
+    
     # Write down the extended
     Csb_proteins.fetch_seqs_to_fasta_parallel(
             options.database_directory,
@@ -451,10 +456,11 @@ def cross_validation(options):
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
     
     options.targeted_sequence_faa_file_dict = Validation.get_target_sets(options.cross_validation_directory)
-    
 
-    print(f"From {options.cross_validation_directory} the following target files were selected {options.targeted_sequence_faa_file_dict}")
+    Validation.initial_self_recognition_validation(options)
     
+    if options.cross_validation_deactivated:
+        return
     Validation.parallel_cross_validation(options)
 
     return
@@ -464,21 +470,17 @@ def report_cv_performance(options):
     #Initial validation
     print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
     
-    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_MCC.txt', options.Hidden_markov_model_directory, "_ini_performance_matrices.txt")
+    Reports_plotting.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
     
-    Reports.concat_and_sort_files(options.fasta_alignment_directory, '_thresholds.txt', options.Hidden_markov_model_directory, "_ini_cutoffs.txt")
-    
-
     #cross validation
     print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
     
     options.reports = Reports.parse_matrices_to_report(options.cross_validation_directory,"_cv_matrices.txt")
     
-    options.standard_performance_report_file = Reports.create_performance_file(options,options.reports,options.Hidden_markov_model_directory,"/cutoff_performance.txt")
+    Reports.create_performance_file(options,options.reports,options.Hidden_markov_model_directory,"/cv_cutoff_performance.txt")
     
-    options.strict_cutoff_report_file = Reports.concatenate_cv_cutoff_files(options.cross_validation_directory, "_cv_thresholds.txt", options.Hidden_markov_model_directory+"/strict_cutoffs.txt")
+    Reports.concatenate_cv_cutoff_files(options.cross_validation_directory, "_cv_thresholds.txt", options.Hidden_markov_model_directory+"/cv_strict_cutoffs.txt")
 
-    Reports.load_and_process_hit_distributions(options.fasta_alignment_directory, options.database_directory)
 
 
 
@@ -521,8 +523,6 @@ def main(args=None):
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
         basis_sequence_fasta(options)
-        # Generates dict with grp0_ : set(proteinIDs)
-        #TODO vielleicht auch eigener step
         pam_defragmentation(options)
 
 #6
@@ -530,8 +530,6 @@ def main(args=None):
         myUtil.print_header("\n 6. Markov chain clustering for protein family sequences")
         mcl_family_clustering_sequences(options)
         
-        
-
 #7   
     if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 7. Selecting MCL clusters with reference sequences")
@@ -547,12 +545,13 @@ def main(args=None):
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
     if options.stage <= 9 and options.end >= 9:
-        myUtil.print_header("\n 7. Performing cross valdation procedure")
+        myUtil.print_header("\n 9. Performing cross valdation procedure")
         cross_validation(options)
 
 #10  
     #mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
     if options.stage <= 10 and options.end >= 10:
+        myUtil.print_header("\n 10. Writing dataset performance reports")
         report_cv_performance(options)
     
     
