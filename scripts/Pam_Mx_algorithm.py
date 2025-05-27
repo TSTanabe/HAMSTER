@@ -213,7 +213,7 @@ def create_presence_absence_matrix(proteinID_sets, database_directory, output, c
             for domain, pid in domain_prot_pairs:
                 genome_domain_matrix[genome_id][domain].append(pid)
     
-    write_pam_to_tsv(genome_domain_matrix, "/home/tomohisa/BioprojectHazel/HAMSTER/test_log.txt")
+    #write_pam_to_tsv(genome_domain_matrix, "/home/tomohisa/BioprojectHazel/HAMSTER/test_log.txt") debugging
     return genome_domain_matrix
 
 def write_pam_to_tsv(pam, output_path):
