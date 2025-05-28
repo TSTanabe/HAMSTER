@@ -362,7 +362,40 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
     
     return output_results_tab
 
+def validate_mcl_cluster_paths(path_dict, result_files_directory):
+    """
+    Validates a dictionary of {key: path_to_mcl_file}. For each path:
+    - If the file exists: keep it.
+    - If not: try looking in result_files_directory/Protein_Phylogeny/.
+    - If that works, update the path.
+    - If neither exists, remove the entry.
 
+    Args:
+        path_dict (dict): Dictionary with keys (e.g., domain names) and values as file paths.
+        result_files_directory (str): Root directory to search fallback file under 'Protein_Phylogeny'.
+
+    Returns:
+        dict: Filtered and updated dictionary with only valid paths.
+
+    Raises:
+        FileNotFoundError: If no valid MCL files are found.
+    """
+    validated = {}
+
+    for key, path in path_dict.items():
+        if os.path.isfile(path):
+            validated[key] = path
+        else:
+            fallback_path = os.path.join(result_files_directory, "Protein_Phylogeny", os.path.basename(path))
+            if os.path.isfile(fallback_path):
+                validated[key] = fallback_path
+            else:
+                print(f"[WARN] No valid MCL file for {key}: '{path}' or fallback '{fallback_path}'")
+
+    if not validated:
+        raise FileNotFoundError("No valid MCL cluster files found in any specified or fallback location.")
+
+    return validated
 
 
 
