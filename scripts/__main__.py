@@ -361,6 +361,7 @@ def mcl_family_clustering_sequences(options):
     
 def mcl_decorate_training_sequences(options):
 
+    # Load the grp1 refseqs that are used to select MCL clusters   
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
     mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
@@ -487,7 +488,7 @@ def report_cv_performance(options):
     mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
     
     mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
-    print(mcl_clustering_results_dict)
+
     myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
     
     Reports_printing.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)

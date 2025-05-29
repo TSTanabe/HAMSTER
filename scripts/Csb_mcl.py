@@ -186,10 +186,10 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
         
         # Get fallback values if thresholds were not provided
         if local_density_thrs is None:
-            print("[WARN] MCL density threshold was not calculated for {domain}, fallback 0.1")
+            print(f"[WARN] MCL density threshold was not calculated for {domain}, fallback 0.1")
             local_density_thrs = 0.1
         if local_reference_thrs is None:
-            print("[WARN] MCL reference threshold was not calculated for {domain}, fallback 0.001")
+            print(f"[WARN] MCL reference threshold was not calculated for {domain}, fallback 0.001")
             local_reference_thrs = 0.01
         
         
@@ -233,6 +233,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
     n_ref_total = len(reference_sequences)
 
     if n_ref_total == 0:
+        print("[WARN] No reference sequence provided")
         return fixed_density_threshold,fixed_reference_threshold
 
     cluster_metrics = []
@@ -243,6 +244,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
         non_ref_count = cluster_size - ref_count
 
         if cluster_size == 0 or ref_count == 0:
+            print("[WARN] No reference sequence in cluster found")
             continue
 
         ref_ratio_in_cluster = ref_count / cluster_size
@@ -297,44 +299,40 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
     """
     Processes a single MCL output file and extracts high-density clusters.
 
-    Args:
-    - mcl_file (str): Path to the MCL output file.
-    - domain (str): Domain name associated with the MCL file.
-    - reference_sequences (set): Set of reference sequence IDs for this domain.
-    - density_threshold (float): Minimum reference density required in the cluster.
-    - reference_fraction_threshold (float): Minimum fraction of reference sequences required in the cluster.
-
     Returns:
     - cluster_dict (dict): Dictionary where keys are "mcl_X_domain" and values are sets of sequence IDs.
     """
 
     cluster_dict = {}
-    cluster_index = 1  # Start index for cluster naming
+    cluster_index = 1
 
     # Read MCL file and process clusters
     with open(mcl_file, "r") as f:
         for line in f:
-            seqs = set(line.strip().split())  # Convert line to a set of sequences
+            seqs = set(line.strip().split())
 
-            # Compute reference sequence statistics
-            ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
-            cluster_size = len(seqs) # absoulte number of sequences in the cluster
-            ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequences in the current mcl cluster
-            ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
+            ref_count = len(seqs & reference_sequences)
+            cluster_size = len(seqs)
+            ref_density = ref_count / cluster_size if cluster_size > 0 else 0
+            ref_fraction = ref_count / len(reference_sequences) if reference_sequences else 0
 
-            # Store clusters that exceed both thresholds
             if ref_density >= density_threshold and ref_fraction >= reference_fraction_threshold:
                 cluster_dict[f"mcl{cluster_index}_{domain}"] = seqs
                 cluster_index += 1
 
+    # Berechne alle enthaltenen Sequenzen in den akzeptierten Clustern
+    all_cluster_seqs = set()
+    for seqs in cluster_dict.values():
+        all_cluster_seqs.update(seqs)
 
-    total_seqs = sum(len(seqs) for seqs in cluster_dict.values())
-    new_seqs = total_seqs - len(reference_sequences)
+    ref_in_clusters = all_cluster_seqs & reference_sequences
+    new_candidates = all_cluster_seqs - reference_sequences
 
     print(f"  Reference sequences provided:    {len(reference_sequences)}")
-    print(f"  Total sequences in kept clusters:{total_seqs}")
-    print(f"     ├─ from references:           {len(reference_sequences)}")
-    print(f"     └─ newly selected sequences:  {new_seqs}")
+    print(f"  Total sequences in kept clusters:{len(all_cluster_seqs)}")
+    print(f"     ├─ from references:           {len(ref_in_clusters)}")
+    print(f"     └─ newly selected sequences:  {len(new_candidates)}")
+
     return cluster_dict
 
 

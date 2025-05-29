@@ -10,6 +10,7 @@ from collections import defaultdict
 
 from . import Pam_Mx_algorithm
 from . import Csb_proteins
+from . import Reports # wäre vielleicht sinnvoll die nieghbourhood routinen wo anders hin zu verschieben
 from . import myUtil
 
 
@@ -40,9 +41,9 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     """
 
 
-    grouped_3_dict = myUtil.load_cache(options,'mcl_truncated_csb_hits.pkl')
-    grouped_4_dict = myUtil.load_cache(options,'mcl_PAM_plausible_hits.pkl')
-    extended_grouped = myUtil.load_cache(options,'mcl_PAM_csb_merged_hits.pkl')
+    grouped_3_dict = myUtil.load_cache(options,'mcl2_truncated_csb_hits.pkl')
+    grouped_4_dict = myUtil.load_cache(options,'mcl2_PAM_plausible_hits.pkl')
+    extended_grouped = myUtil.load_cache(options,'mcl2_PAM_csb_merged_hits.pkl')
 
     if extended_grouped:
         return extended_grouped
@@ -55,8 +56,6 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
         key.split("_", 1)[-1]: value for key, value in basis_grouped.items()
     }
 
-    common_domains = mcl_clustering_results_dict.keys()
-    
     total = len(mcl_clustering_results_dict)
     
     if not grouped_3_dict:
@@ -71,6 +70,13 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
                 print(f"[WARN] No reference sequences found for domain '{domain}', skipping.")
                 continue
             
+            # Get the common gene cluster vicinity (presence without order or doublication)
+            common_gene_vicinity = myUtil.load_cache(options,f"mcl_common_gene_vicinity_{domain}.pkl")
+            if not common_gene_vicinity:
+                common_gene_vicinity = select_gene_cluster_vicinity_domains(options.database_directory,reference_sequences)
+                myUtil.save_cache(options,f"mcl_common_gene_vicinity_{domain}.pkl",common_gene_vicinity)
+                
+            
             mcl_cluster_protID_set = select_ref_seq_mcl_sequences(mcl_file, domain, reference_sequences)
             
             # Save for later use in the PAM calculation
@@ -81,7 +87,7 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
 
 
             # Select the proteins with a truncated csb, that fits the other csbs
-            filtered_proteinIDs = select_seqs_with_truncated_csb_vicinity(options.database_directory, new_proteinID_set, common_domains)
+            filtered_proteinIDs = select_seqs_with_truncated_csb_vicinity(options.database_directory, new_proteinID_set, common_gene_vicinity)
             grouped_3_dict[domain] = filtered_proteinIDs
 
     
@@ -213,13 +219,43 @@ def select_seqs_with_truncated_csb_vicinity(database_path, protein_ids, common_d
             domains_in_cluster = set()
             for neighbor in neighbor_proteins:
                 domains_in_cluster.update(protein_to_domains.get(neighbor, set()))
-
-            if domains_in_cluster.issubset(common_domains):
+            
+            # Vergleich: domains_in_cluster ⊆ common_domains[i]
+            if any(domains_in_cluster.issubset(domain_set) for domain_set in common_domains):
                 selected.add(pid)
 
     return selected
 
+#############################################################################################################
 
+def select_gene_cluster_vicinity_domains(db_path, hit_ids):
+    """
+    Selects for each input proteinID the gene cluster and returns
+    Example return structure are sets containing the genes of a gene cluster in a big set
+    with all the gene lcuster sets
+    
+    """
+    neighbors, _ = Reports.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
+    
+    # Collapse the neighbourhoods by similarity
+    
+    unique_clusters = set()
+
+    for cluster in neighbors.values():
+
+        # Without genomic context no entry
+        if cluster == [["singleton"]]:
+            continue
+        # Gene cluster in correct order
+        flattened = frozenset(domain for gene in cluster for domain in gene)
+        unique_clusters.add(flattened)
+        
+    return unique_clusters
+
+
+
+    
+        
 #############################################################################################################
 
 
@@ -352,13 +388,7 @@ def extract_proteinIDs_from_plausible_predictions(plausible_results, extended_pa
 def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, grouped_3_dict, grouped_4_dict):
     """
     Print selection statistics for all domains based on MCL clustering, including
-    final merged set composition per domain.
-
-    Args:
-        reference_dict (dict): {domain: set of reference proteinIDs}
-        cluster_proteins_dict (dict): {domain: set of all proteinIDs from clusters with refs}
-        grouped_3_dict (dict): {domain: set of selected proteinIDs}
-        grouped_4_dict (dict): {domain: set of selected proteinIDs}
+    final merged set composition per domain. Uses actual set membership to avoid negative counts.
     """
     for domain in reference_dict:
         reference_sequences = reference_dict.get(domain, set())
@@ -368,23 +398,31 @@ def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, groupe
 
         total_clusters_with_refs = len(mcl_cluster_protID_set)
         total_reference_count = len(reference_sequences)
-        total_new_hits = len(mcl_cluster_protID_set - reference_sequences)
+        true_new_hits = mcl_cluster_protID_set - reference_sequences
+        total_new_hits = len(true_new_hits)
 
+
+        # Final merged set
         final_merged_set = reference_sequences | group3_set | group4_set
-        ref_in_final = len(reference_sequences)
-        grp3_in_final = len(group3_set - reference_sequences)
-        grp4_in_final = len(group4_set - reference_sequences - group3_set)
+
+        # Detaillierte Zusammensetzung
+        ref_part = final_merged_set & reference_sequences
+        grp3_grp4_part = final_merged_set & group3_set & group4_set - reference_sequence
+        grp3_part = final_merged_set & group3_set - reference_sequences - group4_set
+        grp4_part = final_merged_set & group4_set - reference_sequences - group3_set
 
         print(f"\n[{domain}]")
-        print(f"  Reference sequences:             {total_reference_count}")
-        print(f"  Total sequences in ref-clusters: {total_clusters_with_refs}")
-        print(f"  New candidate sequences:         {total_new_hits}")
-        print(f"  Selected by (CSB):               {len(group3_set)}")
-        print(f"  Selected by (PAM):               {len(group4_set)}")
-        print(f"  Final set:                       {len(final_merged_set)}")
-        print(f"     ├─ from references:           {ref_in_final}")
-        print(f"     ├─ from (CSB) only:           {grp3_in_final}")
-        print(f"     └─ from (PAM) only:           {grp4_in_final}")
+        print(f"  Reference sequences:                 {len(reference_sequences)}")
+        print(f"  Total sequences in ref-mcl-clusters: {total_clusters_with_refs}")
+        print(f"  New candidate sequences:             {total_new_hits}")
+        print(f"  Selected by (CSB):                   {len(group3_set)}")
+        print(f"  Selected by (PAM):                   {len(group4_set)}")
+        print(f"  Final set:                           {len(final_merged_set)}")
+        print(f"     ├─ from references:               {len(ref_part)}")
+        print(f"     ├─ from (CSB) & (PAM):            {len(grp3_grp4_part)}")
+        print(f"     ├─ from (CSB) only:               {len(grp3_part)}")
+        print(f"     └─ from (PAM) only:               {len(grp4_part)}")
+
 
 
 
