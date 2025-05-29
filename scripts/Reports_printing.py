@@ -94,7 +94,21 @@ def process_initial_validations(options,
         # Convert to DataFrame
         df = pd.DataFrame.from_dict(report_dict, orient='index')
         df.index.name = 'hit_id'
+        
+        # Check validity of the dataframe
+        required_columns = ['bitscore', 'MCC', 'TP', 'FP', 'FN', 'TN']
 
+        if df.empty:
+            print("[ERROR] Report for {protein} is missing.")
+            continue
+        else:
+
+            # Check, ob alle erforderlichen Spalten vorhanden sind
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                print(f"[ERROR] {missing_columns} Report for {protein} is incomplete.")
+                continue
+        
         # Fetch neighborhood information
         hit_ids = df.index.tolist()
         neighbors, _ = Reports.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
@@ -112,136 +126,143 @@ def process_initial_validations(options,
         print(f"[SAVE] Saved validation report: {out_csv}")
     
         # ROC curve plotting
-        roc_path = os.path.join(hmm_report_output_dir, f"{protein}_roc.png")
-        plot_roc_from_metrics(df, score_col='bitscore', trusted_cutoff=trusted_cutoff, noise_cutoff = noise_cutoff, optimized_cutoff = optimized_cutoff, output_path=roc_path)
+        roc_path = os.path.join(hmm_report_output_dir, f"{protein}_roc.txt")
+        write_roc_from_metrics_to_tsv(df, score_col='bitscore', trusted_cutoff=trusted_cutoff, noise_cutoff = noise_cutoff, optimized_cutoff = optimized_cutoff, output_path=roc_path)
 
+        # MCC curve per score
+        mcc_path = os.path.join(hmm_report_output_dir, f"{protein}_mcc.txt")
+        export_existing_mcc_curve(df, score_col="bitscore", mcc_col="MCC", output_path=mcc_path)
+        
         # Confusion stats per gene neighbourhood
 
         for name,cutoff in cutoffs_dict.items():
-            plot_neighborhood_confusion_single(df, cutoff, name, output_dir = hmm_report_output_dir)
+            write_neighborhood_confusion_data(df, cutoff, name, output_dir = hmm_report_output_dir)
 
         # MCL selection plots
-        protein_name = protein.split('_',1)[-1]
-        mcl_file = mcl_results[protein_name]
-        grp1_ref_seqs_set = grp1_refs[protein_name]
-        grp1_cuts = mcl_grp1_cutoff[protein_name]
-        
-        plot_mcl_vs_references(mcl_file, "grp1_mcl_cluster_selection", grp1_ref_seqs_set, grp1_cuts['density_threshold'], grp1_cuts['reference_threshold'], output_dir = hmm_report_output_dir)
-        print(f"[SAVE] MCL selection plot grp1")
-        grp2_ref_seqs_set = grp2_refs[protein_name]
-        grp2_cuts = mcl_grp2_cutoff[protein_name]
-        
-        plot_mcl_vs_references(mcl_file, "grp2_mcl_cluster_selection", grp2_ref_seqs_set, grp2_cuts['density_threshold'], grp2_cuts['reference_threshold'], output_dir = hmm_report_output_dir)
-        print(f"[SAVE] MCL selection plot grp2")
+        protein_name = protein.split('_', 1)[-1]
+
+        # Check if all required data for MCL plotting is present
+        if (
+            protein_name in mcl_results and
+            protein_name in grp1_refs and
+            protein_name in mcl_grp1_cutoff and
+            protein_name in grp2_refs and
+            protein_name in mcl_grp2_cutoff
+        ):
+            mcl_file = mcl_results[protein_name]
+            
+            grp1_ref_seqs_set = grp1_refs[protein_name]
+            grp1_cuts = mcl_grp1_cutoff[protein_name]
+            write_mcl_vs_references(
+                mcl_file,
+                "grp1_mcl_cluster_selection",
+                grp1_ref_seqs_set,
+                grp1_cuts['density_threshold'],
+                grp1_cuts['reference_threshold'],
+                output_dir=hmm_report_output_dir
+            )
+            print(f"[SAVE] MCL selection plot grp1")
+
+            grp2_ref_seqs_set = grp2_refs[protein_name]
+            grp2_cuts = mcl_grp2_cutoff[protein_name]
+            write_mcl_vs_references(
+                mcl_file,
+                "grp2_mcl_cluster_selection",
+                grp2_ref_seqs_set,
+                grp2_cuts['density_threshold'],
+                grp2_cuts['reference_threshold'],
+                output_dir=hmm_report_output_dir
+            )
+            print(f"[SAVE] MCL selection plot grp2")
+
+        else:
+            print(f"[WARN] Skipping MCL selection plots for {protein_name}: missing clustering or cutoff data.")
         
     save_cutoffs_table(cutoff_collection, options.Hidden_markov_model_directory, 'cutoffs.txt')
     save_performance_table(performance_collection, options.Hidden_markov_model_directory, 'performance.txt')
     return
 
 
-
-def plot_roc_from_metrics(df: pd.DataFrame,
+def write_roc_from_metrics_to_tsv(df: pd.DataFrame,
                           score_col: str = 'bitscore',
                           trusted_cutoff: float = None,
                           noise_cutoff: float = None,
                           optimized_cutoff: float = None,
-                          output_path: str = 'roc_curve.png') -> None:
+                          output_path: str = 'roc_data.txt') -> None:
     """
-    Plots an ROC curve using precomputed confusion matrices in the DataFrame,
-    and highlights points nearest above specified cutoffs with subtle markers.
+    Writes ROC curve data (FPR, TPR, score) to a TSV file.
+    Optionally adds labels for the closest points above specified cutoffs.
 
     Parameters:
         df (pd.DataFrame): Must contain:
             - score_col: continuous classifier score
-            - matrix_col: iterable of [TP, FP, FN, TN] per row
+            - columns: 'TP', 'FP', 'FN', 'TN'
         trusted_cutoff (float): Score threshold for 'Trusted'
         noise_cutoff (float): Score threshold for 'Noise'
         optimized_cutoff (float): Score threshold for 'Optimized'
-        output_path (str): Path to save the ROC plot
+        output_path (str): Path to save the TSV file
     """
-    #
     if os.path.isfile(output_path):
         return
-    
-    # Extract scores and confusion matrix entries
-    scores = df[score_col].values
-    TP     = df['TP'].values
-    FP     = df['FP'].values
-    FN     = df['FN'].values
-    TN     = df['TN'].values
 
-    # Compute TPR and FPR
+    scores = df[score_col].values
+    TP = df['TP'].values
+    FP = df['FP'].values
+    FN = df['FN'].values
+    TN = df['TN'].values
+
     with np.errstate(divide='ignore', invalid='ignore'):
         tprs = TP / (TP + FN)
         fprs = FP / (FP + TN)
     tprs = np.nan_to_num(tprs)
     fprs = np.nan_to_num(fprs)
 
-    # Unique thresholds descending
     unique_scores = np.unique(scores)[::-1]
-    # Map score -> corresponding average point
     roc_points = []
     for s in unique_scores:
         idxs = np.where(scores == s)[0]
         roc_points.append((fprs[idxs].mean(), tprs[idxs].mean(), s))
+
     fpr_vals, tpr_vals, thresh_vals = zip(*roc_points)
 
-    # Plot base ROC in light gray
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr_vals, tpr_vals, color='lightgray', linewidth=2, label='ROC')
-    plt.scatter(fpr_vals, tpr_vals,
-                color='gray', edgecolor='black', s=40, alpha=0.8,
-                label='_nolegend_')
-    plt.plot([0, 1], [0, 1], linestyle='--', color='lightgray')
+    # Create label column
+    labels = [''] * len(thresh_vals)
 
-    # Helper to mark cutoff: smallest score >= cutoff
-    def mark_cutoff(cutoff, label, color, marker):
+    def label_cutoff(cutoff, label):
         if cutoff is None:
             return
-        # choose next higher threshold
         cands = [s for s in unique_scores if s >= cutoff]
         s_sel = min(cands) if cands else max(unique_scores)
         i = thresh_vals.index(s_sel)
-        plt.scatter(fpr_vals[i], tpr_vals[i],
-                    color=color, marker=marker,
-                    edgecolor='black', linewidth=1,
-                    s=80, alpha=1.0,
-                    label=f"{label} ({s_sel})")
+        labels[i] = label
 
-    # Subtle pastel colors for cutoffs
-    mark_cutoff(trusted_cutoff,   'Trusted',   '#ADD8E6', 's')  # light blue square
-    mark_cutoff(noise_cutoff,     'Noise',     '#FFB6C1', '^')  # light pink triangle
-    mark_cutoff(optimized_cutoff, 'Optimized', '#90EE90', 'D')  # light green diamond
+    label_cutoff(trusted_cutoff, 'Trusted')
+    label_cutoff(noise_cutoff, 'Noise')
+    label_cutoff(optimized_cutoff, 'Optimized')
 
-    # Labels and legend
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve with Highlighted Cutoffs')
-    plt.legend(loc='lower right', frameon=True)
-    plt.grid(True, color='lightgray', linestyle=':')
-    plt.tight_layout()
+    out_df = pd.DataFrame({
+        'FPR': fpr_vals,
+        'TPR': tpr_vals,
+        'Score': thresh_vals,
+        'Label': labels
+    })
 
-    # Save plot
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    plt.savefig(output_path, dpi=300)
-    plt.close()
-    print(f"[SAVE] Saved ROC plot to {output_path}")
+    out_df.to_csv(output_path, sep='\t', index=False)
+    print(f"[SAVE] Saved ROC data to {output_path}")
 
 
 
-
-
-def plot_neighborhood_confusion_single(df: pd.DataFrame,
-                                        cutoff: float,
-                                        cutoff_name: str = 'cutoff',
-                                        neighborhood_col: str = 'neighborhood',
-                                        score_col: str = 'bitscore',
-                                        true_label_col: str = 'true_value',
-                                        top_n: int = None,
-                                        output_dir: str = None) -> None:
+def write_neighborhood_confusion_data(df: pd.DataFrame,
+                                       cutoff: float,
+                                       cutoff_name: str = 'cutoff',
+                                       neighborhood_col: str = 'neighborhood',
+                                       score_col: str = 'bitscore',
+                                       true_label_col: str = 'true_value',
+                                       top_n: int = None,
+                                       output_dir: str = None) -> None:
     """
-    Plots a stacked bar chart showing TP/FP/FN/TN counts per genomic neighborhood at a specific cutoff,
-    grouping reverse complements together, sorting by cluster size, and coloring individual genes.
+    Writes confusion matrix summary data per genomic neighborhood at a specific cutoff to a TSV file.
 
     Parameters:
         df (pd.DataFrame): Must contain score, true labels, and neighborhood columns.
@@ -251,29 +272,25 @@ def plot_neighborhood_confusion_single(df: pd.DataFrame,
         score_col (str): Column with classifier scores.
         true_label_col (str): Column with true labels ('TP' or 'TN').
         top_n (int, optional): Number of top neighborhoods to include by total count. If None, include all.
-        output_dir (str, optional): Directory to save the plot. Defaults to cwd if None.
+        output_dir (str, optional): Directory to save the file. Defaults to cwd if None.
     """
-    # Define output and check if already exists
     out_dir = output_dir or os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
-    fname = f'neighborhood_confusion_{cutoff_name}.png'
+    fname = f'neighborhood_confusion_{cutoff_name}.tsv'
     path = os.path.join(out_dir, fname)
     if os.path.isfile(path):
         return
 
-    # Validate inputs
     for col in [neighborhood_col, score_col, true_label_col]:
         if col not in df.columns:
             raise KeyError(f"DataFrame must contain column '{col}'")
 
-    # Determine predicted classes
     preds_pos = df[score_col] >= cutoff
     true_pos = df[true_label_col] == 'TP'
     df['_conf_label'] = np.where(preds_pos & true_pos, 'TP',
                           np.where(preds_pos & ~true_pos, 'FP',
                           np.where(~preds_pos & true_pos, 'FN', 'TN')))
 
-    # Canonicalize neighborhood: group reverse complements
     def canonical(nb):
         seq = tuple(tuple(x) for x in (nb or []))
         rev = tuple(reversed(seq))
@@ -281,179 +298,84 @@ def plot_neighborhood_confusion_single(df: pd.DataFrame,
 
     df['_nb'] = df[neighborhood_col].map(canonical)
 
-    # Count per neighborhood group and label
     counts = {nb: Counter(sub_df['_conf_label']) for nb, sub_df in df.groupby('_nb')}
     totals = {nb: sum(cnt.values()) for nb, cnt in counts.items()}
 
-    # Select neighborhoods sorted by total descending or all
     selected = sorted(totals, key=totals.get, reverse=True)
     if top_n is not None:
         selected = selected[:top_n]
 
-    # Build DataFrame for plotting
-    plot_df = pd.DataFrame(
-        [{ 'TP': counts[nb].get('TP', 0), 'FP': counts[nb].get('FP', 0),
-           'FN': counts[nb].get('FN', 0), 'TN': counts[nb].get('TN', 0)}
-         for nb in selected], index=selected
-    )
+    out_rows = []
+    for nb in selected:
+        cluster_genes = [gene for tup in nb for gene in tup]
+        out_rows.append({
+            'Neighborhood': " ".join(cluster_genes),
+            'TP': counts[nb].get('TP', 0),
+            'FP': counts[nb].get('FP', 0),
+            'FN': counts[nb].get('FN', 0),
+            'TN': counts[nb].get('TN', 0),
+            'Total': totals[nb]
+        })
 
-    # Prepare clusters list of gene names
-    clusters = [[gene for tup in nb for gene in tup] for nb in plot_df.index]
-    # label_texts (space-separated gene names)
-    label_texts = [" ".join(genes) for genes in clusters]
+    out_df = pd.DataFrame(out_rows)
+    out_df.to_csv(path, sep='\t', index=False)
+    print(f"[SAVE] Saved neighborhood confusion data to {path}")
 
-    # Plot stacked horizontal bars
-    fig, ax = plt.subplots(figsize=(10, max(6, len(plot_df)*0.5)))
-    fig.subplots_adjust(left=0.4, right=0.95)
-    
-    bottom = np.zeros(len(plot_df))
-    cmap_conf = {'TN':'#d3d3d3','FP':'#ff9999','FN':'#ffcc99','TP':'#66b3ff'}
-    for label in ['TN','FP','FN','TP']:
-        vals = plot_df[label].values
-        ax.barh(range(len(plot_df)), vals, left=bottom,
-                color=cmap_conf[label], edgecolor='black', label=label)
-        bottom += vals
-        
-
-    # Remove default y-tick labels
-    ax.set_yticks(range(len(plot_df)))
-    ax.set_yticklabels(['']*len(plot_df))
-
-
-    # Add individual gene names with background
-    x_min, x_max = ax.get_xlim()
-    x_span = x_max - x_min
-    x_start = x_min - 2 * x_span
-    for idx, genes in enumerate(clusters):
-        x_offset = x_start
-        for gene in genes:
-            # consistent low-sat color per gene
-            h = (int(hashlib.md5(gene.encode()).hexdigest(), 16) % 360) / 360.0
-            rgb = mcolors.hsv_to_rgb((h, 0.3, 0.8))
-            ax.text(x_offset, idx, gene,
-                    va='center', ha='left',
-                    color='black', backgroundcolor=rgb,
-                    fontsize=9, clip_on=False)
-            x_offset += len(gene) * 0.02 * x_span # Defines space between labels
-
-    ax.invert_yaxis()
-    ax.set_xlabel('Count')
-    ax.set_title(f'Confusion matrix by genomic context at {cutoff_name}: hit score ≥ {cutoff}')
-    ax.legend(loc='lower right')
-    ax.grid(axis='x', linestyle='--', linewidth=0.5)
-
-    # Save figure and close
-    fig.savefig(path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-
-    # Clean up temporary columns
     df.drop(columns=['_conf_label','_nb'], inplace=True)
     
     
     
-def plot_mcl_vs_references(mcl_file: str,
-                            name: str,
-                            ref_ids: set,
-                            ref_line_pct: float = 0.1,
-                            pct_color_threshold: float = 0.05,
-                            max_pct: int = 10,
-                            output_dir: str = None) -> None:
+def write_mcl_vs_references(mcl_file: str,
+                             name: str,
+                             ref_ids: set,
+                             ref_line_pct: float = 0.1,
+                             pct_color_threshold: float = 0.05,
+                             max_pct: int = 10,
+                             output_dir: str = None) -> None:
     """
-    Plots cluster size vs. number of reference sequences for a single MCL clusters file.
+    Writes cluster size vs. number of reference sequences for a single MCL clusters file to a TSV file.
 
     Parameters:
         mcl_file (str): Path to the MCL cluster file.
         ref_ids (set): Set of reference sequence IDs.
         ref_line_pct (float): Fractional threshold for the reference line (e.g., 0.1 for 10%).
-        pct_color_threshold (float): Fractional threshold for coloring points; below this are gray.
-        max_pct (int): Maximum percent value for the color scale (default 10).
-        output_dir (str, optional): Directory in which to save the plot. Defaults to current working directory.
+        pct_color_threshold (float): Fractional threshold for flagging low-ref points.
+        max_pct (int): Maximum percent value for classification.
+        output_dir (str, optional): Directory in which to save the TSV. Defaults to cwd.
     """
-
-    # Extract protein type from filename
+    # File name prefix and output location
     protein_type = os.path.splitext(os.path.basename(mcl_file))[0]
-
-    # Output directory
     out_dir = output_dir or os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{name}_{protein_type}.png")
+    out_path = os.path.join(out_dir, f"{name}_{protein_type}.tsv")
     if os.path.isfile(out_path):
         return
 
-    # Parse clusters
+    # Read clusters
     clusters = parse_mcl_clusters(mcl_file)
     n_ref_total = len(ref_ids)
     if n_ref_total == 0:
         print(f"[WARN] No reference sequences for {protein_type}")
         return
 
-    # Collect metrics
-    cluster_sizes = []
-    ref_counts = []
-    ref_fractions = []
+    # Compute cluster statistics
+    rows = []
     for cluster in clusters:
         cs = len(cluster)
         rc = len(set(cluster) & ref_ids)
-        cluster_sizes.append(cs)
-        ref_counts.append(rc)
-        ref_fractions.append(rc / n_ref_total)
+        rf = rc / n_ref_total
+        label = "gray" if rf < pct_color_threshold else f">={int(rf * 100)}%"
+        rows.append({
+            'ClusterSize': cs,
+            'ReferenceCount': rc,
+            'ReferenceFraction': round(rf, 5),
+            'ClassLabel': label
+        })
 
-    # Convert to arrays
-    cs_arr = np.array(cluster_sizes)
-    rc_arr = np.array(ref_counts)
-    rf_arr = np.array(ref_fractions)
-
-    # Mask for low-fraction points
-    mask_low = rf_arr < pct_color_threshold
-    pct_bins = np.clip((rf_arr[~mask_low] * 100).astype(int), 0, max_pct)
-    cmap = plt.get_cmap("plasma", max_pct + 1)
-
-    # Create plot
-    plt.figure(figsize=(10, 6))
-    # Gray for low
-    plt.scatter(
-        cs_arr[mask_low], rc_arr[mask_low],
-        color='lightgray', s=80, edgecolor='k', alpha=0.75,
-        label=f"<{int(pct_color_threshold*100)}% ref/all_ref cutoff"
-    )
-    # Colored for others
-    scatter = plt.scatter(
-        cs_arr[~mask_low], rc_arr[~mask_low],
-        c=pct_bins, cmap=cmap, vmin=0, vmax=max_pct,
-        s=80, edgecolor='k', alpha=0.75
-    )
-
-    # Colorbar
-    cbar = plt.colorbar(scatter, ticks=range(0, max_pct + 1))
-    cbar.set_label("Fraction of reference sequences from total number of reference sequences (%)")
-
-    # Reference line
-    x_vals = np.arange(1, max(cs_arr.max(), 200) + 1)
-    plt.plot(
-        x_vals, x_vals * ref_line_pct,
-        linestyle='--', color='black', linewidth=1,
-        label=f"{int(ref_line_pct*100)}% ref/total cutoff"
-    )
-
-    # Additional lines for orientation bei 25%, 50% und 75%
-    for perc, shade in zip([0.25, 0.50, 0.75], ['darkgray', 'gray', 'lightgray']):
-        plt.plot(
-            x_vals, x_vals * perc,
-            linestyle='--', color=shade, linewidth=1,
-            label=f"{int(perc*100)}% ref/total"
-        )
-
-    # Labels, title, grid
-    plt.xlabel("Cluster size (number of sequences)")
-    plt.ylabel("Number of included reference sequences")
-    plt.title(f"{protein_type}: MCL cluster selection")
-    plt.grid(True)
-    plt.legend(loc='upper right')
-
-    # Save and close
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=300)
-    plt.close()
+    # Save output TSV
+    out_df = pd.DataFrame(rows)
+    out_df.to_csv(out_path, sep='\t', index=False)
+    print(f"[SAVE] Saved MCL-reference data to {out_path}")
 
 
 def parse_mcl_clusters(mcl_file_path):
@@ -461,6 +383,27 @@ def parse_mcl_clusters(mcl_file_path):
         return [line.strip().split() for line in f if line.strip()]
 
 
+
+def export_existing_mcc_curve(df: pd.DataFrame, score_col: str, mcc_col: str, output_path: str) -> None:
+    """
+    Exports the given MCC values for each unique score threshold to a TSV file.
+
+    Parameters:
+        df (pd.DataFrame): Must contain columns score_col and mcc_col.
+        score_col (str): Column containing classifier scores (e.g. bitscore).
+        mcc_col (str): Column containing precomputed MCC values.
+        output_path (str): Path to the TSV output file.
+    """
+    if os.path.isfile(output_path):
+        return
+
+    # Sort and drop duplicate scores, keeping the first occurrence
+    sorted_df = df[[score_col, mcc_col]].dropna().drop_duplicates(subset=score_col)
+    sorted_df = sorted_df.sort_values(by=score_col, ascending=False)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    sorted_df.to_csv(output_path, sep='\t', index=False)
+    print(f"[SAVE] MCC curve data exported to {output_path}")
 
 
 

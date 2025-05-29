@@ -302,7 +302,8 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids, num_workers=8):
     - sorted_compositions (list): Unique domain compositions sorted by occurrence.
     """
     # 1. Parallel Fetch: Get cluster IDs
-    protein_id_chunks = [list(protein_ids)[i::num_workers] for i in range(num_workers)]
+    protein_id_chunks = list(chunked_sql_safe(protein_ids, max_chunk_size=900))
+
     with Pool(num_workers) as pool:
         results = pool.starmap(fetch_cluster_ids, [(database, chunk) for chunk in protein_id_chunks])
     
@@ -310,7 +311,8 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids, num_workers=8):
 
     # 2. Parallel Fetch: Get all proteins for clusters
     cluster_ids = set(protein_to_cluster.values())
-    cluster_id_chunks = [list(cluster_ids)[i::num_workers] for i in range(num_workers)]
+    cluster_id_chunks = list(chunked_sql_safe(cluster_ids))
+
     with Pool(num_workers) as pool:
         results = pool.starmap(fetch_cluster_proteins, [(database, chunk) for chunk in cluster_id_chunks])
 
@@ -321,7 +323,8 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids, num_workers=8):
 
     # 3. Parallel Fetch: Get protein domains
     all_protein_ids = {p for proteins in cluster_to_proteins.values() for p in proteins}
-    protein_id_chunks = [list(all_protein_ids)[i::num_workers] for i in range(num_workers)]
+    protein_id_chunks = list(chunked_sql_safe(all_protein_ids))
+
     with Pool(num_workers) as pool:
         results = pool.starmap(fetch_protein_domains, [(database, chunk) for chunk in protein_id_chunks])
 
@@ -366,5 +369,11 @@ def fetch_neighbouring_genes_with_domains(database, protein_ids, num_workers=8):
 
     return neighbors_dict, sorted_compositions
 
-    
+def chunked_sql_safe(iterable, max_chunk_size=900):
+    """
+    Yields SQL-safe chunks (max 900 variables for SQLite).
+    """
+    iterable = list(iterable)
+    for i in range(0, len(iterable), max_chunk_size):
+        yield iterable[i:i + max_chunk_size]    
             

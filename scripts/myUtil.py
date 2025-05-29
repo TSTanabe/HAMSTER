@@ -227,7 +227,7 @@ def remove_directory(directory_path):
         print(f"[INFO] Directory does not exist: {directory_path}")
         
 
-def save_cache(options, name, data, redirect=None):
+def save_cache(options, name, data, redirect=None, overwrite=False):
 
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
     if redirect:
@@ -236,7 +236,7 @@ def save_cache(options, name, data, redirect=None):
     os.makedirs(cache_dir, exist_ok=True)  # sicherer als os.system(mkdir ...)
 
     file_path = os.path.join(cache_dir, name)
-    if os.path.exists(file_path):
+    if os.path.exists(file_path) and overwrite == False:
         return  # Nicht überschreiben, wenn bereits vorhanden
 
     with open(file_path, "wb") as f:

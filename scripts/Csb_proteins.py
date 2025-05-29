@@ -85,6 +85,8 @@ def csb_proteins_datasets(options, sglr_dict):
     
     csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
     csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
+    
+    myUtil.save_cache(options, "csb_selected_csb_to_domain_dataset.pkl", csb_dictionary)
 
     print("[INFO] Collecting protein sequence identifiers from local database")
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)

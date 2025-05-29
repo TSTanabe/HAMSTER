@@ -24,8 +24,8 @@ from . import Pam_Singleton_finder
 from . import Pam_defragmentation
 from . import Pam_mcl
 
-from . import Reports_plotting
-#from . import Reports_printing
+#from . import Reports_plotting
+from . import Reports_printing
 from . import Reports
 
 if getattr(sys, 'frozen', False):
@@ -363,10 +363,10 @@ def mcl_decorate_training_sequences(options):
 
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
-    mcl_clustering_results_dict = options.mcl_clusterin_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
+    mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
     
     mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
-    
+    myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
     
     # MCL cluster analysis, cluster selection with F1 optimized density for basic grouped sequences
     print("\n[INFO] Generating grp1: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
@@ -484,8 +484,13 @@ def report_cv_performance(options):
     
     #Initial validation
     print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
+    mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
     
-    Reports_plotting.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
+    mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
+    print(mcl_clustering_results_dict)
+    myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
+    
+    Reports_printing.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
     
     #cross validation
     print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
