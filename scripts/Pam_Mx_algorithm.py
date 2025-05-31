@@ -14,6 +14,9 @@ from multiprocessing import Pool
 from sklearn.linear_model import LogisticRegression
 from sklearn.exceptions import ConvergenceWarning
 
+# Global variables for the databse read only mode
+_con = None
+_cur = None
 
 # Routines for the logistic regression based on presence absence matrices
 
@@ -165,7 +168,7 @@ def build_presence_score_matrix(df, hit_scores):
 #########################################################################################
 
 
-def create_presence_absence_matrix(proteinID_sets, database_directory, output, chunk_size=900, cores=4):
+def create_presence_absence_matrix(proteinID_sets, database_directory, output, chunk_size=900, cores=8):
     """
     Creates a TSV file where each cell contains the proteinID(s) for a domain in a genome,
     using a grouped dictionary instead of reading FASTA files.
@@ -192,20 +195,19 @@ def create_presence_absence_matrix(proteinID_sets, database_directory, output, c
     with Pool(processes=cores) as pool:
         results = pool.map(_fetch_protein_to_genome_chunk, chunk_args)
 
-    protein_to_genome_dict = {}
-    for partial in results:
-        protein_to_genome_dict.update(partial)
+        protein_to_genome_dict = {}
+        for partial in results:
+            protein_to_genome_dict.update(partial)
 
-    # Step 2: genomeID → domain → [proteinIDs]
-    args_list = [
-        (domain, protein_ids, protein_to_genome_dict)
-        for domain, protein_ids in proteinID_sets.items()
-    ]
+        # Step 2: genomeID → domain → [proteinIDs]
+        args_list = [
+            (domain, protein_ids, protein_to_genome_dict)
+            for domain, protein_ids in proteinID_sets.items()
+        ]
  
     
-    genome_domain_matrix = defaultdict(lambda: defaultdict(list))
+        genome_domain_matrix = defaultdict(lambda: defaultdict(list))
 
-    with Pool(processes=cores) as pool:
         results = pool.map(_map_domain_proteins_to_genomes, args_list)
 
     for partial in results:
@@ -253,22 +255,55 @@ def _map_domain_proteins_to_genomes(args):
             
     return result
 
-def _fetch_protein_to_genome_chunk(args):
-    database_path, chunk = args
-    local_result = {}
-    with sqlite3.connect(database_path) as con:
-        cur = con.cursor()
-        placeholders = ",".join(["?"] * len(chunk))
-        query = f"SELECT proteinID, genomeID FROM Proteins WHERE proteinID IN ({placeholders})"
-        cur.execute(query, chunk)
-        for proteinID, genomeID in cur.fetchall():
-            local_result[proteinID] = genomeID
-    return local_result
-
 def chunked(iterable, size):
     """Yield successive chunk-sized lists from iterable."""
     for i in range(0, len(iterable), size):
         yield list(iterable)[i:i + size]
+        
+#############################################################################
+######## Read only database for the PAM mapping #############################
+#############################################################################
+
+def _get_readonly_cursor(database_path: str):
+    """
+    Öffnet eine nur-lesende SQLite-Verbindung (URI mode=ro) mit query_only,
+    und cached Verbindung+Cursor pro Prozess.
+    """
+    global _con, _cur
+    if _con is None:
+        _con = sqlite3.connect(
+            f"file:{database_path}?mode=ro",
+            uri=True,
+            check_same_thread=False
+        )
+        _con.execute("PRAGMA query_only = TRUE;")
+        _cur = _con.cursor()
+    return _cur
+
+# -------------------------------------------------------------------
+# 2) Chunk-weises Protein→Genome Mapping
+# -------------------------------------------------------------------
+def _fetch_protein_to_genome_chunk(args):
+    """
+    Args:
+        args: Tuple(database_path, chunk: List[str])
+    Returns:
+        Dict[proteinID, genomeID]
+    """
+    database_path, chunk = args
+    if not chunk:
+        return {}
+    cur = _get_readonly_cursor(database_path)
+    placeholders = ",".join("?" for _ in chunk)
+    sql = (
+        f"SELECT proteinID, genomeID "
+        f"FROM Proteins "
+        f"WHERE proteinID IN ({placeholders})"
+    )
+    cur.execute(sql, chunk)
+    rows = cur.fetchall()
+    return {proteinID: genomeID for proteinID, genomeID in rows}
+
 
 
 #########################################################################################

@@ -244,7 +244,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
         non_ref_count = cluster_size - ref_count
 
         if cluster_size == 0 or ref_count == 0:
-            print("[WARN] No reference sequence in cluster found")
+            #print("[WARN] No reference sequence in cluster found")
             continue
 
         ref_ratio_in_cluster = ref_count / cluster_size

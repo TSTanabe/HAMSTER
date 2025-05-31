@@ -501,15 +501,31 @@ def cutoffs(true_positives, true_negatives, report_filepath):
     # Sanity-Check: Warn if no optimal cutoff was found
     if optimized_cutoff is None:
         print('[WARN] No optimized cutoff found')
+        optimized_cutoff = trusted_cutoff
 
     # Second pass: assign based on optimized_cutoff
     for hit_id, info in hit_report.items():
         bs = info['bitscore']
         true_val = info['true_value']
+
+        # Assignment at optimized cutoff
         if bs >= optimized_cutoff:
-            info['assignment'] = 'TP' if true_val == 'TP' else 'FP'
+            info['assignment_optimized_score'] = 'TP' if true_val == 'TP' else 'FP'
         else:
-            info['assignment'] = 'FN' if true_val == 'TP' else 'TN'
+            info['assignment_optimized_score'] = 'FN' if true_val == 'TP' else 'TN'
+
+        # Assignment at trusted cutoff
+        if bs >= trusted_cutoff:
+            info['assignment_trusted_cutoff'] = 'TP' if true_val == 'TP' else 'FP'
+        else:
+            info['assignment_trusted_cutoff'] = 'FN' if true_val == 'TP' else 'TN'
+
+        # Assignment at noise cutoff
+        if bs >= noise_cutoff:
+            info['assignment_noise_cutoff'] = 'TP' if true_val == 'TP' else 'FP'
+        else:
+            info['assignment_noise_cutoff'] = 'FN' if true_val == 'TP' else 'TN'
+
 
     return optimized_cutoff, trusted_cutoff, noise_cutoff, hit_report, best_MCC, best_matrix
 

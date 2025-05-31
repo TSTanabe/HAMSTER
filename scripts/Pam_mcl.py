@@ -10,7 +10,7 @@ from collections import defaultdict
 
 from . import Pam_Mx_algorithm
 from . import Csb_proteins
-from . import Reports # wäre vielleicht sinnvoll die nieghbourhood routinen wo anders hin zu verschieben
+#from . import Reports # wäre vielleicht sinnvoll die nieghbourhood routinen wo anders hin zu verschieben
 from . import myUtil
 
 
@@ -41,9 +41,9 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     """
 
 
-    grouped_3_dict = myUtil.load_cache(options,'mcl2_truncated_csb_hits.pkl')
-    grouped_4_dict = myUtil.load_cache(options,'mcl2_PAM_plausible_hits.pkl')
-    extended_grouped = myUtil.load_cache(options,'mcl2_PAM_csb_merged_hits.pkl')
+    grouped_3_dict = myUtil.load_cache(options,'mcl_truncated_csb_hits.pkl')
+    grouped_4_dict = myUtil.load_cache(options,'mcl_PAM_plausible_hits.pkl')
+    extended_grouped = myUtil.load_cache(options,'mcl_PAM_csb_merged_hits.pkl')
 
     if extended_grouped:
         return extended_grouped
@@ -73,8 +73,9 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
             # Get the common gene cluster vicinity (presence without order or doublication)
             common_gene_vicinity = myUtil.load_cache(options,f"mcl_common_gene_vicinity_{domain}.pkl")
             if not common_gene_vicinity:
-                common_gene_vicinity = select_gene_cluster_vicinity_domains(options.database_directory,reference_sequences)
+                common_gene_vicinity, neighbors_dict = select_gene_cluster_vicinity_domains(options.database_directory,reference_sequences) #Neighbors dict ist proteinID => vicinity
                 myUtil.save_cache(options,f"mcl_common_gene_vicinity_{domain}.pkl",common_gene_vicinity)
+                myUtil.save_cache(options,f"mcl_gene_vicinity_dict_{domain}.pkl",neighbors_dict)
                 
             
             mcl_cluster_protID_set = select_ref_seq_mcl_sequences(mcl_file, domain, reference_sequences)
@@ -89,7 +90,6 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
             # Select the proteins with a truncated csb, that fits the other csbs
             filtered_proteinIDs = select_seqs_with_truncated_csb_vicinity(options.database_directory, new_proteinID_set, common_gene_vicinity)
             grouped_3_dict[domain] = filtered_proteinIDs
-
     
     print("[INFO] Selecing sequences from mcl clusters with plausible presence in the genome")
     # Select the proteins with plausible PAM
@@ -235,8 +235,8 @@ def select_gene_cluster_vicinity_domains(db_path, hit_ids):
     with all the gene lcuster sets
     
     """
-    neighbors, _ = Reports.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
-    
+    neighbors, _ = Csb_proteins.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
+
     # Collapse the neighbourhoods by similarity
     
     unique_clusters = set()
@@ -250,7 +250,7 @@ def select_gene_cluster_vicinity_domains(db_path, hit_ids):
         flattened = frozenset(domain for gene in cluster for domain in gene)
         unique_clusters.add(flattened)
         
-    return unique_clusters
+    return unique_clusters, neighbors
 
 
 
@@ -407,7 +407,7 @@ def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, groupe
 
         # Detaillierte Zusammensetzung
         ref_part = final_merged_set & reference_sequences
-        grp3_grp4_part = final_merged_set & group3_set & group4_set - reference_sequence
+        grp3_grp4_part = final_merged_set & group3_set & group4_set - reference_sequences
         grp3_part = final_merged_set & group3_set - reference_sequences - group4_set
         grp4_part = final_merged_set & group4_set - reference_sequences - group3_set
 

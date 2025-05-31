@@ -2,8 +2,12 @@
 import sqlite3
 import os
 import multiprocessing
+import time
+import threading
 from multiprocessing import Pool, Manager, Value, Lock
-
+from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
+import itertools
 from . import Csb_statistic
 from . import myUtil
 
@@ -730,9 +734,164 @@ def filter_dictionary_by_excluding_domains(input_dict, exclude_list):
     
     
     
-    
-    
-    
-    
 
+##########################################################################################
+###################### Get genomic context per protein ###################################
+##########################################################################################
+
+_thread_local = threading.local()
+
+
+def _get_thread_cursor(db_path: str):
+    """
+    Returns a thread-local Cursor. On the first call in each thread:
+     - Opens the DB in truly read-only+immutable mode
+     - Disables any attempt to create journals or temporary files
+
+    Subsequent calls from the same thread return the same Cursor.
+    """
+    if getattr(_thread_local, "cur", None) is None:
+        # 1) Open connection with mode=ro & immutable=1
+        #    &nolockfile forces SQLite to never try to create a rollback journal
+        uri = f"file:{db_path}?mode=ro&immutable=1&nolockfile=1"
+        con = sqlite3.connect(uri, uri=True, check_same_thread=False)
+
+        # 2) We still set row_factory so fetch returns Row objects
+        con.row_factory = sqlite3.Row
+        cur = con.cursor()
+
+        # 3) Explicitly disable any journaling or temp file usage
+        #    - journal_mode = OFF means no rollback or WAL is ever used
+        #    - temp_store = MEMORY means any temporary table/index is purely in RAM
+        #    - query_only = TRUE forbids any accidental writes
+        cur.executescript("""
+            PRAGMA query_only = TRUE;
+            PRAGMA journal_mode = OFF;
+            PRAGMA temp_store = MEMORY;
+            PRAGMA defer_foreign_keys = TRUE;
+        """)
+
+        # 4) Save to thread-local
+        _thread_local.con = con
+        _thread_local.cur = cur
+
+    return _thread_local.cur
+def _fetch_neighbours_chunk(args):
+    """
+    Worker für einen Chunk, mit gecachedem Cursor und Timing.
+    """
+    db_path, protein_ids = args
+    if not protein_ids:
+        return {}, {}
+
+    # Timer starten
+    t0 = time.perf_counter()
+
+    # Cursor holen (erstellt Connection + PRAGMAs einmal pro Thread)
+    cur = _get_thread_cursor(db_path)
+
+    # --- 1) hit → clusterID ---
+    ph1 = ",".join("?" for _ in protein_ids)
+    cur.execute(
+        f"SELECT proteinID, clusterID FROM Proteins WHERE proteinID IN ({ph1})",
+        protein_ids
+    )
+    hit2cid = {r["proteinID"]: r["clusterID"] for r in cur.fetchall()}
+
+    if not hit2cid:
+        dt = time.perf_counter() - t0
+        print(f"[TIMING] chunk {len(protein_ids)} (no clusters) in {dt:.3f}s")
+        return {pid:[["singleton"]] for pid in protein_ids}, {}
+
+    # --- 2) clusterID → neighbours (+ start) ---
+    cids = list(set(hit2cid.values()))
+    ph2 = ",".join("?" for _ in cids)
+    cur.execute(
+        f"SELECT proteinID, clusterID, start "
+        f"FROM Proteins WHERE clusterID IN ({ph2})",
+        cids
+    )
+    nbr_rows = list(cur.fetchall())
+    nbr_rows.sort(key=lambda r: (r["clusterID"], r["start"]))
+
+    # --- 3) neighbour → domains ---
+    nids = [r["proteinID"] for r in nbr_rows]
+    ph3 = ",".join("?" for _ in nids)
+    cur.execute(
+        f"SELECT proteinID, domain FROM Domains WHERE proteinID IN ({ph3})",
+        nids
+    )
+    dom_rows = cur.fetchall()
+
+    # Timer stoppen
+    dt = time.perf_counter() - t0
+    print(f"[TIMING] chunk {len(protein_ids)} → "
+          f"{len(nbr_rows)} neighbours in {dt:.3f}s")
+
+    # --- Rest wie gehabt (Aggregation) ---
+    domains_by_nid = defaultdict(list)
+    for r in dom_rows:
+        domains_by_nid[r["proteinID"]].append(r["domain"] or "no_neighbours")
+
+    cluster_to_nids = defaultdict(list)
+    for r in nbr_rows:
+        cluster_to_nids[r["clusterID"]].append(r["proteinID"])
+
+    neighbours = {
+        hit: [
+            domains_by_nid.get(nid, ["singleton"])
+            for nid in cluster_to_nids.get(cid, [])
+        ] or [["singleton"]]
+        for hit, cid in hit2cid.items()
+    }
+
+    comp_counts = defaultdict(int)
+    for cid, ids in cluster_to_nids.items():
+        comp = tuple(
+            sorted(tuple(sorted(domains_by_nid.get(nid, ["singleton"])))
+                   for nid in ids)
+        )
+        comp_counts[comp] += 1
+
+    return neighbours, comp_counts
+
+
+def fetch_neighbouring_genes_with_domains(db_path,
+                                                  protein_ids,
+                                                  chunk_size: int = 50000,
+                                                  threads: int = 8):
+    """
+    Threaded wrapper: chunk_size große Listen parallel in Threads verarbeiten,
+    Ergebnisse zusammenführen und sortierte Kompositionen zurückgeben.
+    """
+    # Ensure it's a list so we can index/slice
+    protein_list = list(protein_ids)
+
+    if not protein_ids:
+        return {}, []
+
+    # 1) Chunking
+    chunks = [
+        protein_list[i : i + chunk_size]
+        for i in range(0, len(protein_ids), chunk_size)
+    ]
+    args = [(db_path, chunk) for chunk in chunks]
+
+    # 2) Parallel mit ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        partials = list(executor.map(_fetch_neighbours_chunk, args))
     
+    # 3) Merge results
+    full_neighbours = {}
+    total_counts = defaultdict(int)
+    for neigh_dict, comp_dict in partials:
+        full_neighbours.update(neigh_dict)
+        for comp, cnt in comp_dict.items():
+            total_counts[comp] += cnt
+    
+    # 4) Sort compositions
+    sorted_compositions = sorted(
+        total_counts.items(), key=lambda x: x[1], reverse=True
+    )
+
+    return full_neighbours, sorted_compositions

@@ -64,6 +64,7 @@ class Options:
         self.deconcat_flag = 0 #Memorize if a deconcatenation was done
         self.glob_flag = 0 #Memorize if a concatenation was done
         
+        self.sqlite_chunks = 50000 # chunks size for placeholders in sqlite fetch TODO
         
 def parse_arguments(arguments):
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
@@ -411,11 +412,6 @@ def mcl_decorate_training_sequences(options):
             options.cores
         )
 
-def mcl_decorate_training_sequences2(options):
-    
-    print("\n[INFO] Generating grp3: Extended MCL cluster selection by all sequences with similar genomic vicinity")
-
-    # Get the 
 
 
 

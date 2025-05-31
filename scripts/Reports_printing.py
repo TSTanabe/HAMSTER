@@ -13,174 +13,308 @@ from collections import Counter, defaultdict
 
 from . import myUtil
 from . import Reports
+from . import Csb_proteins
+from . import Pam_Mx_algorithm
 
-import matplotlib
-matplotlib.use('Agg')    # <— ganz oben, vor pyplot!
-import matplotlib.pyplot as plt
-from matplotlib import colors as mcolors
 
 def process_initial_validations(options,
                                 report_directory: str,
                                 init_val_dir: str,
                                 db_path: str,
                                 output_dir: str = None):
-    """
-    Processes all initial validation .pkl reports in a directory:
-    - Loads reference sets for grp1 and grp2
-    - Unpacks each .pkl report into a DataFrame
-    - Fetches genetic neighborhood for each hit ID
-    - Adds neighborhood info to the DataFrame
-    - Saves enriched DataFrame as CSV in output_dir
+    # Prepare directories and file lists
+    output_dir = _prepare_output_dir(report_directory, output_dir)
+    pkl_files = _find_pkl_files(init_val_dir)
 
-    Parameters:
-        init_val_dir (str): Directory containing '*.ini_performance_pkl' files
-        db_path (str): Path to the SQLite database for neighborhood queries
-        output_dir (str): Directory to save enriched CSVs. Defaults to init_val_dir/enriched_reports
-        
-    Info:
-        Cannot be parallelized because the neighbourhood fetching is already a forked
-        process.
-    """
-    # Prepare output directory
+    # Collect cutoffs and performance metrics
+    cutoff_collection = _collect_cutoff_and_performance(pkl_files, init_val_dir, options)
+
+    # Load reference and MCL data
+    basis, grp1_refs, grp2_refs = _load_reference_sets(options)
+    all_grp1, all_grp2 = _compute_unified_sets(grp1_refs, grp2_refs)
+    mcl_grp1_cutoff, mcl_grp2_cutoff, mcl_results = _load_mcl_cutoff_sets(options)
+
+    # Save presence-absence matrices of all reference sequences
+    print(f"[INFO] Saving global presence absence matrices")
+    _save_pam_matrices(options, basis, grp1_refs, grp2_refs, output_dir)
+    
+    # Process each report
+    for pkl_file in pkl_files:
+        _handle_pkl_file(
+            options, pkl_file, init_val_dir, db_path, output_dir,
+            cutoff_collection, all_grp1, all_grp2,
+            grp1_refs, grp2_refs,
+            mcl_grp1_cutoff, mcl_grp2_cutoff, mcl_results
+        )
+
+
+
+# --- Directory & File Helpers ---
+
+def _prepare_output_dir(report_directory, output_dir):
     if output_dir is None:
         output_dir = os.path.join(report_directory, 'Reports')
     os.makedirs(output_dir, exist_ok=True)
+    return output_dir
 
-    # Load reference sets
-    grp1_refs = myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
-    grp2_refs = myUtil.load_cache(options, 'grp2_selection_ref_seqs.pkl')
-    
-    # Load mcl cutoff sets
-    mcl_grp1_cutoff = myUtil.load_cache(options, 'mcl_grp1_cluster_selection_cutoffs.pkl')
-    mcl_grp2_cutoff = myUtil.load_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl')
-    
-    # Precompute unified sets (safe if empty)
-    all_grp1 = set().union(*grp1_refs.values()) if grp1_refs else set()
-    all_grp2 = set().union(*grp2_refs.values()) if grp2_refs else set()
 
-    # Find all initial performance pkl files
+def _find_pkl_files(init_val_dir):
     pattern = os.path.join(init_val_dir, '*.ini_performance_pkl')
-    pkl_files = glob.glob(pattern)
+    return glob.glob(pattern)
 
-    # Find all mcl files
-    mcl_results = myUtil.load_cache(options, 'mcl_clustering_results.pkl')
-    
-    # Collect cutoffs
-    cutoff_collection = {}
-    performance_collection = {}
-    
-    for pkl_file in pkl_files:
-    
-        protein = os.path.splitext(os.path.basename(pkl_file))[0]
-        hmm_report_output_dir = os.path.join(output_dir, f"{protein}")
-        os.makedirs(hmm_report_output_dir, exist_ok=True)
+
+# --- Data Loading & Collection ---
+
+def _collect_cutoff_and_performance(pkl_files, init_val_dir, options):
+    cutoffs = {}
+    performance = {}
+    for pkl in pkl_files:
+        name, cuts, perf = _extract_cutoff_and_performance(pkl, init_val_dir, options)
+        cutoffs[name] = cuts
+        performance[name] = perf
+    # Optionally write summary files here
+    return {'cutoffs': cutoffs, 'performance': performance}
+
+
+def _extract_cutoff_and_performance(pkl_file, init_val_dir, options):
+    protein = os.path.splitext(os.path.basename(pkl_file))[0]
+    cutoffs_file = os.path.join(init_val_dir, f"{protein}.ini_cutoffs_pkl")
+    data = myUtil.load_cache(options, f"{protein} cutoffs", file_path=cutoffs_file)
+    name, opt, trust, noise, best_MCC, best_matrix = data
+    cuts = {'optimized cutoff': opt,
+            'trusted cutoff': trust,
+            'noise cutoff': noise}
+    perf = {'MCC': best_MCC,
+            'Matrix [TP,FP,FN,TN]': best_matrix}
+    return name, cuts, perf
+
+
+def _load_reference_sets(options):
+    basis = myUtil.load_cache(options, 'basis_merged_grouped.pkl')
+    grp1 = myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
+    grp2 = myUtil.load_cache(options, 'grp2_selection_ref_seqs.pkl')
+    return basis, grp1, grp2
+
+
+def _compute_unified_sets(grp1_refs, grp2_refs):
+    all1 = set().union(*grp1_refs.values()) if grp1_refs else set()
+    all2 = set().union(*grp2_refs.values()) if grp2_refs else set()
+    return all1, all2
+
+
+def _load_mcl_cutoff_sets(options):
+    m1 = myUtil.load_cache(options, 'mcl_grp1_cluster_selection_cutoffs.pkl')
+    m2 = myUtil.load_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl')
+    results = myUtil.load_cache(options, 'mcl_clustering_results.pkl')
+    return m1, m2, results
+
+
+# --- Per-File Processing ---
+
+def _handle_pkl_file(
+    options, pkl_file, init_val_dir, db_path, output_dir,
+    collections, all_grp1, all_grp2,
+    grp1_refs, grp2_refs,
+    mcl1_cutoff, mcl2_cutoff, mcl_results
+):
+    protein = os.path.splitext(os.path.basename(pkl_file))[0]
+    report_dir = os.path.join(output_dir, protein)
+    os.makedirs(report_dir, exist_ok=True)
+
+    # Define expected output files
+    enriched_path = os.path.join(report_dir, f"{protein}_enriched.txt")
+    roc_file = os.path.join(report_dir, f"{protein}_roc.txt")
+    mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
+    # neighborhood confusion files for each cutoff label
+    cut_labels = collections['cutoffs'].get(protein, {}).keys()
+    confusion_files = [
+        os.path.join(report_dir, f"neighborhood_confusion_{label}.tsv")
+        for label in cut_labels
+    ]
+
+    # Skip if all core and confusion outputs exist
+    all_expected = [enriched_path, roc_file, mcc_file] + confusion_files
+    if all(os.path.exists(path) for path in all_expected):
+        print(f"[SKIP] All outputs exist for {protein}, skipping.")
+        return
         
-        cutoffs_file = os.path.join(init_val_dir, f"{protein}.ini_cutoffs_pkl")
-        
-        print(f"\n[INFO] Generating HMM training report for {protein}")
-        
-        #### Make the dataframe ###
-        
-        # Load report dict: hit_id -> metrics dict
-        report_dict = myUtil.load_cache(options, "Report metrics", pkl_file)
-        
-        # Load reported cutoffs
-        cutoffs = myUtil.load_cache(options, "Report", file_path=cutoffs_file)
-        hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, best_matrix = cutoffs
-        cutoffs_dict = {'trusted cutoff':trusted_cutoff, 'noise cutoff':noise_cutoff, 'optimized cutoff':optimized_cutoff}
-        cutoff_collection[hmm_protein_name] = cutoffs_dict
-        performance_collection[hmm_protein_name] = {'MCC': best_MCC, 'Matrix [TP,FP,FN,TN]': best_matrix}
-        
-        # Convert to DataFrame
-        df = pd.DataFrame.from_dict(report_dict, orient='index')
-        df.index.name = 'hit_id'
-        
-        # Check validity of the dataframe
-        required_columns = ['bitscore', 'MCC', 'TP', 'FP', 'FN', 'TN']
 
-        if df.empty:
-            print("[ERROR] Report for {protein} is missing.")
-            continue
-        else:
+    print(f"\n[INFO] Generating HMM report for {protein}")
 
-            # Check, ob alle erforderlichen Spalten vorhanden sind
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                print(f"[ERROR] {missing_columns} Report for {protein} is incomplete.")
-                continue
-        
-        # Fetch neighborhood information
-        hit_ids = df.index.tolist()
-        neighbors, _ = Reports.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
+    # Load and validate basic metrics
+    df = _load_and_validate_report(options, pkl_file)
+    if df is None:
+        return
 
-        # Map neighborhood to DataFrame
-        df['neighborhood'] = df.index.map(lambda hid: neighbors.get(hid, [['no_data']]))
+    # Enrich with neighborhood and group membership
+    df = _add_neighborhood_info(df, protein, options, db_path)
+    df['in_grp1'] = df.index.isin(all_grp1)
+    df['in_grp2'] = df.index.isin(all_grp2)
 
-        # Flag grp1/grp2 membership
-        df['in_grp1'] = df.index.isin(all_grp1)
-        df['in_grp2'] = df.index.isin(all_grp2)
+    # Save enriched table
+    _save_enriched(df, report_dir, protein)
 
-        # Save enriched DataFrame
-        out_csv = os.path.join(hmm_report_output_dir, f"{protein}_enriched.txt")
-        df.to_csv(out_csv, sep='\t', index=True)
-        print(f"[SAVE] Saved validation report: {out_csv}")
-    
-        # ROC curve plotting
-        roc_path = os.path.join(hmm_report_output_dir, f"{protein}_roc.txt")
-        write_roc_from_metrics_to_tsv(df, score_col='bitscore', trusted_cutoff=trusted_cutoff, noise_cutoff = noise_cutoff, optimized_cutoff = optimized_cutoff, output_path=roc_path)
+    # Plot ROC and MCC curves
+    cut_dict = collections['cutoffs'].get(protein, {})
+    _plot_roc_and_mcc(df, report_dir, protein, cut_dict)
 
-        # MCC curve per score
-        mcc_path = os.path.join(hmm_report_output_dir, f"{protein}_mcc.txt")
-        export_existing_mcc_curve(df, score_col="bitscore", mcc_col="MCC", output_path=mcc_path)
-        
-        # Confusion stats per gene neighbourhood
+    # Neighborhood confusion stats
+    _write_neighborhood_confusions(df, report_dir, cut_dict)
 
-        for name,cutoff in cutoffs_dict.items():
-            write_neighborhood_confusion_data(df, cutoff, name, output_dir = hmm_report_output_dir)
+    # MCL selection plots
+    _write_mcl_plots_if_available(
+        protein, report_dir,
+        grp1_refs, grp2_refs,
+        mcl1_cutoff, mcl2_cutoff, mcl_results
+    )
 
-        # MCL selection plots
-        protein_name = protein.split('_', 1)[-1]
 
-        # Check if all required data for MCL plotting is present
-        if (
-            protein_name in mcl_results and
-            protein_name in grp1_refs and
-            protein_name in mcl_grp1_cutoff and
-            protein_name in grp2_refs and
-            protein_name in mcl_grp2_cutoff
-        ):
-            mcl_file = mcl_results[protein_name]
-            
-            grp1_ref_seqs_set = grp1_refs[protein_name]
-            grp1_cuts = mcl_grp1_cutoff[protein_name]
+# --- Metric Loading & Validation ---
+
+def _load_and_validate_report(options, pkl_file):
+    report = myUtil.load_cache(options, 'Report metrics', pkl_file)
+    df = pd.DataFrame.from_dict(report, orient='index')
+    df.index.name = 'hit_id'
+
+    if df.empty:
+        print(f"[ERROR] Missing data for {os.path.basename(pkl_file)}")
+        return None
+
+    required = ['bitscore', 'MCC', 'TP', 'FP', 'FN', 'TN']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        print(f"[ERROR] Missing columns {missing} in {os.path.basename(pkl_file)}")
+        return None
+
+    return df
+
+
+# --- Neighborhood Enrichment ---
+
+def _add_neighborhood_info(df, protein, options, db_path):
+    domain = protein.split('_', 1)[-1]
+    cache_name = f"mcl_gene_vicinity_dict_{domain}.pkl"
+    neighbors = myUtil.load_cache(options, cache_name) or {}
+
+    missing = [hid for hid in df.index if hid not in neighbors]
+    if missing:
+        new_nb, _ = Csb_proteins.fetch_neighbouring_genes_with_domains(db_path, missing, options.sqlite_chunks)
+        neighbors.update(new_nb)
+        myUtil.save_cache(options, cache_name, neighbors)
+
+    df['neighborhood'] = df.index.map(lambda hid: neighbors.get(hid, [['singleton']]))
+    return df
+
+
+# --- Saving & Plotting ---
+
+def _save_enriched(df, report_dir, protein):
+    path = os.path.join(report_dir, f"{protein}_enriched.txt")
+    if not os.path.exists(path):
+        df.to_csv(path, sep='\t')
+        print(f"[SAVE] Enriched report: {path}")
+
+
+def _plot_roc_and_mcc(df, report_dir, protein, cutoffs):
+    trusted = cutoffs.get('trusted cutoff')
+    noise = cutoffs.get('noise cutoff')
+    opt = cutoffs.get('optimized cutoff')
+
+    roc_file = os.path.join(report_dir, f"{protein}_roc.txt")
+    write_roc_from_metrics_to_tsv(
+        df, score_col='bitscore',
+        trusted_cutoff=trusted,
+        noise_cutoff=noise,
+        optimized_cutoff=opt,
+        output_path=roc_file
+    )
+    print(f"[SAVE] ROC: {roc_file}")
+
+    mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
+    export_existing_mcc_curve(
+        df, score_col='bitscore', mcc_col='MCC', output_path=mcc_file
+    )
+    print(f"[SAVE] MCC: {mcc_file}")
+
+
+def _write_neighborhood_confusions(df, report_dir, cutoffs):
+    for label, cutoff in cutoffs.items():
+        write_neighborhood_confusion_data(
+            df, cutoff, label,
+            output_dir=report_dir
+        )
+
+
+def _write_mcl_plots_if_available(
+    protein, report_dir,
+    grp1_refs, grp2_refs,
+    mcl1_cutoff, mcl2_cutoff, mcl_results
+):
+    key = protein.split('_', 1)[-1]
+    if key in mcl_results:
+        if key in grp1_refs and key in mcl1_cutoff:
             write_mcl_vs_references(
-                mcl_file,
-                "grp1_mcl_cluster_selection",
-                grp1_ref_seqs_set,
-                grp1_cuts['density_threshold'],
-                grp1_cuts['reference_threshold'],
-                output_dir=hmm_report_output_dir
+                mcl_results[key],
+                'grp1_mcl_cluster_selection',
+                grp1_refs[key],
+                mcl1_cutoff[key]['density_threshold'],
+                mcl1_cutoff[key]['reference_threshold'],
+                output_dir=report_dir
             )
-            print(f"[SAVE] MCL selection plot grp1")
-
-            grp2_ref_seqs_set = grp2_refs[protein_name]
-            grp2_cuts = mcl_grp2_cutoff[protein_name]
+            print(f"[SAVE] MCL grp1: {key}")
+        if key in grp2_refs and key in mcl2_cutoff:
             write_mcl_vs_references(
-                mcl_file,
-                "grp2_mcl_cluster_selection",
-                grp2_ref_seqs_set,
-                grp2_cuts['density_threshold'],
-                grp2_cuts['reference_threshold'],
-                output_dir=hmm_report_output_dir
+                mcl_results[key],
+                'grp2_mcl_cluster_selection',
+                grp2_refs[key],
+                mcl2_cutoff[key]['density_threshold'],
+                mcl2_cutoff[key]['reference_threshold'],
+                output_dir=report_dir
             )
-            print(f"[SAVE] MCL selection plot grp2")
+            print(f"[SAVE] MCL grp2: {key}")
+    else:
+        print(f"[WARN] No MCL data for {key}, skipping plots.")
 
-        else:
-            print(f"[WARN] Skipping MCL selection plots for {protein_name}: missing clustering or cutoff data.")
-        
-    save_cutoffs_table(cutoff_collection, options.Hidden_markov_model_directory, 'cutoffs.txt')
-    save_performance_table(performance_collection, options.Hidden_markov_model_directory, 'performance.txt')
-    return
+
+def _save_pam_matrices(options, basis, grp1_refs, grp2_refs, output_dir):
+    save_PAM_data(
+        options.database_directory,
+        basis,
+        os.path.join(output_dir, 'pam_basis_reference_seqs.txt'),
+        options.cores
+    )
+    save_PAM_data(
+        options.database_directory,
+        grp1_refs,
+        os.path.join(output_dir, 'pam_grp1_reference_seqs.txt'),
+        options.cores
+    )
+    save_PAM_data(
+        options.database_directory,
+        grp2_refs,
+        os.path.join(output_dir, 'pam_grp2_reference_seqs.txt'),
+        options.cores
+    )
+
+
+
+
+################################################################################################
+#############  Subroutine for the cutoff and performance reports and mcl loading ###############
+################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def write_roc_from_metrics_to_tsv(df: pd.DataFrame,
@@ -487,5 +621,15 @@ def save_performance_table(performance_collection, output_dir, filename='perform
         
         
         
-        
-        
+def save_PAM_data(database_path, grouped, output_path, cores):
+    if os.path.isfile(output_path):
+        return
+    pam = Pam_Mx_algorithm.create_presence_absence_matrix(
+            grouped,
+            database_directory=database_path,
+            output="pam_with_all_domains",
+            chunk_size=900,
+            cores=cores
+        )        
+    Pam_Mx_algorithm.write_pam_to_tsv(pam, output_path)
+    return
