@@ -24,7 +24,7 @@ from . import Pam_Singleton_finder
 from . import Pam_defragmentation
 from . import Pam_mcl
 
-#from . import Reports_plotting
+from . import Reports_plotting
 from . import Reports_printing
 from . import Reports
 
@@ -65,6 +65,8 @@ class Options:
         self.glob_flag = 0 #Memorize if a concatenation was done
         
         self.sqlite_chunks = 50000 # chunks size for placeholders in sqlite fetch TODO
+        
+        self.plotting_Rscripts = __location__+"/src"
         
 def parse_arguments(arguments):
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
@@ -489,6 +491,7 @@ def report_cv_performance(options):
     
     Reports_printing.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
     
+    Reports_plotting.process_initial_plotting(options)
     #cross validation
     print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
     

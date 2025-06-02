@@ -29,6 +29,10 @@ def process_initial_validations(options,
     # Collect cutoffs and performance metrics
     cutoff_collection = _collect_cutoff_and_performance(pkl_files, init_val_dir, options)
 
+    # Save the performance and cutoffs in the report directory
+    save_cutoffs_table(cutoff_collection['cutoffs'], output_dir, filename='all_cutoffs.txt')
+    save_performance_table(cutoff_collection['performance'], output_dir, filename='all_performance.txt')
+    
     # Load reference and MCL data
     basis, grp1_refs, grp2_refs = _load_reference_sets(options)
     all_grp1, all_grp2 = _compute_unified_sets(grp1_refs, grp2_refs)
@@ -128,9 +132,10 @@ def _handle_pkl_file(
     # neighborhood confusion files for each cutoff label
     cut_labels = collections['cutoffs'].get(protein, {}).keys()
     confusion_files = [
-        os.path.join(report_dir, f"neighborhood_confusion_{label}.tsv")
+        os.path.join(report_dir, f"neighborhood_confusion_{label.replace(' ', '_')}.tsv")
         for label in cut_labels
     ]
+
 
     # Skip if all core and confusion outputs exist
     all_expected = [enriched_path, roc_file, mcc_file] + confusion_files
@@ -411,6 +416,7 @@ def write_neighborhood_confusion_data(df: pd.DataFrame,
     out_dir = output_dir or os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
     fname = f'neighborhood_confusion_{cutoff_name}.tsv'
+    fname.replace(' ','_')
     path = os.path.join(out_dir, fname)
     if os.path.isfile(path):
         return
@@ -559,7 +565,7 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
 
     # Define column order
     fieldnames = ['name', 'optimized', 'trusted', 'noise']
-
+    sorted_items = sorted(cutoffs_collection.items(), key=lambda kv: kv[0])
     with open(out_path, 'w', newline='') as tsvfile:
         writer = csv.DictWriter(tsvfile,
                                 fieldnames=fieldnames,
@@ -581,19 +587,22 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
 
 def save_performance_table(performance_collection, output_dir, filename='performance.tsv'):
     """
-    Saves the performance_collection into a tab-separated file.
+    Saves the performance_collection into a tab-separated file, sorted by the 'name'-Spalte.
 
     Parameters:
-        performance_collection (dict): Mapping name -> dict with keys
-                                       'MCC' and 'Matrix [TP,FP,FN,TN]'
-        output_dir (str): Directory in which to save the TSV.
-        filename (str): Name of the TSV file (default: 'performance.tsv').
+        performance_collection (dict): Mapping name -> dict mit Schlüsseln
+                                       'MCC' und 'Matrix [TP,FP,FN,TN]'
+        output_dir (str): Verzeichnis, in dem die TSV-Datei abgelegt wird.
+        filename (str): Dateiname (default: 'performance.tsv').
     """
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, filename)
 
-    # Define column order
+    # Definiere Spaltenreihenfolge
     fieldnames = ['name', 'MCC', 'TP', 'FP', 'FN', 'TN']
+
+    # Sortiere alle Einträge alphabetisch nach dem Schlüssel (name)
+    sorted_items = sorted(performance_collection.items(), key=lambda kv: kv[0])
 
     with open(out_path, 'w', newline='') as tsvfile:
         writer = csv.DictWriter(tsvfile,
@@ -602,10 +611,9 @@ def save_performance_table(performance_collection, output_dir, filename='perform
         # Header schreiben
         writer.writeheader()
 
-        # jede Zeile pro Eintrag
-        for name, perf in performance_collection.items():
+        # Schreibe jede Zeile in alphabetischer Reihenfolge (Name = erste Spalte)
+        for name, perf in sorted_items:
             matrix = perf.get('Matrix [TP,FP,FN,TN]', [])
-            # Entpacke Matrix oder fülle mit None, falls unvollständig
             TP, FP, FN, TN = (matrix + [None]*4)[:4]
             writer.writerow({
                 'name': name,
@@ -617,6 +625,7 @@ def save_performance_table(performance_collection, output_dir, filename='perform
             })
 
     print(f"[SAVE] Performance table saved to {out_path}")
+
         
         
         
