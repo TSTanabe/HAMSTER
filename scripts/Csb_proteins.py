@@ -858,7 +858,7 @@ def _fetch_neighbours_chunk(args):
 
 def fetch_neighbouring_genes_with_domains(db_path,
                                                   protein_ids,
-                                                  chunk_size: int = 50000,
+                                                  chunk_size: int = 999,
                                                   threads: int = 8):
     """
     Threaded wrapper: chunk_size große Listen parallel in Threads verarbeiten,
@@ -895,3 +895,207 @@ def fetch_neighbouring_genes_with_domains(db_path,
     )
 
     return full_neighbours, sorted_compositions
+    
+    
+    
+    
+##########################################################################################################
+######################### Extend grouped reference proteins with similar csb #############################
+##########################################################################################################
+
+def extend_merged_grouped_by_csb_similarity(options, grouped):
+    
+    # Main routine for addition of similar proteins from similar csb to the grouped datasets
+    
+    # Find keywords that are in jaccard distance to the csb of reference sequences in grouped
+    protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein(options, grouped, options.jaccard)
+    
+    # Integrate proteins with the new keywords into merged_grouped dataset
+    extended_grouped = integrate_csb_variants_into_merged_grouped(options, grouped, protein_to_new_keywords_dict, options.sqlite_chunks)
+
+    return extended_grouped
+
+
+
+
+
+
+
+def select_similar_csb_patterns_per_protein(options, merged_grouped, jaccard_threshold=0.7):
+    """
+    Extend merged_grouped by finding CSB patterns with high similarity to the patterns 
+    associated with the current proteins in each domain.
+
+    Args:
+        options: Options object containing paths and settings.
+        merged_grouped (dict): Current merged_grouped dictionary { domain: set(proteinIDs) }.
+        jaccard_threshold (float): Jaccard similarity threshold.
+
+    Returns:
+        dict: jaccard_included_patterns { domain: set(similar CSB keywords) }.
+    """
+
+    # Stores the similar CSB keywords for each domain
+    jaccard_included_patterns = {}  # { domain : set(csb_keywords) }
+
+    # Load all CSB patterns from csb_output_file
+    csb_dictionary = parse_csb_file_to_dict(options.csb_output_file)
+
+    # Process each domain
+    for domain, protein_ids in merged_grouped.items():
+        print(f"[INFO] Processing domain {domain}")
+
+        # Fetch all keywords associated with proteins of this domain
+        all_keywords = fetch_keywords_for_proteins(options.database_directory, protein_ids)
+
+        if not all_keywords:
+            print(f"[WARN] No keywords found for domain {domain}")
+            continue
+
+        # Build union of patterns from these keywords
+        domain_pattern_union = set().union(
+            *[csb_dictionary[k] for k in all_keywords if k in csb_dictionary]
+        )
+
+        print(f"[INFO] Domain {domain} - Pattern size: {len(domain_pattern_union)}")
+
+        # Compare against all CSB patterns and collect similar ones
+        similar_csb_keywords = set()
+
+        for csb_key, csb_pattern in csb_dictionary.items():
+            intersection = len(domain_pattern_union & csb_pattern)
+            union = len(domain_pattern_union | csb_pattern)
+            similarity = intersection / union if union > 0 else 0.0
+
+            if similarity >= jaccard_threshold:
+                similar_csb_keywords.add(csb_key)
+
+        print(f"[INFO] Domain {domain} - Found {len(similar_csb_keywords)} similar CSB patterns (Jaccard >= {jaccard_threshold})")
+
+        # Store the result for this domain
+        jaccard_included_patterns[domain] = similar_csb_keywords
+
+    # Return dictionary: domain → set of similar CSB keywords
+    return jaccard_included_patterns
+
+
+
+def fetch_keywords_for_proteins(database_path, protein_ids, chunk_size=999):
+    """
+    Fetch keywords for a list of proteinIDs from the database (chunked).
+
+    Args:
+        database_path (str): Path to the SQLite database.
+        protein_ids (iterable): List or set of proteinIDs.
+        chunk_size (int): Maximum size of chunks (default 999).
+
+    Returns:
+        set: Union of all keywords associated with these proteinIDs.
+    """
+
+    protein_to_keywords = defaultdict(set)
+
+    if not protein_ids:
+        print("[WARN] No proteinIDs provided to fetch_keywords_for_proteins.")
+        return set()
+
+    conn = sqlite3.connect(database_path)
+    cur = conn.cursor()
+
+    protein_ids = list(protein_ids)
+    total = len(protein_ids)
+    print(f"[INFO] Fetching keywords for {total} proteins (chunk size {chunk_size})")
+
+    for start in range(0, total, chunk_size):
+        end = start + chunk_size
+        chunk = protein_ids[start:end]
+
+        protein_placeholders = ','.join(['?'] * len(chunk))
+        query = f"""
+        SELECT Proteins.proteinID, Keywords.keyword
+        FROM Proteins
+        LEFT JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
+        WHERE Proteins.proteinID IN ({protein_placeholders})
+        """
+
+        cur.execute(query, chunk)
+        rows = cur.fetchall()
+
+        for protein_id, keyword in rows:
+            if keyword:
+                protein_to_keywords[protein_id].add(keyword)
+
+        print(f"[INFO] Processed proteins {start+1} to {min(end, total)} of {total}")
+
+    conn.close()
+
+    print(f"[INFO] Retrieved keywords for {len(protein_to_keywords)} proteins.")
+
+    # Union of all keywords associated with these reference sequences
+    all_keywords = set().union(*protein_to_keywords.values())
+
+    return all_keywords
+
+
+
+def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_to_new_keywords_dict, chunk_size=999):
+    """
+    Integrates proteins matching new CSB keywords into merged_grouped.
+
+    Args:
+        options: Options object with paths and settings.
+        merged_grouped (dict): Current merged_grouped { domain : set(proteinIDs) }.
+        domain_to_new_keywords_dict (dict): { domain : set(new_keywords) }.
+
+    Returns:
+        updated merged_grouped (dict).
+    """
+
+    print(f"[INFO] Starting integration of new keywords into merged_grouped...")
+
+    conn = sqlite3.connect(options.database_directory)
+    cur = conn.cursor()
+
+    total_proteins_added = 0
+
+    for domain, new_keywords in domain_to_new_keywords_dict.items():
+        if not new_keywords:
+            print(f"[INFO] Domain {domain}: No new keywords to integrate.")
+            continue
+
+        print(f"[INFO] Domain {domain}: Integrating sequences from {len(new_keywords)} new keywords")
+
+        new_keywords_list = list(new_keywords)
+        domain_proteins_before = len(merged_grouped.get(domain, set()))
+        proteins_added_this_domain = 0
+
+        for start in range(0, len(new_keywords_list), chunk_size):
+            end = start + chunk_size
+            chunk = new_keywords_list[start:end]
+
+            placeholders = ','.join(['?'] * len(chunk))
+            query = f"""
+            SELECT Proteins.proteinID
+            FROM Proteins
+            LEFT JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
+            WHERE Keywords.keyword IN ({placeholders})
+            """
+
+            cur.execute(query, chunk)
+            rows = cur.fetchall()
+
+            for (protein_id,) in rows:
+                if protein_id not in merged_grouped[domain]:
+                    merged_grouped[domain].add(protein_id)
+                    proteins_added_this_domain += 1
+
+        domain_proteins_after = len(merged_grouped[domain])
+        print(f"[INFO] Added {proteins_added_this_domain} new {domain} based on similar synteny. New total: {domain_proteins_after}")
+
+        total_proteins_added += proteins_added_this_domain
+
+    conn.close()
+
+    print(f"[INFO] Integration complete: {total_proteins_added} proteins added across all domains.")
+
+    return merged_grouped

@@ -315,7 +315,10 @@ def pam_defragmentation(options):
     basis_score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
     
     merged_grouped, merged_score_limit_dict = Pam_defragmentation.pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_limit_dict)
-    
+
+    # Adds protein sequences from csb that are below jaccard distance threshold distance to grp0 csb
+    merged_grouped = Csb_proteins.extend_merged_grouped_by_csb_similarity(options, merged_grouped)
+
     # Save computed grp1 datasets
     myUtil.save_cache(options, 'grp1_merged_grouped.pkl', merged_grouped)
     myUtil.save_cache(options, 'grp1_merged_score_limits.pkl', merged_score_limit_dict)
@@ -415,8 +418,7 @@ def mcl_decorate_training_sequences(options):
         )
 
 
-
-
+    print("\n[INFO] Generating grp3: Converge selection by mcl and")
 
 
 
