@@ -1078,10 +1078,12 @@ def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_t
             SELECT Proteins.proteinID
             FROM Proteins
             LEFT JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-            WHERE Keywords.keyword IN ({placeholders})
+            LEFT JOIN Domains ON Proteins.proteinID = Domains.proteinID
+            WHERE Domains.domain = ? AND Keywords.keyword IN ({placeholders})
             """
 
-            cur.execute(query, chunk)
+            params = [domain] + chunk
+            cur.execute(query, params)
             rows = cur.fetchall()
 
             for (protein_id,) in rows:

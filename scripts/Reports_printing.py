@@ -574,7 +574,7 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
         writer.writeheader()
 
         # write one line per entry
-        for name, cuts in cutoffs_collection.items():
+        for name, cuts in sorted_items.items():
             writer.writerow({
                 'name':      name,
                 'optimized': cuts.get('optimized cutoff'),

@@ -495,7 +495,8 @@ def report_cv_performance(options):
     
     Reports_plotting.process_initial_plotting(options)
     #cross validation
-    print(f"Saving the cutoffs and performance reports from the cross-validatio to {options.Hidden_markov_model_directory}")
+    print("\n[INFO] Starting cross-validation")
+    print(f"[INFO] Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}")
     
     options.reports = Reports.parse_matrices_to_report(options.cross_validation_directory,"_cv_matrices.txt")
     

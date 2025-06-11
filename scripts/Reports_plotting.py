@@ -65,12 +65,12 @@ def plotting_matrix_histogram(options, tsv_dir):
             # Output-PDF-Name: <basename>_<flag>.pdf
             output_pdf = f"{base}_{flag}.pdf"
             if os.path.exists(output_pdf):
-                print(f"[SKIP] '{output_pdf}' existiert bereits – überspringe.")
+                print(f"[SKIP] '{output_pdf}' already exists")
             else:
                 tasks.append((tsv_file, flag))
 
     if not tasks:
-        print("Alle Outputs existieren bereits, keine Tasks gestartet.")
+        print("[SKIP] All outputs already exist")
         return
 
     # 4) Parallel ausführen mit ThreadPoolExecutor
@@ -86,11 +86,11 @@ def plotting_matrix_histogram(options, tsv_dir):
             try:
                 tsv_file, flag, returncode = future.result()
                 if returncode != 0:
-                    print(f"[ERROR] R-Skript schlug fehl für '{tsv_file}' (filter={flag}).")
+                    print(f"[ERROR] R-script not executable '{tsv_file}' (filter={flag}).")
                 else:
-                    print(f"[SAVE] Plot erstellt für '{tsv_file}' (filter={flag}).")
+                    print(f"[SAVE] Plot created for '{tsv_file}' (filter={flag}).")
             except Exception as exc:
-                print(f"[ERROR] Beim Ausführen von '{tsv_file}' (filter={flag}) ist ein Fehler: {exc}")
+                print(f"[ERROR] During the execution of '{tsv_file}' (filter={flag}) an error occurred: {exc}")
 
 
                 

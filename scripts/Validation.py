@@ -562,7 +562,7 @@ def calculate_performance_and_sum_matrices(cross_validation_folds):
         lowest_noise_cutoff = min(lowest_noise_cutoff, noise_cutoff)
 
         # Update best MCC and corresponding optimized cutoff
-        if mcc > best_mcc or (mcc == best_mcc and optimized_cutoff < best_optimized_cutoff):
+        if safe_compare(mcc, best_mcc, optimized_cutoff, best_optimized_cutoff):
             best_mcc = mcc
             best_optimized_cutoff = optimized_cutoff
 
@@ -572,6 +572,12 @@ def calculate_performance_and_sum_matrices(cross_validation_folds):
     best_optimized_cutoff = best_optimized_cutoff if best_optimized_cutoff and best_optimized_cutoff > 0 else 10
     
     return (sum_matrix, fold_matrices, best_optimized_cutoff, highest_trusted_cutoff, lowest_noise_cutoff)
+
+def safe_compare(mcc, best_mcc, optimized_cutoff, best_optimized_cutoff):
+    if any(x is None for x in [mcc, best_mcc, optimized_cutoff, best_optimized_cutoff]):
+        return False
+    return mcc > best_mcc or (mcc == best_mcc and optimized_cutoff < best_optimized_cutoff)
+
 
 def count_fasta_headers(fasta_file):
     with open(fasta_file, "r") as f:
