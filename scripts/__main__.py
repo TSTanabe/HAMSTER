@@ -64,7 +64,7 @@ class Options:
         self.deconcat_flag = 0 #Memorize if a deconcatenation was done
         self.glob_flag = 0 #Memorize if a concatenation was done
         
-        self.sqlite_chunks = 50000 # chunks size for placeholders in sqlite fetch TODO
+        self.sqlite_chunks = 999 # chunks size for placeholders in sqlite fetch TODO
         
         self.plotting_Rscripts = __location__+"/src"
         
