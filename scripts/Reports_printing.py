@@ -96,7 +96,7 @@ def _extract_cutoff_and_performance(pkl_file, init_val_dir, options):
 def _load_reference_sets(options):
     basis = myUtil.load_cache(options, 'basis_merged_grouped.pkl')
     grp1 = myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
-    grp2 = myUtil.load_cache(options, 'grp2_selection_ref_seqs.pkl')
+    grp2 = myUtil.load_cache(options, 'grp3_selection_ref_seqs.pkl')
     return basis, grp1, grp2
 
 
@@ -107,8 +107,8 @@ def _compute_unified_sets(grp1_refs, grp2_refs):
 
 
 def _load_mcl_cutoff_sets(options):
-    m1 = myUtil.load_cache(options, 'mcl_grp1_cluster_selection_cutoffs.pkl')
-    m2 = myUtil.load_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl')
+    m1 = myUtil.load_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl')
+    m2 = myUtil.load_cache(options, 'mcl_grp3_cluster_selection_cutoffs.pkl')
     results = myUtil.load_cache(options, 'mcl_clustering_results.pkl')
     return m1, m2, results
 
@@ -574,7 +574,7 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
         writer.writeheader()
 
         # write one line per entry
-        for name, cuts in sorted_items.items():
+        for name, cuts in sorted_items:
             writer.writerow({
                 'name':      name,
                 'optimized': cuts.get('optimized cutoff'),

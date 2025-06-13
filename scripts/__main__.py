@@ -79,18 +79,17 @@ def parse_arguments(arguments):
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    essential = parser.add_argument_group("Provide either (-q & -f) or -db")
+    essential = parser.add_argument_group("Provide either (-q & -f) or -db or -r")
     essential.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = __location__, metavar = '<directory>', help='Directory of the target fasta files, need -q option')
     essential.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Query sequences fasta file, need -f option')
     essential.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Existing HAMSTER sqlite database')
-    
+    essential.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Resultfile directory (of previous run)')
 
     resources = parser.add_argument_group("Optional parameters")
     resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='Start pipeline at stage')
     resources.add_argument('-x', dest='end', type=int, default = 10, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='End pipeline at stage')
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Use number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file fro input assemblies')
-    resources.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Resultfile directory (of previous run)')
     resources.add_argument('-glob_off', dest='glob_search', action='store_false', help='Do not concatenated fasta file for initial diamond search')
     resources.add_argument('-cv_off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')
    
@@ -114,16 +113,6 @@ def parse_arguments(arguments):
     search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query')
 
 
-
-    #Cluster parameters
-    #protein_cluster = parser.add_argument_group("Sequence clustering parameters for mmseqs2")
-    #protein_cluster.add_argument('-cluster-active', dest='protein_cluster_active', action='store_true', help='Cluster initial blastp hits with mmseqs2 cluster')
-    #protein_cluster.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2,3,4], help='mmseqs2 cluster search alignment mode')
-    #protein_cluster.add_argument('-cluster-coverage', dest='clustercoverage', type=float, default = 0.800, metavar='<float>', help='mmseqs2 cluster min. coverage used for clustering sequences')
-    #protein_cluster.add_argument('-cluster-min-seq-id',dest='cminseqid',type=float, default=0.000, metavar='<float>', help='mmseqs2 search list matches above this sequence identity [0.0,1.0]')
-
-
-    
     genecluster = parser.add_argument_group("Optional gene cluster prediction parameters")
     genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes')
     genecluster.add_argument('-p', dest= 'patterns_file' , type=myUtil.file_path, default=__location__+"/src/Patterns", metavar='<filepath>', help='Filepath to predefined tab separated patterns file')
@@ -262,7 +251,7 @@ def initial_search(options):
 def csb_finder(options):
 
     Csb_cluster.csb_prediction(options)
-    csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options)
+    csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options, 0.0)
 
     Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) # remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
@@ -345,13 +334,15 @@ def mcl_family_clustering_sequences(options):
 
         Output: are the grp1 fasta files
     """
+    
+    # Load grp1 datasets, that includes basis + proteins with similar csb and presence absence patterns
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
 
     print("\n[INFO] Including homologs without genomic context based on protein sequence clustering")
     print("[INFO] Generating protein family fasta files")
     Csb_proteins.decorate_training_data(options, score_limit_dict, grouped)
-        
+
     # Markov chain clustering for grp1 fasta files
     if not options.csb_mcl_clustering:
         return
@@ -376,35 +367,11 @@ def mcl_decorate_training_sequences(options):
     myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
     
     # MCL cluster analysis, cluster selection with F1 optimized density for basic grouped sequences
-    print("\n[INFO] Generating grp1: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
+    print("\n[INFO] Generating grp2: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
     extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, grouped, options.mcl_density_thrs, options.mcl_reference_thrs)
-    extended_grouped_prefixed = {f"grp1_{key}": value for key, value in extended_grouped.items()}
+    extended_grouped_prefixed = {f"grp2_{key}": value for key, value in extended_grouped.items()}
 
     # Save the mcl cluster selection cutoffs    
-    myUtil.save_cache(options, 'mcl_grp1_cluster_selection_cutoffs.pkl', mcl_cutoffs)
-    
-    # Write down the extended
-    Csb_proteins.fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            extended_grouped_prefixed,
-            options.fasta_output_directory,
-            options.min_seqs,
-            options.max_seqs,
-            options.cores
-        )
-    
-    print("\n[INFO] Generating grp2: Extended MCL cluster selection by csb and presence plausibility")
-    # MCL cluster analysis with pam and csb selection
-    regrouped = Pam_mcl.select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, grouped)
-    
-    # Save the regrouped reference seqs used to select inclusion of the grp2 mcl clusters
-    myUtil.save_cache(options, 'grp2_selection_ref_seqs.pkl', regrouped)
-    
-    # MCL cluster analysis, cluster selection with F1 optimized density for extended grouped
-    extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
-    extended_grouped_prefixed = {f"grp2_{key}": value for key, value in extended_grouped.items()}
-    
-    # Save the mcl cluster selection cutoffs
     myUtil.save_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl', mcl_cutoffs)
     
     # Write down the extended
@@ -418,30 +385,42 @@ def mcl_decorate_training_sequences(options):
         )
 
 
-    print("\n[INFO] Generating grp3: Converge selection by mcl and")
 
-
-
-
-
-
-
-
-
-
-
-
-           
-    # Phylogeny clustering for lca fasta files
-    #if options.csb_distinct_grouping:
-        
-    #    # Decorate grouped high scoring csb with similarly high seqs from the same phylogenetic clade
-    #    print("\nCalculating phylogeny for each protein family")
-        
-    #    decorated_grouped_dict = Csb_phylogeny.csb_phylogeny_datasets(options, grouped) # phylogenetic grouped training data
-        
-    #    Csb_proteins.fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.fasta_output_directory, options.min_seqs, options.max_seqs, options.cores)
     
+    print("\n[INFO] Generating grp3: Extended MCL cluster selection by csb and presence plausibility")
+    # MCL cluster analysis with pam and csb selection
+    regrouped = Pam_mcl.select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, grouped)
+    
+    # Save the regrouped reference seqs used to select inclusion of the grp3 mcl clusters. These are grp1 + pam selection
+    myUtil.save_cache(options, 'grp3_selection_ref_seqs.pkl', regrouped)
+    
+    # MCL cluster analysis, cluster selection with F1 optimized density for extended grouped
+    extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    extended_grouped_prefixed = {f"grp3_{key}": value for key, value in extended_grouped.items()}
+    
+    # Save the mcl cluster selection cutoffs
+    myUtil.save_cache(options, 'mcl_grp3_cluster_selection_cutoffs.pkl', mcl_cutoffs)
+    
+    # Write down the extended
+    Csb_proteins.fetch_seqs_to_fasta_parallel(
+            options.database_directory,
+            extended_grouped_prefixed,
+            options.fasta_output_directory,
+            options.min_seqs,
+            options.max_seqs,
+            options.cores
+        )
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -546,11 +525,11 @@ def main(args=None):
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
         basis_sequence_fasta(options)
-        pam_defragmentation(options)
 
 #6
     if options.stage <= 6 and options.end >= 6:
         myUtil.print_header("\n 6. Markov chain clustering for protein family sequences")
+        pam_defragmentation(options)
         mcl_family_clustering_sequences(options)
         
 #7   

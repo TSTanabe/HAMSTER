@@ -38,19 +38,18 @@ def csb_prediction(options):
     # Reduce redundancy in the keys
     options.computed_Instances_dict = csb_collapse_to_longest_pattern(computed_Instances_dict)
     
-    #options.computed_Instances_dict = computed_Instances_dict #replaced by the csb_collapse
 
 
 
 
     
-def csb_jaccard(options):
+def csb_jaccard(options, jaccard_distance):
     #convert the keys in computed_instances_dict into a list
     computed_Instances_key_list = csb_Instance_key_list(options.computed_Instances_dict, options.min_csb_size)
     cluster_dict = dict()
     if len(computed_Instances_key_list) > 1:
         matrix = calculate_similarity_matrix_jaccard(computed_Instances_key_list) #matrix of similarity and the corresponding clusterID for each row and column as names
-        cluster_dict = hierachy_clustering(matrix,options.jaccard) # 0.2 means that 80 % have to be the same genes
+        cluster_dict = hierachy_clustering(matrix, jaccard_distance) # 0.2 means that 80 % have to be the same genes
     elif len(computed_Instances_key_list) == 1:
         cluster_dict[0] = [0]
     else:
