@@ -18,8 +18,9 @@ def pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_li
     
     # Load precomputed grp1 results if available
     grp1_merged_dict = myUtil.load_cache(options,'grp1_merged_grouped.pkl')
+    grp1_merged_score_dict = myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
     if grp1_merged_dict:
-        return grp1_merged_dict
+        return grp1_merged_dict, grp1_merged_score_dict
     
     # Eine Genomliste zurückbekommen
     predicted_genomes = predict_reference_seqs_for_each_domain(options.database_directory, basis_grouped, options.cores, chunk_size=900)
