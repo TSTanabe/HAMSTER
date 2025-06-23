@@ -62,7 +62,7 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
         grouped_3_dict = {}
         print("[INFO] Selecing sequences from mcl clusters with truncated csb")
         for i, (domain, mcl_file) in enumerate(mcl_clustering_results_dict.items(), 1):
-            print(f"  [{i}/{total}] Processing: {domain}")
+            print(f"  [{i}/{total}] Processing: {domain} in file {mcl_file}")
 
             # Get reference sequences for the domain (if exists in processed reference dict)
             reference_sequences = processed_reference_dict.get(domain, set())
@@ -93,6 +93,8 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     
     print("[INFO] Selecing sequences from mcl clusters with plausible presence in the genome")
     # Select the proteins with plausible PAM
+    print(processed_reference_dict)
+    print(extended_grouped)
     if not grouped_4_dict:
         grouped_4_dict = select_proteins_with_plausible_pam_from_mcl(options.database_directory, options.pam_threshold, processed_reference_dict, extended_grouped, options.cores)
     
