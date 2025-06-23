@@ -31,37 +31,31 @@ def prepare_csb_grouped_training_proteins(options):
     Returns:
         tuple:
             - grp_score_limit_dict (dict): Domain-wise score limits.
-            - grouped (dict): Mapping from group label → set of protein IDs.
+            - grouped (dict): Mapping from group protein label → set of protein IDs.
     """
 
-    # Step 1: Compute score limits and keyword clusters
-    grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
+    # Step 1: Try loading cached grouped training data
+    grouped = myUtil.load_cache(options, 'grp0_training_proteinIDs.pkl') # Name is defined by fetch_to_fasta routine
+    grp_score_limit_dict = myUtil.load_cache(options, 'grp0_score_limit_dict.pkl')
 
+    if grouped and grp_score_limit_dict:
+        return grp_score_limit_dict, grouped
+        
+    # Step 2: Compute score limits and keyword clusters
+    grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
+    
     print("[INFO] Collecting sequences for training datasets with similar csb")
     csb_proteins_dict = csb_proteins_datasets(options, clustered_excluded_keywords_dict)
 
     print("[INFO] Processing highly similar homologs with specific genomic context")
+    # Step 3: Export one fasta per protein
+    grouped = csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict)
+    grouped = add_query_ids_to_proteinIDset(grouped, options.database_directory)
 
-    # Step 2: Try loading cached grouped training data
-    grouped = myUtil.load_cache(options, 'grp_training_proteinIDs.pkl')
-
-    # Step 3: If cache is missing, recompute and export FASTAs
-    if not grouped:
-        grouped = csb_proteins_datasets_combine(grouped_keywords_dict, csb_proteins_dict)
-        grouped = add_query_ids_to_proteinIDset(grouped, options.database_directory)
-        
-        
-        extended_grouped_prefixed = {f"grp0_{key}": value for key, value in grouped.items()}
-        fetch_seqs_to_fasta_parallel(
-            options.database_directory,
-            extended_grouped_prefixed,
-            options.fasta_output_directory,
-            min_seq=options.min_seqs,
-            max_seq=options.max_seqs,
-            cores=options.cores
-        )
-        myUtil.save_cache(options, 'grp_training_proteinIDs.pkl', grouped)
-
+    # Step 4: Save in pkl cache
+    myUtil.save_cache(options, 'grp0_training_proteinIDs.pkl', grouped)
+    myUtil.save_cache(options, 'grp0_score_limit_dict.pkl', grp_score_limit_dict)
+    	
     return grp_score_limit_dict, grouped
     
     
@@ -105,6 +99,60 @@ def csb_proteins_datasets(options, sglr_dict):
     dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
 
     return dictionary
+
+def generate_score_limit_dict_from_grouped(database_path, grouped_dict, default_lower=100, default_upper=2000, chunk_size=999):
+    """
+    Generate a score limit dictionary {domain: {'lower_limit': x, 'upper_limit': y}} for each domain
+    from grouped proteinIDs, chunked to avoid SQLite parameter limits.
+
+    Parameters:
+        database_path (str): Path to the SQLite database.
+        grouped_dict (dict): {domain: set(proteinIDs)}
+        default_lower (int): Fallback lower limit if no data found.
+        default_upper (int): Fallback upper limit if no data found.
+        chunk_size (int): Max number of placeholders per query (<=999 for SQLite).
+
+    Returns:
+        dict: {domain: {'lower_limit': X, 'upper_limit': Y}}
+    """
+    result = {}
+
+    with sqlite3.connect(database_path) as con:
+        cur = con.cursor()
+
+        for domain, protein_ids in grouped_dict.items():
+            if not protein_ids:
+                result[domain] = {'lower_limit': default_lower, 'upper_limit': default_upper}
+                continue
+
+            min_score = float('inf')
+            max_score = float('-inf')
+            protein_id_list = list(protein_ids)
+
+            for i in range(0, len(protein_id_list), chunk_size):
+                chunk = protein_id_list[i:i + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                query = f"""
+                    SELECT MIN(score), MAX(score)
+                    FROM Domains
+                    WHERE domain = ? AND proteinID IN ({placeholders});
+                """
+                cur.execute(query, (domain, *chunk))
+                row = cur.fetchone()
+                if row:
+                    chunk_min, chunk_max = row
+                    if chunk_min is not None:
+                        min_score = min(min_score, chunk_min)
+                    if chunk_max is not None:
+                        max_score = max(max_score, chunk_max)
+
+            if min_score == float('inf') or max_score == float('-inf'):
+                # No valid score data found
+                result[domain] = {'lower_limit': default_lower, 'upper_limit': default_upper}
+            else:
+                result[domain] = {'lower_limit': min_score, 'upper_limit': max_score}
+
+    return result
 
 ################################################################################################
 
@@ -181,13 +229,13 @@ def add_query_ids_to_proteinIDset(combined_protein_sets, database_path):
 
 ################################################################################################
 
-def decorate_training_data(options, score_limit_dict, grouped):
+def fetch_protein_family_sequences(options, directory, score_limit_dict, grouped):
 
     # Training datasets with additional sequences
-    score_limit_dict = filter_existing_faa_files(score_limit_dict, options.phylogeny_directory) # Do not fetch again for existing files
+    score_limit_dict = filter_existing_faa_files(score_limit_dict, directory) # Do not fetch again for existing files
     decorated_grouped_dict = fetch_protein_ids_parallel(options.database_directory, score_limit_dict, options.cores, options.max_seqs) # get the proteinIDs within the score limits for each domain, new keys are domain only
     decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-    fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, options.phylogeny_directory, options.min_seqs, options.max_seqs, options.cores)
+    fetch_seqs_to_fasta_parallel(options.database_directory, decorated_grouped_dict, directory, options.min_seqs, options.max_seqs, options.cores)
     
     return
 ################################################################################################
@@ -195,7 +243,8 @@ def decorate_training_data(options, score_limit_dict, grouped):
     
 def parse_csb_file_to_dict(file_path):
     data_dict = {}
-
+    if not os.path.isfile(file_path):
+        return data_dict
     with open(file_path, 'r') as file:
         for line in file:
             # Split the line by tabs
@@ -373,6 +422,19 @@ def remove_non_query_clusters(database, dictionary):
 ###############################################################################
 #################### Protein to fasta operations ##############################
 ###############################################################################
+
+def fetch_training_data_to_fasta(options, grouped, prefix):
+
+    extended_grouped_prefixed = {f"{prefix}_{key}": value for key, value in grouped.items()} # Extend dictionary with a prefix
+    
+    fetch_seqs_to_fasta_parallel(
+        options.database_directory,
+        extended_grouped_prefixed,
+        options.fasta_output_directory,
+        min_seq=options.min_seqs,
+        max_seq=options.max_seqs,
+        cores=options.cores
+    )
 
 def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=990):
     """
@@ -905,7 +967,7 @@ def fetch_neighbouring_genes_with_domains(db_path,
 
 def extend_merged_grouped_by_csb_similarity(options, grouped):
     
-    # Main routine for addition of similar proteins from similar csb to the grouped datasets
+    # Main routine for proteins from highly similar csb to the basic csb
     
     # Find keywords that are in jaccard distance to the csb of reference sequences in grouped
     protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein(options, grouped, options.jaccard)
@@ -943,13 +1005,13 @@ def select_similar_csb_patterns_per_protein(options, merged_grouped, jaccard_thr
 
     # Process each domain
     for domain, protein_ids in merged_grouped.items():
-        print(f"[INFO] Processing domain {domain}")
+        print(f"[INFO] Processing protein {domain}")
 
         # Fetch all keywords associated with proteins of this domain
         all_keywords = fetch_keywords_for_proteins(options.database_directory, protein_ids)
 
         if not all_keywords:
-            print(f"[WARN] No keywords found for domain {domain}")
+            print(f"[WARN] No keywords found for protein {domain}")
             continue
 
         # Build union of patterns from these keywords
@@ -957,7 +1019,7 @@ def select_similar_csb_patterns_per_protein(options, merged_grouped, jaccard_thr
             *[csb_dictionary[k] for k in all_keywords if k in csb_dictionary]
         )
 
-        print(f"[INFO] Domain {domain} - Pattern size: {len(domain_pattern_union)}")
+        print(f"[INFO] Protein {domain} - Currently selected csb: {len(domain_pattern_union)}")
 
         # Compare against all CSB patterns and collect similar ones
         similar_csb_keywords = set()
@@ -970,7 +1032,7 @@ def select_similar_csb_patterns_per_protein(options, merged_grouped, jaccard_thr
             if similarity >= jaccard_threshold:
                 similar_csb_keywords.add(csb_key)
 
-        print(f"[INFO] Domain {domain} - Found {len(similar_csb_keywords)} similar CSB patterns (Jaccard >= {jaccard_threshold})")
+        print(f"[INFO] Protein {domain} - Found {len(similar_csb_keywords)} similar CSB patterns (Jaccard >= {jaccard_threshold})")
 
         # Store the result for this domain
         jaccard_included_patterns[domain] = similar_csb_keywords
@@ -1004,7 +1066,7 @@ def fetch_keywords_for_proteins(database_path, protein_ids, chunk_size=999):
 
     protein_ids = list(protein_ids)
     total = len(protein_ids)
-    print(f"[INFO] Fetching keywords for {total} proteins (chunk size {chunk_size})")
+    #print(f"[INFO] Fetching keywords for {total} proteins")
 
     for start in range(0, total, chunk_size):
         end = start + chunk_size
@@ -1025,7 +1087,7 @@ def fetch_keywords_for_proteins(database_path, protein_ids, chunk_size=999):
             if keyword:
                 protein_to_keywords[protein_id].add(keyword)
 
-        print(f"[INFO] Processed proteins {start+1} to {min(end, total)} of {total}")
+        #print(f"[INFO] Processed proteins {start+1} to {min(end, total)} of {total}")
 
     conn.close()
 
@@ -1051,7 +1113,7 @@ def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_t
         updated merged_grouped (dict).
     """
 
-    print(f"[INFO] Starting integration of new keywords into merged_grouped...")
+    print(f"\n[INFO] Integration of added csb to basic dataset")
 
     conn = sqlite3.connect(options.database_directory)
     cur = conn.cursor()
@@ -1060,10 +1122,10 @@ def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_t
 
     for domain, new_keywords in domain_to_new_keywords_dict.items():
         if not new_keywords:
-            print(f"[INFO] Domain {domain}: No new keywords to integrate.")
+            print(f"[INFO] Protein {domain}: No new keywords to integrate.")
             continue
 
-        print(f"[INFO] Domain {domain}: Integrating sequences from {len(new_keywords)} new keywords")
+        print(f"[INFO] Protein {domain}: Integrating sequences from {len(new_keywords)} new keywords")
 
         new_keywords_list = list(new_keywords)
         domain_proteins_before = len(merged_grouped.get(domain, set()))
@@ -1098,6 +1160,6 @@ def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_t
 
     conn.close()
 
-    print(f"[INFO] Integration complete: {total_proteins_added} proteins added across all domains.")
+    print(f"\n[INFO] Integration completed: {total_proteins_added} proteins added across all domains.\n")
 
     return merged_grouped

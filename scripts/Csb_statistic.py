@@ -14,10 +14,10 @@ from . import myUtil
 
 def group_gene_cluster_statistic(options):
     """
-    Berechnet und speichert (oder lädt) die Statistiken zu Gen-Clustern.
+    Calculates and saves the hit score statistic for each gene cluster
     
     Args:
-        options: Konfigurationsoptionen, die Datenbank- und Verzeichnisinformationen enthalten.
+        options: configuration and parameter container
     
     Returns:
         tuple: 
@@ -25,7 +25,7 @@ def group_gene_cluster_statistic(options):
             - grouped_keywords (dict)
             - clustered_excluded_keywords (dict)
     """
-    #TODO für die bessere Übersicht diesen pkl einen prefix voranstellen, erleidgen solbald debugging der singleton routine durchgeführt ist
+
     filtered_stats_dict = myUtil.load_cache(options, "stat_filtered_stats.pkl")
     domain_score_limits = myUtil.load_cache(options, "stat_domain_score_limits.pkl")
     grouped_keywords = myUtil.load_cache(options, "stat_grouped_keywords.pkl")
@@ -38,26 +38,28 @@ def group_gene_cluster_statistic(options):
         print("[LOAD] existing CSB grouping from cache")
         return domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
 
-    # Schritt 1: Berechnung der Keyword-Statistiken
+    # Step 1: Calculate hit score statistics
     if not filtered_stats_dict or not query_score_dict:
-        print("[INFO] Computing hitscore statistic per gene cluster")
+        print("[INFO] Computing hitscore range per protein per collinear syntenic block")
         stats_dict = get_keyword_statistics_parallel(options.database_directory, options.cores)
 
-        # Schritt 2: Extrahiere das höchste Bitscore pro Domain in QUERY
-        print("[INFO] Extracting highest bitscores per hit")
+        # Step 2: Extract highest selfblast hitscore
+        print("[INFO] Extracting highest bitscores per hit for query-selfblast")
         query_score_dict = get_highest_bitscores_for_genome(options.database_directory, "QUERY")
         myUtil.save_cache(options, "stat_query_score_dict.pkl", query_score_dict)
 
-        # Schritt 3: Entferne CSBs, deren Domains alle unter 70% der Query-Referenz liegen
-        print("[INFO] Filtering out hits with low scores")
+        # Step 3: Remove clusters where all hits are blow threshold. This should remove all low similarity csb of distant homologs
+        print(f"[INFO] Filtering out csb were all hits are below exclude_csb_hitscore {options.low_hitscore_csb_cutoff}")
         filtered_stats_dict = filter_out_low_quality_csb(stats_dict, query_score_dict, options.low_hitscore_csb_cutoff, min(10,options.min_seqs))
         
         myUtil.save_cache(options, "stat_filtered_stats.pkl", filtered_stats_dict)
     
-    # Schritt 4: Speichere gefilterte Statistiken als TSV
+    # Step 4: Save hit scores for later use
     save_stats_to_tsv(filtered_stats_dict, options.Csb_directory)
 
-    # Schritt 5: Gruppiere Keywords pro Domain mit einer maximalen Abweichung von 30%
+    # Step 5: Make for each protein a list of csb keywords where at least one highly similar protein occurs for the pattern
+    # This uses the pattern to include distantly similar homologs with the same function under the assumption that similar co-occurence
+    # retains the original function
     if not grouped_keywords or not distant_keywords:
         print("[INFO] Grouping keywords by domain")
 
@@ -65,14 +67,14 @@ def group_gene_cluster_statistic(options):
         myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
         myUtil.save_cache(options, "stat_distant_keywords.pkl", distant_keywords)
 
-    # Schritt 6: Clustere ausgeschlossene Keywords basierend auf statistischer Ähnlichkeit
+    # Step 6: Group the clusters that are below cutoff. Not used in any case in this program but might be in the future
     if not clustered_excluded_keywords:
         print("[INFO] Clustering gene clusters with low hitscores by similarity")
 
         clustered_excluded_keywords = group_excluded_keywords_by_similarity(filtered_stats_dict, distant_keywords)
         myUtil.save_cache(options, "stat_clustered_excluded_keywords.pkl", clustered_excluded_keywords)
 
-    # Schritt 7: Oberes und unteres Score-Limit der gruppierten CSBs ohne Outliers
+    # Step 7: Upper and lower score limits for grouped csbs without outliers. Score limits are later used
     if not domain_score_limits:
         print("[INFO] Computing protein sequence hit score limits for grouped csbs")
  

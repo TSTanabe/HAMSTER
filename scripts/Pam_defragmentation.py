@@ -16,25 +16,18 @@ from . import myUtil
 #### Main routine of this module
 def pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_limit_dict):
     
-    # Load precomputed grp1 results if available
-    grp1_merged_dict = myUtil.load_cache(options,'grp1_merged_grouped.pkl')
-    grp1_merged_score_dict = myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
-    if grp1_merged_dict:
-        return grp1_merged_dict, grp1_merged_score_dict
-    
-    # Eine Genomliste zurückbekommen
+    # returns dict: {domain: prediction_series (genomeID → score), only new genomes}
     predicted_genomes = predict_reference_seqs_for_each_domain(options.database_directory, basis_grouped, options.cores, chunk_size=900)
     
     # Collect die zusätzlichen proteinIDs aus den entsprechenden Genomen der DB
-    pam_added_score_limit_dict, pam_added_reference_seq_dict = Pam_Mx_algorithm.collect_predicted_singleton_hits_from_db_parallel(predicted_genomes, options.database_directory, options.pam_threshold, options.pam_bsr_threshold)
+    pam_added_reference_seq_dict = Pam_Mx_algorithm.collect_predicted_singleton_hits_from_db_parallel(predicted_genomes, options.database_directory, options.pam_threshold, options.pam_bsr_threshold)
     
     # Merge the new proteinIDs to the basic set to generate the grp1 refseq dataset
     grp1_merged_dict = myUtil.merge_grouped_refseq_dicts_simple(pam_added_reference_seq_dict, basis_grouped)
-    grp1_merged_score_dict = myUtil.merge_score_limits(pam_added_score_limit_dict, basis_score_limit_dict)
 
     report_added_only_counts(grp1_merged_dict, pam_added_reference_seq_dict, basis_grouped) # print in terminal the number of added sequences
     
-    return grp1_merged_dict, grp1_merged_score_dict
+    return grp1_merged_dict
 
 
 #######################
@@ -73,7 +66,7 @@ def predict_reference_seqs_for_each_domain(database_path, grouped, cores, chunk_
     
     # 4. Vorhersagen je Domain
     for domain in grouped:
-        print(f"[INFO] Processing prediction for domain {domain}")
+        print(f"[INFO] Fitting logistic regression model for {domain}")
         
         model = models.get(domain)
         if model is None:

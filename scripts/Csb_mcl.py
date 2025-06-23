@@ -169,7 +169,7 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
     }
 
     for domain, mcl_file in mcl_output_dict.items():
-        print(f"\n[INFO] Selecting hits by csb for {domain}")
+        print(f"\n[INFO] Selecting hits by sequence clustering for {domain}")
 
         # Get reference sequences for the domain (if exists in processed reference dict)
         reference_sequences = processed_reference_dict.get(domain, set())
@@ -240,8 +240,10 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
     for cluster in clusters:
         cluster_set = set(cluster)
         cluster_size = len(cluster_set)
-        ref_count = len(cluster_set & reference_sequences)
+        ref_ids = cluster_set & reference_sequences
+        ref_count = len(ref_ids)
         non_ref_count = cluster_size - ref_count
+
 
         if cluster_size == 0 or ref_count == 0:
             #print("[WARN] No reference sequence in cluster found")
@@ -251,11 +253,13 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
         ref_ratio_of_total = ref_count / n_ref_total
 
         cluster_metrics.append({
-            'ref_ratio_in_cluster': ref_ratio_in_cluster,
-            'ref_ratio_of_total': ref_ratio_of_total,
+            'ref_ratio_in_cluster': ref_count / cluster_size,
+            'ref_ratio_of_total': len(ref_ids) / n_ref_total,
             'ref_count': ref_count,
-            'non_ref_count': non_ref_count
+            'non_ref_count': non_ref_count,
+            'ref_ids': ref_ids  # neue Info
         })
+
 
     if not cluster_metrics:
         return fixed_density_threshold,fixed_reference_threshold
@@ -274,7 +278,8 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
                 if c['ref_ratio_of_total'] >= x_thresh and c['ref_ratio_in_cluster'] >= y_thresh
             ]
 
-            TP = sum(c['ref_count'] for c in selected)
+            TP_ids = set().union(*(c['ref_ids'] for c in selected))
+            TP = len(TP_ids)
             FP = sum(c['non_ref_count'] for c in selected)
             FN = n_ref_total - TP
 
@@ -283,7 +288,20 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
 
             precision = TP / (TP + FP)
             recall = TP / (TP + FN)
+
+            # Sanity check
+            if not (0 <= precision <= 1):
+                print(f"[ERROR] Invalid precision: {precision} (TP={TP}, FP={FP})")
+                continue
+            if not (0 <= recall <= 1):
+                print(f"[ERROR] Invalid recall: {recall} (TP={TP}, FN={FN})")
+                continue
+
             f1 = 2 * (precision * recall) / (precision + recall)
+
+            if f1 > 1:
+                print(f"[ERROR] F1 > 1: TP={TP}, FP={FP}, FN={FN}, Precision={precision}, Recall={recall}, F1={f1}")
+                continue
 
             if f1 >= best_score:
                 best_score = f1
@@ -292,7 +310,6 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
 
     print(f"[INFO] {domain} optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
     return best_coords[1], best_coords[0]  # Return in order: (density, reference)
-
 
 
 def process_single_mcl_file(mcl_file, domain, reference_sequences, density_threshold, reference_fraction_threshold):
@@ -360,7 +377,7 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
     
     return output_results_tab
 
-def validate_mcl_cluster_paths(path_dict, result_files_directory):
+def validate_mcl_cluster_paths(path_dict, result_files_directory, target_dir="Protein_Phylogeny"):
     """
     Validates a dictionary of {key: path_to_mcl_file}. For each path:
     - If the file exists: keep it.
@@ -384,14 +401,15 @@ def validate_mcl_cluster_paths(path_dict, result_files_directory):
         if os.path.isfile(path):
             validated[key] = path
         else:
-            fallback_path = os.path.join(result_files_directory, "Protein_Phylogeny", os.path.basename(path))
+            fallback_path = os.path.join(result_files_directory, target_dir, os.path.basename(path))
             if os.path.isfile(fallback_path):
                 validated[key] = fallback_path
             else:
                 print(f"[WARN] No valid MCL file for {key}: '{path}' or fallback '{fallback_path}'")
 
     if not validated:
-        raise FileNotFoundError("No valid MCL cluster files found in any specified or fallback location.")
+        print("No valid MCL cluster files found in any specified or fallback location.")
+        return {}
 
     return validated
 

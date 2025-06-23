@@ -215,7 +215,6 @@ def create_presence_absence_matrix(proteinID_sets, database_directory, output, c
             for domain, pid in domain_prot_pairs:
                 genome_domain_matrix[genome_id][domain].append(pid)
     
-    #write_pam_to_tsv(genome_domain_matrix, "/home/tomohisa/BioprojectHazel/HAMSTER/test_log.txt") debugging
     return genome_domain_matrix
 
 def write_pam_to_tsv(pam, output_path):
@@ -317,8 +316,8 @@ def process_domain_hits_pool(args):
     con = sqlite3.connect(database_path)
     cur = con.cursor()
 
-    for i in range(0, len(genome_list), 900):
-        chunk = genome_list[i:i + 900]
+    for i in range(0, len(genome_list), 999):
+        chunk = genome_list[i:i + 999]
         placeholders = ','.join(['?'] * len(chunk))
         query = f"""
             SELECT genomeID, Proteins.proteinID, score, blast_score_ratio
@@ -339,13 +338,8 @@ def process_domain_hits_pool(args):
     bitscores = []
     for genome_id, (bsr, proteinID, score) in best_hits.items():
         proteinIDs.add(proteinID)
-        bitscores.append(score)
 
-    score_limits = {}
-    if bitscores:
-        score_limits = {"lower_limit": min(bitscores), "upper_limit": max(bitscores)}
-
-    return domain, proteinIDs, score_limits
+    return domain, proteinIDs
 
 
 def collect_predicted_singleton_hits_from_db_parallel(predictions_all, database_path, plausible_cutoff=0.6, bsr_cutoff=0.5, max_parallel=4):
@@ -358,18 +352,15 @@ def collect_predicted_singleton_hits_from_db_parallel(predictions_all, database_
     task_args = [(domain, genome_list, database_path, bsr_cutoff) for domain, genome_list in domain_to_genomes.items()]
 
     singleton_hits = {}
-    singleton_score_limits = {}
 
     with Pool(processes=max_parallel) as pool:
         results = pool.map(process_domain_hits_pool, task_args)
 
-    for domain, proteinIDs, limits in results:
+    for domain, proteinIDs in results:
         if proteinIDs:
             singleton_hits[domain] = proteinIDs
-        if limits:
-            singleton_score_limits[domain] = limits
 
-    return singleton_score_limits, singleton_hits
+    return singleton_hits
 
 
 

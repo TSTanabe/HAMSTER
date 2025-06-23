@@ -399,7 +399,7 @@ def submit_batches(protein_batch, cluster_batch, genomeID_set, options):
     Database.insert_database_clusters(options.database_directory, cluster_batch)
     
     #write initial hits fasta
-    write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_batch)
+    #write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_batch)
     
     # Append to the gene clusters file
     with open(options.gene_clusters_file, "a") as file:
@@ -420,7 +420,7 @@ def write_query_hit_sequence_fasta(directory, protein_dict):
             genomeID = protein.genomeID
             proteinID = f"{genomeID}-{protein.proteinID}" #same concatenation is done for the database, do not alter
             domains = protein.get_domains()
-            file_path = f"{directory}/Query_{domains}.hit_list"
+            file_path = f"{directory}/Query_{domains}.faa"
             
             # If the file path changes, close the current file and open a new one
             if file_path != current_file_path:
@@ -703,7 +703,7 @@ def self_blast_query(options):
     
     Database.insert_database_genomeIDs(options.database_directory, {"QUERY"})
     Database.insert_database_proteins(options.database_directory, protein_dict)
-    write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_dict)
+    #write_query_hit_sequence_fasta(options.fasta_initial_hit_directory, protein_dict)
     
     return report
 

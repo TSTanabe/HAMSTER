@@ -17,40 +17,29 @@ from . import myUtil
 #### Main routine of this module
 def singleton_reference_finder(options, grouped):
     
-    singleton_reference_seqs_dict = myUtil.load_cache(options, 'sng_training_proteinIDs.pkl')
-    domain_score_limits = myUtil.load_cache(options, 'sng_training_proteinIDs_limits.pkl')
+    singleton_reference_seqs_dict = myUtil.load_cache(options, 'sng0_training_proteinIDs.pkl')
+    domain_score_limits = myUtil.load_cache(options, 'sng0_training_proteinIDs_limits.pkl')
     
     if singleton_reference_seqs_dict and domain_score_limits:
         return domain_score_limits, singleton_reference_seqs_dict
 
     domain_score_limits, singleton_reference_seqs_dict = get_singleton_reference_sequences(options)
     
+    # Logistic regression prediction of propability of presence of singleton for each genome
     predictions_all = predict_singleton_reference_seqs_for_each_domain(options.database_directory, grouped, singleton_reference_seqs_dict, options.cores, chunk_size=900)
 
+    # Get the best hit per protein for each genome where plausebility and blast score ratio are above cutoff. Plausibility refers to the propability of this singleton to occur TODO make this an options
     limits_dict, sng_reference_seq_dict = collect_predicted_singleton_hits_from_db(predictions_all, options.database_directory, plausible_cutoff = 0.02)
     
-    myUtil.save_cache(options, 'sng_training_proteinIDs.pkl', sng_reference_seq_dict)
-    myUtil.save_cache(options, 'sng_training_proteinIDs_limits.pkl', limits_dict)
-
-    sng_reference_seq_dict_prefixed = {f"grp0_{k}": v for k, v in sng_reference_seq_dict.items()}
-    
-    # Step 3: compute and export FASTAs
-    Csb_proteins.fetch_seqs_to_fasta_parallel(
-        options.database_directory,
-        sng_reference_seq_dict_prefixed,
-        options.fasta_output_directory,
-        min_seq=10,
-        max_seq=options.max_seqs,
-        cores=options.cores
-    )
-    
+    myUtil.save_cache(options, 'sng0_training_proteinIDs.pkl', sng_reference_seq_dict)
+    myUtil.save_cache(options, 'sng0_training_proteinIDs_limits.pkl', limits_dict)
 
     return limits_dict, sng_reference_seq_dict
 
 def get_singleton_reference_sequences(options):
 
 
-    # Load cache if available
+    # Load the dictionary from cache if available
     domain_score_limits = myUtil.load_cache(options, "sng_domain_score_limits.pkl")
     singleton_reference_seqs_dict = myUtil.load_cache(options, "sng_reference_seqs_dict.pkl")
     
@@ -64,7 +53,7 @@ def get_singleton_reference_sequences(options):
     singletons = query_names - training_set_domains
     print(f"[INFO] Proteins without recognized genomic context {singletons}")
 
-    # Step 3: Query database instead of BLAST file
+    # Select the singleton hits with an above blast score ration cutoff
     singleton_hits = defaultdict(set)
     domain_score_limits = {}
 
@@ -92,34 +81,39 @@ def get_singleton_reference_sequences(options):
                     "upper_limit": max(bitscores)
                 }
 
-    # Prefix keys and fetch sequences to fasta
-    singleton_reference_seqs_dict = {f"sng0_{k}": v for k, v in singleton_hits.items()}
-    Csb_proteins.fetch_seqs_to_fasta_parallel(
-        options.database_directory,
-        singleton_reference_seqs_dict,
-        options.fasta_output_directory,
-        2, options.max_seqs, options.cores
-    )
-
-    myUtil.save_cache(options, "sng_reference_seqs_dict.pkl", singleton_reference_seqs_dict)
+    myUtil.save_cache(options, "sng_reference_seqs_dict.pkl", singleton_hits)
     myUtil.save_cache(options, "sng_domain_score_limits.pkl", domain_score_limits)
 
-    return domain_score_limits, singleton_reference_seqs_dict
+    # Prefix keys and fetch sequences to fasta
+    #singleton_reference_seqs_dict = {f"sng0_{k}": v for k, v in singleton_hits.items()}
+    #Csb_proteins.fetch_seqs_to_fasta_parallel(
+    #    options.database_directory,
+    #    singleton_reference_seqs_dict,
+    #    options.fasta_output_directory,
+    #    2, options.max_seqs, options.cores
+    #)
+
+    #myUtil.save_cache(options, "sng_reference_seqs_dict.pkl", singleton_reference_seqs_dict)
+    #myUtil.save_cache(options, "sng_domain_score_limits.pkl", domain_score_limits)
+
+    return domain_score_limits, singleton_hits
 
 
 #######################
 
 def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, singleton, cores, chunk_size=900):
     """
-    Für jedes Singleton wird ein Modell auf einem kombinierten PAM (grouped + singleton_domain) trainiert.
-    Danach wird das Modell verwendet, um Vorhersagen auf grouped zu treffen.
+    For each singleton protein a linear regression model is generated. This is based on the combined presence absence matrix 
+    of singleton domains + the proteins from csb patterns where at least one reference query sequence occurs in the
+    pattern. The logistic regression model is then used to predict the presence of the singleton in all genomes where a similar pam
+    pattern exists.
     
     Args:
-        database_path (str): Pfad zur SQLite-Datenbank.
-        grouped (dict): Basis-Domänenstruktur {domain_label: set(proteinIDs)}.
+        database_path (str): SQLite-Database
+        grouped (dict): Basis-protein presence {domain_label: set(proteinIDs)}.
         singleton (dict): {singleton_domain_label: set(proteinIDs)}.
-        cores (int): Anzahl CPUs.
-        chunk_size (int): DB-Abfragegröße.
+        cores (int): CPUs.
+        chunk_size (int): database chunksize
 
     Returns:
         dict: {singleton_domain: prediction_series (genomeID → score)}
@@ -202,7 +196,7 @@ def collect_predicted_singleton_hits_from_db(predictions_all, database_path, pla
     singleton_hits = defaultdict(set)
     singleton_score_limits = {}
 
-    # Schritt 1: Bereite die Struktur für Domains → plausible genomeIDs
+    # Prepare the structure of the output dictionary domain => plausible genome genomeIDs > plausible cutoff
     domain_to_genomes = defaultdict(list)
     for singleton, prediction_series in predictions_all.items():
         domain = singleton.replace('sng0_', '')
@@ -212,7 +206,7 @@ def collect_predicted_singleton_hits_from_db(predictions_all, database_path, pla
     if not domain_to_genomes:
         return {}, {}
 
-    # Schritt 2: Iteriere über Domains, hole Treffer genomeweise
+    # iterate over the proteins and get the best hits per genome
     with sqlite3.connect(database_path) as con:
         cur = con.cursor()
 
@@ -236,7 +230,7 @@ def collect_predicted_singleton_hits_from_db(predictions_all, database_path, pla
                     if genome_id not in best_hits or bsr > best_hits[genome_id][0]:
                         best_hits[genome_id] = (bsr, proteinID, score)
 
-            # Speichere beste Treffer pro Domain
+            # Save best hit per protein
             bitscores = []
             for genome_id, (bsr, proteinID, score) in best_hits.items():
                 singleton_hits[domain].add(proteinID)
