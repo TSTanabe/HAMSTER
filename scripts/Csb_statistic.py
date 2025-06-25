@@ -63,7 +63,7 @@ def group_gene_cluster_statistic(options):
     if not grouped_keywords or not distant_keywords:
         print("[INFO] Grouping keywords by domain")
 
-        grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, options.group_hitscore_csb_cutoff)
+        grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, options.low_hitscore_csb_cutoff)
         myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
         myUtil.save_cache(options, "stat_distant_keywords.pkl", distant_keywords)
 
@@ -306,7 +306,7 @@ def filter_out_low_quality_csb(stats_dict, query_score_dict, threshold=0.2, min_
     filtered_csb = {}
 
     # Precompute threshold scores for each domain
-    domain_thresholds = {domain: query_score * threshold for domain, query_score in query_score_dict.items()}
+    domain_thresholds = {domain: query_score * (1-threshold) for domain, query_score in query_score_dict.items()}
 
     for keyword, domain_dict in stats_dict.items():
         csb_should_be_removed = True  # Assume CSB will be removed unless a domain passes
@@ -359,7 +359,7 @@ def group_keywords_by_domain_extended(stats_dict, query_score_dict, acceptable_d
                 # Berechnung der Abweichung
                 deviation = abs(median_score - query_score) / query_score
 
-                if deviation <= acceptable_deviation:
+                if deviation <= (1-acceptable_deviation):
                     eligible_domains.add(domain)
 
         if eligible_domains:

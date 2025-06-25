@@ -243,18 +243,23 @@ def save_cache(options, name, data, redirect=None, overwrite=False):
         pickle.dump(data, f)
 
 
-def load_cache(options, name, file_path = None):
+
+def load_cache(options, name, file_path=None):
     cache_dir = os.path.join(options.result_files_directory, "pkl_cache")
 
     if not file_path:
         file_path = os.path.join(cache_dir, name)
     
     if os.path.exists(file_path):
-        print(f"[LOAD] Loading from cache: {name}")
-        with open(file_path, "rb") as f:
-            return pickle.load(f)
+        try:
+            print(f"[LOAD] Loading from cache: {name}")
+            with open(file_path, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"[ERROR] Failed to load {file_path}: {e}")
+            return None
     else:
-        print(file_path)
+        print(f"[MISS] Cache file not found: {file_path}")
         return None
     
     

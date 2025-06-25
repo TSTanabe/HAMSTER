@@ -9,7 +9,7 @@ def process_initial_plotting(options):
     output_dir = os.path.join(options.result_files_directory, 'Reports')
 
     # Plotte die performance matrix mit den MCC Werten
-    plotting_performance(options, output_dir)    
+    #plotting_performance(options, output_dir)    
 
     # Plotter für die presence absence matrix histogramme
     plotting_matrix_histogram(options, output_dir)
@@ -34,8 +34,8 @@ def _run_rscript(r_script, tsv_file, flag):
     """
     result = subprocess.run(
         ["Rscript", r_script, tsv_file, flag],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        #stdout=subprocess.DEVNULL,
+        #stderr=subprocess.DEVNULL
     )
     return (tsv_file, flag, result.returncode)
 

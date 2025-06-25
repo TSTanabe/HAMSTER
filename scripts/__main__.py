@@ -30,6 +30,13 @@ from . import Reports_plotting
 from . import Reports_printing
 from . import Reports
 
+
+# TODO soft cap sollte anpassbar sein
+# TODO mcl durch linclust ersetzt, daher sollte auch das menü geändert werden
+# TODO print kommandos ersetzen
+
+
+
 if getattr(sys, 'frozen', False):
     __location__ = os.path.split(sys.executable)[0]
 else:
@@ -66,7 +73,7 @@ class Options:
         self.deconcat_flag = 0 #Memorize if a deconcatenation was done
         self.glob_flag = 0 #Memorize if a concatenation was done
         
-        self.sqlite_chunks = 999 # chunks size for placeholders in sqlite fetch TODO
+        self.sqlite_chunks = 999 # chunks size for placeholders in sqlite fetch
         
         self.plotting_Rscripts = __location__+"/src"
         
@@ -111,10 +118,10 @@ def parse_arguments(arguments):
     search = parser.add_argument_group("Optional parameters for the initial diamond blastp search")
     search.add_argument('-evalue', dest='evalue', type=float, default = 1e-5, metavar = '<float>', help='E-value cutoff [0,inf]')
     search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]')
-    search.add_argument('-min-seq-id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
-    search.add_argument('-search-coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
-    search.add_argument('-alignment-mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
-    search.add_argument('-blast-score-ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Blast score ratio for hits [0.0,1.0]')
+    search.add_argument('-min_seq_id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
+    search.add_argument('-search_coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
+    search.add_argument('-alignment_mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
+    search.add_argument('-blast_score_ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Min. blast score ratio targets [0.0,1.0]')
     search.add_argument('-allow_multidomain', dest='multidomain_allowed', action='store_true', help='Allow multiple query hits for each sequence')
     search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query')
 
@@ -125,22 +132,17 @@ def parse_arguments(arguments):
     
     csb = parser.add_argument_group("Optional collinear synthenic block parameters")
     csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb')
-    csb.add_argument('-occurence', dest='occurence', type=int,default = 10, metavar='<int>', help='Min. number of csb occurs at least time')
+    csb.add_argument('-occurence', dest='occurence', type=int,default = 1, metavar='<int>', help='Min. number of csb occurs at least time')
     csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.0, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
     csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Consider as single pattern if two csb have this identity')
-    
-    csb.add_argument('-exclude_csb_hitscore', dest='low_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Exclude csb with all hits below this deviation from the query self-hits')
-    csb.add_argument('-group_csb_hitscore', dest='group_hitscore_csb_cutoff', type=float,default = 0.3, metavar='<float>', help='Group hits from csb above this deviation from the query self-hit')
-    csb.add_argument('-csb_singleton_correlation', dest='csb_singleton_correlation', type=float,default = 0.3, metavar='<float>', help='Required correlation of singletons to existing csb')
+    csb.add_argument('-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float,default = 0.7, metavar='<float>', help='Exclude csb with all hits below this blast score ratio [0.0,1.0]')
 
     pam_search = parser.add_argument_group("Optional presence/absence matrix parameters")
     pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.3, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]')
     pam_search.add_argument('-mx_bsr', dest='pam_bsr_threshold', type=float, default=0.6, metavar = '<float>', help='Blast score ratio inclusion cutoff from PAM prediction [0.0,1.0]')
     
-    #pam_search.add_argument('-mx_long_branch_thrs', dest='pam_long_branch_thres', type=float, default=0.5, metavar = '<float>', help='Do not consider hits with this branch length in the phylogenetic tree. Default: 0.5')
-    #pam_search.add_argument('-mx_max_phylo_distance', dest='pam_phylogenetic_distance', type=float, default=0.05, metavar = '<float>', help='Max. phylogenetic distance to reference sequence. Default: 0.05')
-
+    """
     mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
     mcl_search.add_argument('-mcl_off', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
     mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]')
@@ -149,8 +151,6 @@ def parse_arguments(arguments):
     mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=100, metavar = '<int>', help='MCL maximum number of edges between sequences')
     mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control')
     mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive")
-    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the MCL cluster to label it as true positive [0.0,1.0]')
-    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the MCL cluster to label it as true positive [0.0,1.0]')
     
     #This is how the MCL reference thresholds work
     #ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
@@ -158,8 +158,13 @@ def parse_arguments(arguments):
     #ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequencse in the current mcl cluster
     #ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
     #ref_density >= density_threshold and ref_fraction >= reference_fraction_threshold:
+    """
     
-    
+    mcl_search = parser.add_argument_group("Optional protein sequence clustering parameters")
+    mcl_search.add_argument('-mcl_min_seq_id', dest='mcl_min_seq_id', type=float, default=0.4, metavar = '<float>', help='Cluster sequences at minimal sequence identity [0.0,1.0]')
+    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the cluster to label it as true positive [0.0,1.0]')
+    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the cluster to label it as true positive [0.0,1.0]')
+   
     alignment = parser.add_argument_group("Optional alignment parameters")
     alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
     alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned')
@@ -200,7 +205,6 @@ def validate_options(options):
     
 
 def fasta_preparation(options):
-    
    
     if not options.glob_search:
         print("[INFO] Not concatenating protein fasta files")
@@ -271,7 +275,7 @@ def basis_sequence_fasta(options):
         named gene clusters and csb finder gene clusters that encode a protein sequence
         highly similar to the input reference sequence. The hit score for the inclusion of
         sequences has to be 30 % of the best scoring query, which is similar to a blast score ration
-        of 0.7
+        of 0.7 and the conserved sequence identity of 70 %
         
         Input: Database, options
         Output are the grp0 fasta files
@@ -339,13 +343,13 @@ def pam_defragmentation(options):
     # Adds potential hits by presence absence matrix    
     added_pam_propability_proteins = Pam_defragmentation.pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_limit_dict)
 
-    # Merge the added protein, for same key in both sets sum up the sets
+    # Merge the added proteins, for same key in both sets sum up the sets
     merged_grouped = Csb_proteins.merge_grouped_protein_ids(added_similar_csb_proteins, added_pam_propability_proteins)
 
     # Calculate the score limits for the reference sequences
     score_limit_dict = Csb_proteins.generate_score_limit_dict_from_grouped(options.database_directory, merged_grouped)
     
-    # Write fasta files with the reference sequences and similar sequences within the score cutoff range of the reference seqs
+    # Write fasta files with the reference sequences and similar sequences within the score cutoff range of the reference seqs for the linclustering
     Csb_proteins.fetch_protein_family_sequences(options, options.fasta_initial_hit_directory, score_limit_dict, merged_grouped)
     
     # Cluster sequences at 90 % identity and 70 % coverage to select highly similar proteins without context
@@ -353,7 +357,7 @@ def pam_defragmentation(options):
 
     # Add the clustered hits to the reference sequence sets
     # _linclust_mcl_format.txt select from these files in fasta_initial_hit_directory
-    mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, linclust_mcl_format_output_files_dict, merged_grouped, 0.0, 0.0001) # low cutoffs for low protein clusters
+    mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, linclust_mcl_format_output_files_dict, merged_grouped, 0.0, 0.0001) # low cutoffs for closely related protein clusters
     
     # Save computed grp1 datasets
     myUtil.save_cache(options, 'grp1_merged_grouped.pkl', mcl_extended_grouped)
@@ -373,7 +377,11 @@ def pam_defragmentation(options):
 
 def mcl_family_clustering_sequences(options):
     """
-        Try to find additional hits based on Markov Chain Clustering or mmseqs linclust
+        This routine prepares the sequence clustering via linclust
+        
+        Formerly the MCL clustering algorithm was used, but this requires a lot of computational time
+        due to the all vs all blast
+        
         
         Prepare protein family file, including all hits above 25% identity.
         All vs. all diamond blast (Can this be accellerated like in proteinortho?)
@@ -393,87 +401,87 @@ def mcl_family_clustering_sequences(options):
     Csb_proteins.fetch_protein_family_sequences(options, options.phylogeny_directory, score_limit_dict, grouped)
 
     # Cluster sequences with linclust at 30 % identitiy and 70 % coverage
-    linclust_mcl_format_output_files_dict = Seq_clustering.run_mmseqs_linclust_lowlevel(options.phylogeny_directory, "0.3", "0.7", options.cores) # Make options 
+    linclust_mcl_format_output_files_dict = Seq_clustering.run_mmseqs_linclust_lowlevel(options.phylogeny_directory, options.mcl_min_seq_id, "0.7", options.cores) 
 
     myUtil.save_cache(options, 'linclust_clustering_results.pkl', linclust_mcl_format_output_files_dict)
     
+    ## This block is replaced by linclust.
+    # Linclust is much faster than mcl clustering with similar performance
     # Markov chain clustering for grp1 fasta files
-    if not options.csb_mcl_clustering:
-        return
+    #if not options.csb_mcl_clustering:
+    #    return
     
-    print("\n[INFO] Calculating Markov Chain Clustering")
+    #print("\n[INFO] Calculating Markov Chain Clustering")
     # Clustering sequences with MCL algorithm    
-    mcl_clustering_results_dict = Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
+    #mcl_clustering_results_dict = Csb_mcl.csb_mcl_datasets(options,grouped) # markov chain clustering grouped training data
     
-    myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict)
+    #myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict)
 
     options.mcl_clustering_results_dict = mcl_clustering_results_dict
     
     return
     
     
-def mcl_decorate_training_sequences(options):
 
-    # Load the grp1 refseqs that are used to select MCL clusters   
-    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
+
+def mcl_select_grp2_clusters(options):
+    
+    # Load grp1 reference sets
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
 
-
-    # Use the linclust results if possible
+    # Load and validate clustering results
     mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
-    mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
-    myUtil.save_cache(options, 'linclust_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
-    
-    #TODO make the MCL clustering an option
-    if not mcl_clustering_results_dict:
-        # Validate and save mcl clustering files. Necessary because full path might change when result folder is moved
-        mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'mcl_clustering_results.pkl')
-        mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
-        myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
-    
-    
-    
-    # MCL cluster analysis, cluster selection with F1 optimized density for basic grouped sequences
-    # Adds all sequences of mcl clusters to the training data where reference sequence density is sufficient
-    print("\n[INFO] Generating grp2: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
-    mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, grouped, options.mcl_density_thrs, options.mcl_reference_thrs)
+    mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory)
+    myUtil.save_cache(options, 'linclust_clustering_results.pkl', mcl_clustering_results_dict, overwrite=True)
 
-    # Save the mcl cluster selection cutoffs    
+    print("\n[INFO] Generating grp2: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
+    mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(
+        options, mcl_clustering_results_dict, grouped,
+        options.mcl_density_thrs, options.mcl_reference_thrs
+    )
+
     myUtil.save_cache(options, 'mcl_grp2_cluster_selection_cutoffs.pkl', mcl_cutoffs)
+    myUtil.save_cache(options, 'grp2_merged_grouped.pkl', mcl_extended_grouped)
     
-    # Write down the extended
     Csb_proteins.fetch_training_data_to_fasta(options, mcl_extended_grouped, "grp2")
 
+    return mcl_extended_grouped
 
-####    
+
+def mcl_select_grp3_clusters(options, mcl_extended_grouped_grp2):
     print("\n[INFO] Generating grp3: Extended MCL cluster selection by csb and presence plausibility")
-    # MCL cluster analysis with pam and csb selection
+
+    grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
+    mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
+    mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory)
+    myUtil.save_cache(options, 'linclust_clustering_results.pkl', mcl_clustering_results_dict, overwrite=True)
+
+    # Extend references via PAM model
     regrouped = Pam_mcl.select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, grouped)
-    
-    # Save the regrouped reference seqs used to select inclusion of the grp3 mcl clusters. These are grp1 + pam selection
     myUtil.save_cache(options, 'grp3_selection_ref_seqs.pkl', regrouped)
-    
-    # MCL cluster analysis, cluster selection with F1 optimized density for extended grouped
-    # This has more reference sequences contibuting to density than the grp2
-    pam_mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, regrouped, options.mcl_density_thrs, options.mcl_reference_thrs)
-    
+
+    pam_mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(
+        options, mcl_clustering_results_dict, regrouped,
+        options.mcl_density_thrs, options.mcl_reference_thrs
+    )
     myUtil.save_cache(options, 'mcl_grp3_cluster_selection_cutoffs.pkl', mcl_cutoffs)
 
-    # Add highly similar proteins after this step with high coverage
-    # Use the linclust results if possible
-    mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
-    mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
-    myUtil.save_cache(options, 'linclust_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
-    mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(options, mcl_clustering_results_dict, pam_mcl_extended_grouped, 0.0, 0.0001)
+    # Further extend via high coverage, low threshold
+    mcl_extended_grouped_final, _ = Csb_mcl.select_hits_by_csb_mcl(
+        options, mcl_clustering_results_dict, pam_mcl_extended_grouped,
+        0.0, 0.0001
+    )
+
+    # Merge grp2 + extended grp3
+    merged_grouped = Csb_proteins.merge_grouped_protein_ids(mcl_extended_grouped_final, pam_mcl_extended_grouped)
+
+    myUtil.save_cache(options, 'grp3_merged_grouped.pkl', merged_grouped)
     
-    # Merge the seqeunce dicts to final dataset
-    merged_grouped = Csb_proteins.merge_grouped_protein_ids(mcl_extended_grouped, pam_mcl_extended_grouped)
-    
-    # Write down to fasta
-    Csb_proteins.fetch_training_data_to_fasta(options, pam_mcl_extended_grouped, "grp3")
+    # Export fasta for grp3
+    Csb_proteins.fetch_training_data_to_fasta(options, merged_grouped, "grp3")
 
-
-
+    return merged_grouped
 
 
 
@@ -525,7 +533,7 @@ def report_cv_performance(options):
     
     #Initial validation
     print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
-    mcl_clustering_results_dict = options.mcl_clustering_results_dict if hasattr(options, 'mcl_clustering_results_dict') else myUtil.load_cache(options, 'linclust_clustering_results.pkl')
+    mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
     
     mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
 
@@ -585,21 +593,21 @@ def main(args=None):
 #5
     if options.stage <= 5 and options.end >= 5:
         myUtil.print_header("\n 5. Preparing training data fasta files")
-        basis_sequence_fasta(options)
+        basis_sequence_fasta(options) # grp0 dataset
 
 #6
     if options.stage <= 6 and options.end >= 6:
         myUtil.print_header("\n 6. Markov chain clustering for protein family sequences")
-        pam_defragmentation(options)
-        mcl_family_clustering_sequences(options)
+        pam_defragmentation(options) # grp1 dataset
+        
         
 #7   
     if options.stage <= 7 and options.end >= 7:
         myUtil.print_header("\n 7. Selecting MCL clusters with reference sequences")
-        mcl_decorate_training_sequences(options)
-
+        mcl_family_clustering_sequences(options)
+        mcl_extended_grouped_grp2 = mcl_select_grp2_clusters(options)
+        mcl_extended_grouped_grp3 = mcl_select_grp3_clusters(options, mcl_extended_grouped_grp2)
 #8    
-    #align
     if options.stage <= 8 and options.end >= 8:
         myUtil.print_header("\n 8. Aligning sequences")
         model_alignment(options)
