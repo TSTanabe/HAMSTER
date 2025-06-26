@@ -433,10 +433,11 @@ def fetch_training_data_to_fasta(options, grouped, prefix):
         options.fasta_output_directory,
         min_seq=options.min_seqs,
         max_seq=options.max_seqs,
-        cores=options.cores
+        cores=options.cores,
+        hardcap=options.hardcap
     )
 
-def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=990):
+def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=990, hardcap=5000):
     """
     Forks off the fetching of sequences for each domain using multiprocessing.
 
@@ -465,8 +466,8 @@ def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_s
             print(f"[WARN] Sequences for '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
             continue  # Skip this domain
 
-        if num_sequences > (max_seq + 5000):
-            print(f"[WARN] Sequences for '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+5000})")
+        if num_sequences > (max_seq + hardcap):
+            print(f"[WARN] Sequences for '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+hardcap})")
             continue  # Skip this domain
 
         if os.path.exists(output_file):

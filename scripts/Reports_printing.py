@@ -37,7 +37,8 @@ def process_initial_validations(options,
     
     write_pam_tsv_report(options, output_dir)
 
-
+    return
+    
     # TODO MCL file writer needed
     # Load reference and MCL data
     #mcl_grp1_cutoff, mcl_grp2_cutoff, mcl_results = _load_mcl_cutoff_sets(options)

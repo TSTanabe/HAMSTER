@@ -23,7 +23,9 @@ def singleton_reference_finder(options, grouped):
     if singleton_reference_seqs_dict and domain_score_limits:
         return domain_score_limits, singleton_reference_seqs_dict
 
-    domain_score_limits, singleton_reference_seqs_dict = get_singleton_reference_sequences(options)
+    non_empty_keys = {key for key in grouped if grouped[key]}
+
+    domain_score_limits, singleton_reference_seqs_dict = get_singleton_reference_sequences(options, non_empty_keys)
     
     # Logistic regression prediction of propability of presence of singleton for each genome
     predictions_all = predict_singleton_reference_seqs_for_each_domain(options.database_directory, grouped, singleton_reference_seqs_dict, options.cores, chunk_size=900)
@@ -36,7 +38,7 @@ def singleton_reference_finder(options, grouped):
 
     return limits_dict, sng_reference_seq_dict
 
-def get_singleton_reference_sequences(options):
+def get_singleton_reference_sequences(options, non_empty_keys):
 
 
     # Load the dictionary from cache if available
@@ -49,8 +51,7 @@ def get_singleton_reference_sequences(options):
 
     # Get domains present in query but missing from training sets
     query_names = extract_protein_ids_from_fasta(options.self_query)
-    training_set_domains = extract_domain_names_from_directory(options.fasta_output_directory)
-    singletons = query_names - training_set_domains
+    singletons = query_names - non_empty_keys
     print(f"[INFO] Proteins without recognized genomic context {singletons}")
 
     # Select the singleton hits with an above blast score ration cutoff

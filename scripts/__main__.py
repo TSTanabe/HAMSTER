@@ -31,7 +31,6 @@ from . import Reports_printing
 from . import Reports
 
 
-# TODO soft cap sollte anpassbar sein
 # TODO mcl durch linclust ersetzt, daher sollte auch das menü geändert werden
 # TODO print kommandos ersetzen
 
@@ -77,6 +76,8 @@ class Options:
         
         self.plotting_Rscripts = __location__+"/src"
         
+        self.hardcap=10000 # Allowed number of seqs to exceed the hardcap
+        
 def parse_arguments(arguments):
     """
         Argument parsing section, defines all parameters with default values and passes them to the options object
@@ -104,7 +105,6 @@ def parse_arguments(arguments):
     resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Use number of CPUs')
     resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file fro input assemblies')
     resources.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Existing HAMSTER sqlite database')
-    resources.add_argument('-glob_off', dest='glob_search', action='store_false', help='Do not concatenated fasta file for initial diamond search')
     resources.add_argument('-cv_off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')
    
     resources2 = parser.add_argument_group("Optional globDB file parameters")
@@ -112,7 +112,7 @@ def parse_arguments(arguments):
     resources2.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated multi-assembly gff file')
     resources2.add_argument('-glob_blast_table', dest='glob_table', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated multi-assembly blast result table')
     resources2.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing glob results')
-    
+    resources2.add_argument('-glob_off', dest='glob_search', action='store_false', help='Do not concatenated fasta file for initial diamond search')
     
     
     search = parser.add_argument_group("Optional parameters for the initial diamond blastp search")
@@ -135,7 +135,6 @@ def parse_arguments(arguments):
     csb.add_argument('-occurence', dest='occurence', type=int,default = 1, metavar='<int>', help='Min. number of csb occurs at least time')
     csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
     csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.0, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
-    csb.add_argument('-csb_overlap', dest='csb_overlap_factor', type=float, default = 0.75, metavar='<float>', help='Consider as single pattern if two csb have this identity')
     csb.add_argument('-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float,default = 0.7, metavar='<float>', help='Exclude csb with all hits below this blast score ratio [0.0,1.0]')
 
     pam_search = parser.add_argument_group("Optional presence/absence matrix parameters")
@@ -417,7 +416,7 @@ def mcl_family_clustering_sequences(options):
     
     #myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict)
 
-    options.mcl_clustering_results_dict = mcl_clustering_results_dict
+    options.mcl_clustering_results_dict = linclust_mcl_format_output_files_dict
     
     return
     
@@ -540,8 +539,10 @@ def report_cv_performance(options):
     myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
     
     Reports_printing.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
-    
-    Reports_plotting.process_initial_plotting(options)
+    try:
+        Reports_plotting.process_initial_plotting(options)
+    except:
+        print("[ERROR] An error occured during the R plotting")
     #cross validation
     print("\n[INFO] Starting cross-validation")
     print(f"[INFO] Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}")
