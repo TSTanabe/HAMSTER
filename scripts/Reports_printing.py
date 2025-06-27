@@ -35,7 +35,8 @@ def process_initial_validations(options,
     
     write_pkl_tsv_reports(options, db_path, cutoff_collection, output_dir, pkl_files)
     
-    write_pam_tsv_report(options, output_dir)
+    # TODO fix this routine
+    #write_pam_tsv_report(options, output_dir)
 
     return
     
