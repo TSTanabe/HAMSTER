@@ -108,6 +108,16 @@ def file_path(string: str) -> str:
         return string
     sys.exit(f"\nERROR: {string} is not a valid file")
 
+def auto_float(value):
+    if value == 'auto':
+        return value
+    try:
+        return float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r is not a valid float or 'auto'" % value)
+
+
+
 def print_header(string: str, verbose: int = 0) -> None:
     """Prints a timestamped header if verbose is set."""
     if not verbose:
@@ -332,3 +342,11 @@ def merge_score_limits(dict1: Dict[str, Dict[str, float]], dict2: Dict[str, Dict
         merged[key] = {"lower_limit": lower, "upper_limit": upper}
     return merged
 
+
+def move_HMMs(input_folder,output_folder,file_extension):
+    logger.info(f"Saving HMMs in the directory: {output_folder}")
+    for datafile in os.listdir(input_folder):
+        if datafile.endswith(file_extension):
+            source = os.path.join(input_folder, datafile)
+            target = os.path.join(output_folder, datafile)
+            shutil.move(source,target)

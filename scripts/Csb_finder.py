@@ -1,5 +1,5 @@
 #!/usr/bin/python
-
+import os
 import re
 
 class Cluster:
@@ -101,12 +101,16 @@ def check_order(test_list):
     else:
         return 0
 
-def makePatternDict(Filepath):
+def makePatternDict(filepath):
+    
+    if filepath is None or not os.path.isfile(filepath):
+        return {},{}
+    
     #Patterns can have the same name
     pattern = {}        # id => pattern
     pattern_names = {}  # id => name
     i = 1
-    with open(Filepath, "r") as reader:
+    with open(filepath, "r") as reader:
         for line in reader.readlines():
             #print(line)
             #lines = "key1=value1;key2=value2;key3=value3"

@@ -172,7 +172,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         #print(f"Trimming complete: {input_fasta} -> {output_alignment}")
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
-        logger.error(f"Error occurec during trimming of {input_fasta}: {error_message}")
+        logger.error(f"Error occured during trimming of {input_fasta}: {error_message}")
 
 
 

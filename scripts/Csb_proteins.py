@@ -281,8 +281,10 @@ def parse_csb_file_to_dict(filepath: str) -> Dict[str, List[str]]:
         "csb1\tABC\tDEF\n" → {'csb1': ['ABC','DEF']}
     """
     data_dict = {}
-    if not os.path.isfile(filepath):
+
+    if filepath is None or not os.path.isfile(filepath):
         return data_dict
+
     with open(filepath, 'r') as file:
         for line in file:
             # Split the line by tabs
@@ -797,7 +799,7 @@ def fetch_domains_superfamily_to_fasta(options, directory):
 
             # Skip if the file already exists
             if os.path.isfile(output_fasta_path):
-                print(f"[SKIP] File {output_fasta_path} already exists.")
+                logger.debug(f"File {output_fasta_path} already exists - skipping.")
                 continue
 
             # Fetch all proteins associated with this domain

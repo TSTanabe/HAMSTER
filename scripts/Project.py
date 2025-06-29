@@ -64,7 +64,11 @@ def prepare_result_space(options, project: str = "project") -> None:
     
     now = datetime.now()
     timestamp = str(datetime.timestamp(now))
+    
+    # 1. Detect whether the result directory is an *existing* project before making changes
+    project_preexisted = isProjectFolder(options)
 
+    # 2. Ensure the results directory 
     default_dir = os.path.join(options.location, "results")
 
     # Use standard directory if given
@@ -90,9 +94,12 @@ def prepare_result_space(options, project: str = "project") -> None:
             except Exception as e:
                 logger.error(f"No writing rights for directory {options.result_files_directory}\n {e}")
                 sys.exit(1)
-                
+        
         options.result_files_directory = create_project(options.result_files_directory, project)
         write_options_to_tsv(options, options.result_files_directory)
+
+        
+
 
     # Project structure, applies in both cases
     options.database_directory = options.result_files_directory + "/database.db"
@@ -125,6 +132,12 @@ def prepare_result_space(options, project: str = "project") -> None:
     ]:
         if not os.path.exists(path):
             os.mkdir(path)
+    
+    # 5. If using a pre-existing project, force pipeline to start at stage 3
+    if project_preexisted and options.stage < 3:
+        logger.warning("Existing project directory detected. Setting start stage to 3.")
+        options.stage = 3
+
 
 
 def create_project(directory: str, projectname: str = "project") -> str:

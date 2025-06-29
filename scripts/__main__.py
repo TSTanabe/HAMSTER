@@ -31,8 +31,6 @@ from . import Reports_printing
 from . import Reports
 
 
-# TODO mcl durch linclust ersetzt, daher sollte auch das menü geändert werden
-
 # Initilize the logger and location
 logger = myUtil.logger
 
@@ -82,124 +80,254 @@ class Options:
         
         self.hardcap=10000 # Allowed number of seqs to exceed the hardcap
         
-def parse_arguments(arguments: list) -> Options:
-    """
-    Parses CLI arguments for the pipeline.
-    
-    Args:
-        arguments (list): sys.argv[1:] or custom list of args (as strings)
         
-    Returns:
-        options (Options): Parsed options object with all config attributes.
         
-    Example Output:
-        options.fasta_file_directory = "./genomes"
-        options.query_file = "./query.fasta"
-        options.stage = 1
-        options.end = 10
-        options.verbose = 1
-        ...
+
+def parse_arguments(arguments: list):
     """
+    Parses CLI arguments.
+    -h / --help: Only essential options and --help-all hint.
+    --help-all: Full help with advanced/optional parameters.
+    All options are always settable, but advanced params are hidden unless --help-all is called.
+    """
+
+    # Check if --help-all is in CLI args
+    show_all = '--help-all' in arguments
+    clean_args = [a for a in arguments if a != '--help-all']
     
+    
+    
+    def add_all_groups(parser, show_advanced: bool):
+        # Essential arguments (always visible/helped)
+        essential = parser.add_argument_group("Essential parameters")
+        essential.add_argument(
+            '-f', dest='fasta_file_directory', type=myUtil.dir_path, default=__location__,
+            metavar='<directory>',
+            help="Directory containing the target FASTA files to analyze (used with -q). Example: ./genomes/"
+        )
+        essential.add_argument(
+            '-q', dest='query_file', type=myUtil.file_path, default=None,
+            metavar='<filepath>',
+            help="FASTA file containing query protein or gene sequences (used with -f). Example: ./query.faa"
+        )
+        essential.add_argument(
+            '-r', dest='result_files_directory', type=myUtil.dir_path, default=__location__+'/results',
+            metavar='<directory>',
+            help="Directory for output and intermediate result files. Example: ./results/"
+        )
+        parser.add_argument(
+            '-v', '--verbose', type=int, default=1, choices=[0,1,2],
+            help="Set logging level: 0=WARNING, 1=INFO, 2=DEBUG"
+        )
+        parser.add_argument(
+            '--help-all', action='store_true',
+            help="Show all available options, including advanced parameters, and exit."
+        )
+        # Advanced arguments (nur Helptext, wenn show_advanced==True)
+        resources = parser.add_argument_group("Advanced parameters")
+        resources.add_argument(
+            '-s', dest='stage', type=int, default=0, choices=range(0,11), metavar='<int>',
+            help="Pipeline stage to start execution from (0=full run, 1-10=partial)." if show_advanced else argparse.SUPPRESS
+        )
+        resources.add_argument(
+            '-x', dest='end', type=int, default=10, choices=range(0,11), metavar='<int>',
+            help="Pipeline stage to stop after completion (inclusive)." if show_advanced else argparse.SUPPRESS
+        )
+        resources.add_argument(
+            '-c', dest='cores', type=int, default=2, metavar='<int>',
+            help="Number of CPU cores to use for parallel processing." if show_advanced else argparse.SUPPRESS
+        )
+        resources.add_argument(
+            '-t', dest='taxonomy_file', metavar='<filepath>', default=None,
+            help="Path to taxonomy CSV file for input assemblies." if show_advanced else argparse.SUPPRESS
+        )
+        resources.add_argument(
+            '-db', dest='database_directory', metavar='<filepath>', default=None,
+            help="Path to existing HAMSTER SQLite database." if show_advanced else argparse.SUPPRESS
+        )
+        resources.add_argument(
+            '-cv_off', dest='cross_validation_deactivated', action='store_true',
+            help="Disable cross-validation (recommended for faster validation only)." if show_advanced else argparse.SUPPRESS
+        )
+
+        resources2 = parser.add_argument_group("GlobDB file parameters (advanced)")
+        resources2.add_argument(
+            '-glob_faa', dest='glob_faa', metavar='<filepath>', default=None,
+            help="Concatenated FASTA file with all input assemblies for speedup." if show_advanced else argparse.SUPPRESS
+        )
+        resources2.add_argument(
+            '-glob_gff', dest='glob_gff', metavar='<filepath>', default=None,
+            help="Concatenated GFF annotation file for all assemblies." if show_advanced else argparse.SUPPRESS
+        )
+        resources2.add_argument(
+            '-glob_blast_table', dest='glob_table', metavar='<filepath>', default=None,
+            help="Precomputed multi-assembly BLAST tabular result file." if show_advanced else argparse.SUPPRESS
+        )
+        resources2.add_argument(
+            '-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>',
+            help="Chunk size for batch parsing of large files." if show_advanced else argparse.SUPPRESS
+        )
+        resources2.add_argument(
+            '-glob_off', dest='glob_search', action='store_false',
+            help="Disable creation of concatenated files for the initial search step." if show_advanced else argparse.SUPPRESS
+        )
+
+        search = parser.add_argument_group("DIAMOND blastp search parameters (advanced)")
+        search.add_argument(
+            '-evalue', dest='evalue', type=float, default=1e-5, metavar='<float>',
+            help="Maximum allowed E-value for BLASTp matches." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-thrs_score', dest='thrs_score', type=int, default=100, metavar='<int>',
+            help="Minimum required BLASTp alignment score." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-min_seq_id', dest='minseqid', type=float, default=25, metavar='<float>',
+            help="Minimum percentage sequence identity [%%] for BLASTp results." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-search_coverage', dest='searchcoverage', type=float, default=0.6, metavar='<float>',
+            help="Minimum fraction of query/target aligned (0.0–1.0)." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-alignment_mode', dest='alignment_mode', type=int, default=2, choices=[0,1,2], metavar='<int>',
+            help="DIAMOND BLASTp alignment mode." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-blast_score_ratio', dest='thrs_bsr', type=float, default=0.0, metavar='<float>',
+            help="Minimum BLAST score ratio threshold for hit inclusion." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-allow_multidomain', dest='multidomain_allowed', action='store_true',
+            help="Permit hits to multiple query domains per sequence." if show_advanced else argparse.SUPPRESS
+        )
+        search.add_argument(
+            '-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar='<int>',
+            help="Limit number of BLASTp hits reported per query (0=all)." if show_advanced else argparse.SUPPRESS
+        )
+
+        genecluster = parser.add_argument_group("Gene cluster prediction parameters (advanced)")
+        genecluster.add_argument(
+            '-distance', dest='nucleotide_range', type=int, default=3500, metavar='<int>',
+            help="Maximum nucleotide distance between syntenic genes in a cluster." if show_advanced else argparse.SUPPRESS
+        )
+        genecluster.add_argument(
+            '-p', dest='patterns_file', metavar='<filepath>', default=None,
+            help="Tab-separated file with predefined syntenic gene cluster patterns." if show_advanced else argparse.SUPPRESS
+        )
+
+        csb = parser.add_argument_group("Collinear syntenic block (csb) parameters (advanced)")
+        csb.add_argument(
+            '-insertions', dest='insertions', type=int, default=2, metavar='<int>',
+            help="Maximum insertions allowed between genes in a csb." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
+            '-occurence', dest='occurence', type=int, default=1, metavar='<int>',
+            help="Minimum number of csb occurrences to be recognized." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
+            '-min_csb_size', dest='min_csb_size', type=int, default=4, metavar='<int>',
+            help="Minimum number of genes in a csb." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
+            '-jaccard', dest='jaccard', type=float, default=0.0, metavar='<float>',
+            help="Maximum Jaccard dissimilarity allowed for csb clustering." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
+            '-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float, default=0.7, metavar='<float>',
+            help="Exclude csb with all hits below this BLAST score ratio." if show_advanced else argparse.SUPPRESS
+        )
+
+        pam_search = parser.add_argument_group("Presence/absence matrix (pam) parameters (advanced)")
+        pam_search.add_argument(
+            '-mx_thrs', dest='pam_threshold', type=float, default=0.3, metavar='<float>',
+            help="Significance threshold for presence/absence matrix co-occurrence." if show_advanced else argparse.SUPPRESS
+        )
+        pam_search.add_argument(
+            '-mx_bsr', dest='pam_bsr_threshold', type=float, default=0.6, metavar='<float>',
+            help="Minimum BLAST score ratio for pam prediction inclusion." if show_advanced else argparse.SUPPRESS
+        )
+
+        mcl_search = parser.add_argument_group("Protein sequence clustering parameters (advanced)")
+        mcl_search.add_argument(
+            '-mcl_min_seq_id', dest='mcl_min_seq_id', type=float, default=0.4, metavar='<float>',
+            help="Minimal sequence identity for clustering (0.0–1.0)." if show_advanced else argparse.SUPPRESS
+        )
+        mcl_search.add_argument(
+            '-mcl_density_thrs', dest='mcl_density_thrs', type=myUtil.auto_float, default='auto', metavar='<float>',
+            help="Required fraction of reference sequences in a cluster." if show_advanced else argparse.SUPPRESS
+        )
+        mcl_search.add_argument(
+            '-mcl_reference_thrs', dest='mcl_reference_thrs', type=myUtil.auto_float, default='auto', metavar='<float>',
+            help="Required fraction of all reference sequences found in a cluster." if show_advanced else argparse.SUPPRESS
+        )
+
+        alignment = parser.add_argument_group("Alignment parameters (advanced)")
+        alignment.add_argument(
+            '-min_seqs', dest='min_seqs', type=int, default=5, metavar='<int>',
+            help="Minimum number of sequences required for alignment." if show_advanced else argparse.SUPPRESS
+        )
+        alignment.add_argument(
+            '-max_seqs', dest='max_seqs', type=int, default=100000, metavar='<int>',
+            help="Maximum number of sequences to align." if show_advanced else argparse.SUPPRESS
+        )
+        alignment.add_argument(
+            '-gap_col_remove', dest='gap_remove_threshold', type=float, default=0.05, metavar='<float>',
+            help="Remove alignment columns with gaps above this threshold (0.0–1.0)." if show_advanced else argparse.SUPPRESS
+        )
+        alignment.add_argument(
+            '-include_domains', dest='include_list', nargs='+', default=[], metavar='<list>',
+            help="Domains to specifically include (space-separated)." if show_advanced else argparse.SUPPRESS
+        )
+        alignment.add_argument(
+            '-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>',
+            help="Domains to specifically exclude (space-separated)." if show_advanced else argparse.SUPPRESS
+        )
+
+    # ---- Build parser (show_advanced = True <-> --help-all, else False) ----
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
     
     #parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, description = "HAMSTER version 0.0.8 \nSyntax: HAMSTER [OPTIONS]",epilog = "")
     parser = argparse.ArgumentParser(
         description="HAMSTER: Homolog and Synteny Mining Pipeline",
-        epilog="",
-        usage=argparse.SUPPRESS,
+        epilog="Please cite:", # Formatter makes this a one-liner
+
+        usage="hamster.py -f <genomes_dir> -q <query.faa> [options]\n"
+      "       hamster.py -r <results_dir> [options]\n"
+      "       hamster.py --help-all",
+
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('-v', '--verbose', type=int, default=1, choices=[0, 1, 2], help="Logging verbosity: 0=WARNING, 1=INFO, 2=DEBUG")
-    
-    essential = parser.add_argument_group("Essential parameters: Provide either (-q & -f) or -r")
-    essential.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = __location__, metavar = '<directory>', help='Directory of the target fasta files, need -q option')
-    essential.add_argument('-q', dest='query_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Query sequences fasta file, need -f option')
-    essential.add_argument('-r', dest='result_files_directory', type=myUtil.dir_path, default = __location__+"/results", metavar = '<directory>', help='Resultfile directory (of previous run)')
+    add_all_groups(parser, show_advanced=show_all)
 
-    resources = parser.add_argument_group("Optional parameters")
-    resources.add_argument('-s', dest='stage', type=int, default = 0, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='Start pipeline at stage')
-    resources.add_argument('-x', dest='end', type=int, default = 10, choices= [0,1,2,3,4,5,6,7,8,9,10], metavar='<int>', help='End pipeline at stage')
-    resources.add_argument('-c', dest='cores', type=int, default = 2, metavar='<int>', help='Use number of CPUs')
-    resources.add_argument('-t', dest='taxonomy_file', type=myUtil.file_path, default = None, metavar = '<filepath>', help='Taxonomy csv file fro input assemblies')
-    resources.add_argument('-db',dest='database_directory', type=myUtil.file_path, metavar='<filepath>', help='Existing HAMSTER sqlite database')
-    resources.add_argument('-cv_off', dest='cross_validation_deactivated', action='store_true', help='Skip cross-validation step')
-   
-    resources2 = parser.add_argument_group("Optional globDB file parameters")
-    resources2.add_argument('-glob_faa', dest='glob_faa', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated multi-assembly fasta file')
-    resources2.add_argument('-glob_gff', dest='glob_gff', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated multi-assembly gff file')
-    resources2.add_argument('-glob_blast_table', dest='glob_table', type=myUtil.file_path, default=None, metavar = '<filepath>', help='Concatenated multi-assembly blast result table')
-    resources2.add_argument('-glob_chunks', dest='glob_chunks', type=int, default=3000, metavar='<int>', help='Chunk size for parsing glob results')
-    resources2.add_argument('-glob_off', dest='glob_search', action='store_false', help='Do not concatenated fasta file for initial diamond search')
-    
-    
-    search = parser.add_argument_group("Optional parameters for the initial diamond blastp search")
-    search.add_argument('-evalue', dest='evalue', type=float, default = 1e-5, metavar = '<float>', help='E-value cutoff [0,inf]')
-    search.add_argument('-thrs_score', dest='thrs_score', type=int, default = 100, metavar = '<int>', help='Score cutoff [0,inf]')
-    search.add_argument('-min_seq_id',dest='minseqid',type=float, default=25, metavar = '<float>', help='Sequence search matches above this sequence identity [0,100.0]')
-    search.add_argument('-search_coverage', dest='searchcoverage', type=float, default=0.6, metavar = '<float>', help='Min. coverage used for searching [0.0,1.0]')
-    search.add_argument('-alignment_mode',dest='alignment_mode',type=int, default=2, metavar='<int>', choices=[0,1,2], help='DIAMOND BLASTp alignment mode')
-    search.add_argument('-blast_score_ratio', dest='thrs_bsr', type=float, default=0.0, metavar = '<float>', help='Min. blast score ratio targets [0.0,1.0]')
-    search.add_argument('-allow_multidomain', dest='multidomain_allowed', action='store_true', help='Allow multiple query hits for each sequence')
-    search.add_argument('-reports_hit', dest='diamond_report_hits_limit', type=int, default=0, metavar = '<int>', help='Limit to this number of top hits per query')
+    # --help-all triggers full help and exits
+    if show_all:
+        parser.print_help()
+        sys.exit(0)
 
 
-    genecluster = parser.add_argument_group("Optional gene cluster prediction parameters")
-    genecluster.add_argument('-distance', dest='nucleotide_range', type=int, default = 3500, metavar='<int>', help='Max. nucleotide distance between synthenic genes')
-    genecluster.add_argument('-p', dest= 'patterns_file' , type=myUtil.file_path, default=__location__+"/src/Patterns", metavar='<filepath>', help='Filepath to predefined tab separated patterns file')
-    
-    csb = parser.add_argument_group("Optional collinear synthenic block parameters")
-    csb.add_argument('-insertions', dest='insertions', type=int,default = 2, metavar='<int>', help='Max. insertions in a csb')
-    csb.add_argument('-occurence', dest='occurence', type=int,default = 1, metavar='<int>', help='Min. number of csb occurs at least time')
-    csb.add_argument('-min_csb_size', dest='min_csb_size', type=int,default = 4, metavar='<int>', help='Min. csb size before recognized as csb')
-    csb.add_argument('-jaccard', dest='jaccard', type=float,default = 0.0, metavar='<float>', help='Acceptable dissimilarity in jaccard clustering. 0.2 means that 80 percent have to be the same genes')
-    csb.add_argument('-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float,default = 0.7, metavar='<float>', help='Exclude csb with all hits below this blast score ratio [0.0,1.0]')
-
-    pam_search = parser.add_argument_group("Optional presence/absence matrix parameters")
-    pam_search.add_argument('-mx_thrs', dest='pam_threshold', type=float, default=0.3, metavar = '<float>', help='Presence/absence matrix co-occurence significance parameter [0.0,1.0]')
-    pam_search.add_argument('-mx_bsr', dest='pam_bsr_threshold', type=float, default=0.6, metavar = '<float>', help='Blast score ratio inclusion cutoff from PAM prediction [0.0,1.0]')
-    
-    """
-    mcl_search = parser.add_argument_group("Optional Markov Chain Clustering parameters")
-    mcl_search.add_argument('-mcl_off', dest='csb_mcl_clustering', action='store_false', help='Skip markov chain clustering')
-    mcl_search.add_argument('-mcl_evalue', dest='mcl_evalue', type=float, default = 1e-10, metavar = '<float>', help='MCL matrix e-value cutoff [0,inf]')
-    mcl_search.add_argument('-mcl_min-seq-id',dest='mcl_minseqid',type=float, default=50, metavar = '<float>', help='MCL matrix sequence identity cutoff [0,100.0]')
-    mcl_search.add_argument('-mcl_search-coverage', dest='mcl_searchcoverage', type=float, default=0.6, metavar = '<float>', help='MCL matrix min. coverage [0.0,1.0]')
-    mcl_search.add_argument('-mcl_hit_limit', dest='mcl_hit_limit', type=int, default=100, metavar = '<int>', help='MCL maximum number of edges between sequences')
-    mcl_search.add_argument('-mcl_inflation', dest='mcl_inflation', type=float, default=2.0, metavar = '<float>', help='MCL inflation factor for granularity control')
-    mcl_search.add_argument('-mcl_sensitivity', dest='mcl_sensitivity', type=str, choices=["fast", "more-sensitive", "sensitive", "very-sensitive", "ultra-sensitive"], default="sensitive", metavar='<sensitivity>', help="Set DIAMOND sensitivity for MCL clustering. Choices: fast, more-sensitive, sensitive, very-sensitive, ultra-sensitive")
-    
-    #This is how the MCL reference thresholds work
-    #ref_count = len(seqs.intersection(reference_sequences)) # absolute number of reference sequences in the cluster
-    #cluster_size = len(seqs) # absoulte number of sequences in the cluster
-    #ref_density = ref_count / cluster_size if cluster_size > 0 else 0  # Fraction of reference sequences in the total number of sequencse in the current mcl cluster
-    #ref_fraction = ref_count / len(reference_sequences) if len(reference_sequences) > 0 else 0  # Fraction of total reference sequences in this cluster
-    #ref_density >= density_threshold and ref_fraction >= reference_fraction_threshold:
-    """
-    
-    mcl_search = parser.add_argument_group("Optional protein sequence clustering parameters")
-    mcl_search.add_argument('-mcl_min_seq_id', dest='mcl_min_seq_id', type=float, default=0.4, metavar = '<float>', help='Cluster sequences at minimal sequence identity [0.0,1.0]')
-    mcl_search.add_argument('-mcl_density_thrs', dest='mcl_density_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences in the total number of sequences in the cluster to label it as true positive [0.0,1.0]')
-    mcl_search.add_argument('-mcl_reference_thrs', dest='mcl_reference_thrs', type=float, default=None, metavar = '<float>', help='Required proportion of reference sequences from the total reference sequences in the cluster to label it as true positive [0.0,1.0]')
-   
-    alignment = parser.add_argument_group("Optional alignment parameters")
-    alignment.add_argument('-min_seqs', dest='min_seqs', type=int, default = 5, metavar='<int>', help='Min. number of required sequences for the alignment')
-    alignment.add_argument('-max_seqs', dest='max_seqs', type=int, default = 100000, metavar='<int>', help='Max. number of sequences that are aligned')
-    alignment.add_argument('-gap_col_remove', dest='gap_remove_threshold', type=float, default = 0.05, metavar='<float>', help='[0,1] remove alignment columns with only percent amino acids')
-    alignment.add_argument('-include_domains', dest='include_list',nargs='+', default=[], metavar='<list>', help='Space separated protein list, that are specifically included')
-    alignment.add_argument('-exclude_domains', dest='exclude_list', nargs='+', default=[], metavar='<list>', help='Space separated protein list, that are specifically excluded')
-    
-    
     if len(arguments) == 0: # Print help if no arguments were provided
         parser.print_help()
-        sys.exit("No arguments were provided.")
+        sys.exit("Please provide arguments. For help use -h or --help_all")
 
     options = Options()
     parser.parse_args(namespace=options)
     options.location = __location__
-    validate_options(options) # Check validity of inputs for essential arguments
     
+    # Define automatic calculation for these    
+    if options.mcl_density_thrs == 'auto':
+        options.mcl_density_thrs = None
+    if options.mcl_reference_thrs == 'auto':
+        options.mcl_reference_thrs = None
+
+    validate_options(options) # Check validity of inputs for essential arguments
+  
+
+
     return options
+
+        
+        
     
 def validate_options(options: Options) -> None:
     """
@@ -227,7 +355,7 @@ def validate_options(options: Options) -> None:
     
     # Only proceed if one of the conditions is met
     if not (database_provided or result_directory_provided or fasta_and_query_provided):
-        logger.error("[ERROR]: Please provide either a database file, a result directory, or both a fasta file directory and a query file using the -f and -q arguments.")
+        logger.error("Please provide either a fasta file directory and a query file, or an existing result directory from a previous run.")
         sys.exit(1) 
 
 def fasta_preparation(options: Options) -> None:
@@ -662,7 +790,7 @@ def cross_validation(options: Options) -> None:
         options.cores
     )
     
-    Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
+    myUtil.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
     Csb_proteins.fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory) #Target file for each HMM excluding seqs already below threshold
 
@@ -713,7 +841,8 @@ def report_cv_performance(options: Options) -> None:
     
     # External R scripts
     try:
-        Reports_plotting.process_initial_plotting(options)
+        logger.info("Plotting with external R-scripts")
+        #Reports_plotting.process_initial_plotting(options) TODO fix this routine
     except Exception as e:
         logger.error("An error occurred during the R plotting: %s", str(e))
     #cross validation
@@ -768,12 +897,13 @@ def main(args: list = None) -> None:
     """
     options = parse_arguments(args)
     log_file = os.path.join(options.result_files_directory, "execution_logfile.txt")    
-    myUtil.setup_logging(getattr(options, 'verbose', 0), log_file)
+    myUtil.setup_logging(getattr(options, 'verbose', 0), log_file) 
 #1
     Project.prepare_directory_structure(__location__)
     myUtil.print_header("\n 1. Preparing space for the results")
     Project.prepare_result_space(options)
-    
+    log_file = os.path.join(options.result_files_directory, "execution_logfile.txt")    
+    myUtil.setup_logging(getattr(options, 'verbose', 0), log_file)    
 #2    
     if options.stage <= 2 and options.end >= 2:
         myUtil.print_header("\n 2. Prokaryotic gene recognition and translation via prodigal")

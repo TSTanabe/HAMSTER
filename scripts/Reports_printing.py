@@ -238,7 +238,7 @@ def _skip_if_all_outputs_exist(
     ]
     all_expected = [enriched_path, roc_file, mcc_file] + confusion_files
     if all(os.path.exists(path) for path in all_expected):
-        logging.debug(f"All outputs exist for {protein} - skipping.")
+        logger.debug(f"All outputs exist for {protein} - skipping.")
         return True
     return False
 
@@ -261,13 +261,13 @@ def _plot_roc_and_mcc(
         optimized_cutoff=opt,
         output_path=roc_file
     )
-    logging.debug(f"Saved ROC: {roc_file}")
+    logger.debug(f"Saved ROC: {roc_file}")
 
     mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
     export_existing_mcc_curve(
         df, score_col='bitscore', mcc_col='MCC', output_path=mcc_file
     )
-    logging.debug(f"Saved MCC: {mcc_file}")
+    logger.debug(f"Saved MCC: {mcc_file}")
 
 
 def _write_neighborhood_confusions(df, report_dir, cutoffs):
@@ -463,7 +463,7 @@ def _write_mcl_plots_if_available(
                 mcl1_cutoff[key]['reference_threshold'],
                 output_dir=report_dir
             )
-            logging.debug(f"Saved MCL grp1: {key}")
+            logger.debug(f"Saved MCL grp1: {key}")
         if key in grp2_refs and key in mcl2_cutoff:
             write_mcl_vs_references(
                 mcl_results[key],
@@ -473,9 +473,9 @@ def _write_mcl_plots_if_available(
                 mcl2_cutoff[key]['reference_threshold'],
                 output_dir=report_dir
             )
-            logging.debug(f"Saved MCL grp2: {key}")
+            logger.debug(f"Saved MCL grp2: {key}")
     else:
-        logging.warning(f"No MCL data for {key}, skipping plots.")
+        logger.warning(f"No MCL data for {key}, skipping plots.")
 
 
 
@@ -564,7 +564,7 @@ def write_roc_from_metrics_to_tsv(df: pd.DataFrame,
 
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     out_df.to_csv(output_path, sep='\t', index=False)
-    logging.debug(f"Saved ROC data to {output_path}")
+    logger.debug(f"Saved ROC data to {output_path}")
 
 
 
@@ -635,7 +635,7 @@ def write_neighborhood_confusion_data(df: pd.DataFrame,
 
     out_df = pd.DataFrame(out_rows)
     out_df.to_csv(path, sep='\t', index=False)
-    logging.debug(f"Saved neighborhood confusion data to {path}")
+    logger.debug(f"Saved neighborhood confusion data to {path}")
 
     df.drop(columns=['_conf_label','_nb'], inplace=True)
     
@@ -671,7 +671,7 @@ def write_mcl_vs_references(mcl_file: str,
     clusters = parse_mcl_clusters(mcl_file)
     n_ref_total = len(ref_ids)
     if n_ref_total == 0:
-        logging.warning(f"No reference sequences for {protein_type} in mcl vs reference printing")
+        logger.warning(f"No reference sequences for {protein_type} in mcl vs reference printing")
         return
 
     # Compute cluster statistics
@@ -691,7 +691,7 @@ def write_mcl_vs_references(mcl_file: str,
     # Save output TSV
     out_df = pd.DataFrame(rows)
     out_df.to_csv(out_path, sep='\t', index=False)
-    logging.debug(f"Saved MCL-reference data to {out_path}")
+    logger.debug(f"Saved MCL-reference data to {out_path}")
 
 
 def parse_mcl_clusters(mcl_file_path):
@@ -719,7 +719,7 @@ def export_existing_mcc_curve(df: pd.DataFrame, score_col: str, mcc_col: str, ou
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     sorted_df.to_csv(output_path, sep='\t', index=False)
-    logging.debug(f"Saved MCC curve data exported to {output_path}")
+    logger.debug(f"Saved MCC curve data exported to {output_path}")
 
 
 
@@ -769,7 +769,7 @@ def save_cutoffs_table(
                 'noise':     cuts.get('noise cutoff'),
             })
 
-    logging.info(f"Saved HMM score cutoffs table to {out_path}")
+    logger.info(f"Saved HMM score cutoffs table to {out_path}")
         
 
 def save_performance_table(
@@ -817,7 +817,7 @@ def save_performance_table(
                 'TN':   TN,
             })
 
-    logging.info(f"Saved HMM validation performance table to {out_path}")
+    logger.info(f"Saved HMM validation performance table to {out_path}")
 
         
         
