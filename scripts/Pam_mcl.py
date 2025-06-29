@@ -1,20 +1,26 @@
 #!/usr/bin/python
 
+
 import copy
 import os
-import subprocess
 import sqlite3
-import traceback
-import pandas as pd
 from collections import defaultdict
+from typing import Dict, Set, Any, Tuple, Optional
+
+import pandas as pd
 
 from . import Pam_Mx_algorithm
 from . import Csb_proteins
-#from . import Reports # wäre vielleicht sinnvoll die nieghbourhood routinen wo anders hin zu verschieben
 from . import myUtil
 
+logger = myUtil.logger
 
-def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_grouped):
+
+def select_hits_by_pam_csb_mcl(
+    options: Any,
+    mcl_clustering_results_dict: Dict[str, str],
+    basis_grouped: Dict[str, Set[str]]
+) -> Dict[str, Set[str]]:
     """
     ### Main routine to the module ###
     
@@ -31,13 +37,12 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     
 
     Args:
-        options: An object with attributes:
-            - faa_dir
-            - database_directory
-            - result_files_directory
-            - phylogeny_directory
-            - max_seqs
-            - cores
+        options (Any): Config/options object.
+        mcl_clustering_results_dict (dict): {domain: mcl_cluster_file_path}
+        basis_grouped (dict): {domain: set(reference protein IDs)}
+
+    Returns:
+        dict: {domain: set(protein IDs)} merged final set.
     """
 
 
@@ -60,14 +65,14 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
     
     if not grouped_3_dict:
         grouped_3_dict = {}
-        print("[INFO] Selecing sequences from mcl clusters with truncated csb")
+        logger.info("Selecting sequences from mcl clusters with truncated csb pattern")
         for i, (domain, mcl_file) in enumerate(mcl_clustering_results_dict.items(), 1):
-            print(f"  [{i}/{total}] Processing: {domain} in file {mcl_file}")
+            print(f"[{i}/{total}] Processing: {domain} in file {mcl_file}", end="\r")
 
             # Get reference sequences for the domain (if exists in processed reference dict)
             reference_sequences = processed_reference_dict.get(domain, set())
             if not reference_sequences:
-                print(f"[WARN] No reference sequences found for domain '{domain}', skipping.")
+                logger.warning(f"No reference sequences found for domain '{domain}' - skipping")
                 continue
             
             # Get the common gene cluster vicinity (presence without order or doublication)
@@ -91,15 +96,13 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
             filtered_proteinIDs = select_seqs_with_truncated_csb_vicinity(options.database_directory, new_proteinID_set, common_gene_vicinity)
             grouped_3_dict[domain] = filtered_proteinIDs
     
-    print("[INFO] Selecing sequences from mcl clusters with plausible presence in the genome")
+    logger.info(f"Selecting sequences from mcl clusters with plausible presence in the genome")
     # Select the proteins with plausible PAM
-    print(processed_reference_dict)
-    print(extended_grouped)
     if not grouped_4_dict:
         grouped_4_dict = select_proteins_with_plausible_pam_from_mcl(options.database_directory, options.pam_threshold, processed_reference_dict, extended_grouped, options.cores)
     
     # Print statistics on selection to the terminal
-    print("[INFO] Extended reference sequence datasets")
+    logger.debug("Extended reference sequence datasets")
     log_all_mcl_cluster_statistics(processed_reference_dict, extended_grouped, grouped_3_dict, grouped_4_dict)
     
     merged_dict = myUtil.merge_grouped_refseq_dicts_simple(grouped_3_dict,grouped_4_dict)
@@ -112,17 +115,24 @@ def select_hits_by_pam_csb_mcl(options, mcl_clustering_results_dict, basis_group
             
     return merged_dict
 
-def select_ref_seq_mcl_sequences(mcl_file, domain, reference_sequences):
+def select_ref_seq_mcl_sequences(
+    mcl_file: str,
+    domain: str,
+    reference_sequences: Set[str]
+) -> Set[str]:
     """
     Returns all protein IDs from MCL clusters that contain at least one reference sequence.
 
     Args:
         mcl_file (str): Path to the MCL output file.
-        domain (str): Domain name (used for logging/debugging).
+        domain (str): Domain label.
         reference_sequences (set): Set of known reference protein IDs.
 
     Returns:
-        set: All protein IDs from clusters that contain at least one reference sequence.
+        set: All protein IDs from clusters with at least one reference protein.
+
+    Example:
+        select_ref_seq_mcl_sequences("a_mcl_clusters.txt", "A", {"ref1","ref2"})
     """
     
     def parse_mcl_clusters(path):
@@ -148,19 +158,28 @@ def select_ref_seq_mcl_sequences(mcl_file, domain, reference_sequences):
 
 
 
-def select_seqs_with_truncated_csb_vicinity(database_path, protein_ids, common_domains, chunk_size=900):
+def select_seqs_with_truncated_csb_vicinity(
+    database_path: str,
+    protein_ids: Set[str],
+    common_domains: Set[frozenset],
+    chunk_size: int = 900
+) -> Set[str]:
     """
-    Select proteins whose neighbors (same clusterID) contain only domains from the common_domains set.
-    
+    Selects proteins whose cluster neighborhood only contains domains from the given sets.
+
     Args:
-        database_path (str): Path to the SQLite database.
-        protein_ids (set): Set of proteinIDs to evaluate.
-        common_domains (set): Set of acceptable domains.
-        chunk_size (int): Max size for IN queries to avoid SQLite placeholder limits.
-    
+        database_path (str): SQLite DB path.
+        protein_ids (set): Input protein IDs.
+        common_domains (set): Set of acceptable domain sets (frozenset per neighborhood).
+        chunk_size (int): SQL chunk size.
+
     Returns:
-        set: ProteinIDs that have only valid domains in their cluster neighborhood.
+        set: ProteinIDs with valid neighborhood only.
+
+    Example:
+        select_seqs_with_truncated_csb_vicinity("db.sqlite", {"p1"}, {frozenset({"D1", "D2"})})
     """
+    
     selected = set()
     
     def chunked(iterable, size):
@@ -230,13 +249,23 @@ def select_seqs_with_truncated_csb_vicinity(database_path, protein_ids, common_d
 
 #############################################################################################################
 
-def select_gene_cluster_vicinity_domains(db_path, hit_ids):
+def select_gene_cluster_vicinity_domains(
+    db_path: str,
+    hit_ids: Set[str]
+) -> Tuple[Set[frozenset], Dict]:
     """
-    Selects for each input proteinID the gene cluster and returns
-    Example return structure are sets containing the genes of a gene cluster in a big set
-    with all the gene lcuster sets
+    For a set of protein IDs, extracts their cluster neighborhoods (as frozensets of domains).
+
+    Args:
+        db_path (str): SQLite DB path.
+        hit_ids (set): Protein IDs.
+
+    Returns:
+        tuple:
+            - set of frozensets (unique gene clusters as sets of domains)
+            - neighbors dict (for possible debugging)
+    """
     
-    """
     neighbors, _ = Csb_proteins.fetch_neighbouring_genes_with_domains(db_path, hit_ids)
 
     # Collapse the neighbourhoods by similarity
@@ -262,7 +291,28 @@ def select_gene_cluster_vicinity_domains(db_path, hit_ids):
 
 
 
-def select_proteins_with_plausible_pam_from_mcl(database_path, pam_threshold, basis_grouped, extended_grouped, cores, chunk_size=900):
+def select_proteins_with_plausible_pam_from_mcl(
+    database_path: str,
+    pam_threshold: float,
+    basis_grouped: Dict[str, Set[str]],
+    extended_grouped: Dict[str, Set[str]],
+    cores: int,
+    chunk_size: int = 900
+) -> Dict[str, Set[str]]:
+    """
+    For each domain, select plausible proteins from MCL clusters via a logistic model trained on the reference set.
+
+    Args:
+        database_path (str): SQLite DB path.
+        pam_threshold (float): Probability cutoff.
+        basis_grouped (dict): Reference set {domain: set(proteinIDs)}
+        extended_grouped (dict): Candidate set {domain: set(proteinIDs)}
+        cores (int): CPUs for parallel.
+        chunk_size (int): SQL chunk size.
+
+    Returns:
+        dict: {domain: set(proteinIDs)} passing PAM threshold.
+    """
 
     # 1. Basis PAM berechnen
     global_pam = Pam_Mx_algorithm.create_presence_absence_matrix(
@@ -303,22 +353,27 @@ def select_proteins_with_plausible_pam_from_mcl(database_path, pam_threshold, ba
     
     
     
-    
-    
-def validate_existing_domains_with_models(database_path, extended_pam, models, bsr_hit_scores, cutoff=0.5):
+
+def validate_existing_domains_with_models(
+    database_path: str,
+    extended_pam: Dict[str, Dict[str, list]],
+    models: Dict[str, Any],
+    bsr_hit_scores: Dict[str, float],
+    cutoff: float = 0.5
+) -> Dict[str, pd.Series]:
     """
-    Validates domain presence in the extended_pam using logistic models trained on basis_pam.
-    Only domains that are already present in the extended_pam are evaluated.
+    Validates presence of domains in extended_pam using logistic models.
+    Only domains already present in extended_pam are evaluated.
 
     Args:
-        database_path (str): Path to the SQLite database.
-        extended_pam (dict): PAM structure {genomeID: {domain: [proteinIDs]}}.
-        models (dict): Logistic regression models {domain: model}.
-        bsr_hit_scores (dict): Score lookup {proteinID: BSR score}.
-        cutoff (float): Probability threshold to consider a domain plausible.
+        database_path (str): SQLite DB path.
+        extended_pam (dict): {genomeID: {domain: [proteinIDs]}}
+        models (dict): {domain: model}
+        bsr_hit_scores (dict): {proteinID: score}
+        cutoff (float): Threshold
 
     Returns:
-        dict: {domain: pd.Series with plausible genomeIDs and probabilities}
+        dict: {domain: pd.Series(genomeID → probability)}
     """
 
 
@@ -359,17 +414,21 @@ def validate_existing_domains_with_models(database_path, extended_pam, models, b
     return plausible_results
 
 
-def extract_proteinIDs_from_plausible_predictions(plausible_results, extended_pam):
+def extract_proteinIDs_from_plausible_predictions(
+    plausible_results: Dict[str, pd.Series],
+    extended_pam: Dict[str, Dict[str, list]]
+) -> Dict[str, Set[str]]:
     """
-    Extracts proteinIDs from the extended PAM for genome/domain pairs that are marked as plausible.
+    Extracts proteinIDs for genome/domain pairs marked as plausible.
 
     Args:
-        plausible_results (dict): {domain: pd.Series of genomeID → probability}
+        plausible_results (dict): {domain: pd.Series(genomeID → probability)}
         extended_pam (dict): {genomeID: {domain: [proteinIDs]}}
 
     Returns:
-        dict: {domain: set(proteinIDs)} – same structure as "grouped"
+        dict: {domain: set(proteinIDs)}
     """
+    
     output_grouped = {}
 
     for domain, genome_series in plausible_results.items():
@@ -387,10 +446,23 @@ def extract_proteinIDs_from_plausible_predictions(plausible_results, extended_pa
 
 
 
-def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, grouped_3_dict, grouped_4_dict):
+def log_all_mcl_cluster_statistics(
+    reference_dict: Dict[str, Set[str]],
+    cluster_proteins_dict: Dict[str, Set[str]],
+    grouped_3_dict: Dict[str, Set[str]],
+    grouped_4_dict: Dict[str, Set[str]]
+) -> None:
     """
-    Print selection statistics for all domains based on MCL clustering, including
-    final merged set composition per domain. Uses actual set membership to avoid negative counts.
+    Logs selection statistics for all domains, reporting merged set composition.
+
+    Args:
+        reference_dict (dict): {domain: set(reference seqs)}
+        cluster_proteins_dict (dict): {domain: set(cluster hits)}
+        grouped_3_dict (dict): {domain: set(by CSB)}
+        grouped_4_dict (dict): {domain: set(by PAM)}
+
+    Returns:
+        None. Logs detailed stats.
     """
     for domain in reference_dict:
         reference_sequences = reference_dict.get(domain, set())
@@ -413,17 +485,17 @@ def log_all_mcl_cluster_statistics(reference_dict, cluster_proteins_dict, groupe
         grp3_part = final_merged_set & group3_set - reference_sequences - group4_set
         grp4_part = final_merged_set & group4_set - reference_sequences - group3_set
 
-        print(f"\n[{domain}]")
-        print(f"  Reference sequences:                 {len(reference_sequences)}")
-        print(f"  Total sequences in ref-mcl-clusters: {total_clusters_with_refs}")
-        print(f"  New candidate sequences:             {total_new_hits}")
-        print(f"  Selected by (CSB):                   {len(group3_set)}")
-        print(f"  Selected by (PAM):                   {len(group4_set)}")
-        print(f"  Final set:                           {len(final_merged_set)}")
-        print(f"     ├─ from references:               {len(ref_part)}")
-        print(f"     ├─ from (CSB) & (PAM):            {len(grp3_grp4_part)}")
-        print(f"     ├─ from (CSB) only:               {len(grp3_part)}")
-        print(f"     └─ from (PAM) only:               {len(grp4_part)}")
+        logger.debug(f"\n[{domain}]")
+        logger.debug(f"  Reference sequences:                 {len(reference_sequences)}")
+        logger.debug(f"  Total sequences in ref-mcl-clusters: {total_clusters_with_refs}")
+        logger.debug(f"  New candidate sequences:             {total_new_hits}")
+        logger.debug(f"  Selected by (CSB):                   {len(group3_set)}")
+        logger.debug(f"  Selected by (PAM):                   {len(group4_set)}")
+        logger.debug(f"  Final set:                           {len(final_merged_set)}")
+        logger.debug(f"     ├─ from references:               {len(ref_part)}")
+        logger.debug(f"     ├─ from (CSB) & (PAM):            {len(grp3_grp4_part)}")
+        logger.debug(f"     ├─ from (CSB) only:               {len(grp3_part)}")
+        logger.debug(f"     └─ from (PAM) only:               {len(grp4_part)}")
 
 
 

@@ -3,37 +3,46 @@ import os
 import sqlite3
 import csv
 import warnings
-
-from . import Csb_proteins
-from . import myUtil
-import pandas as pd
+from typing import Dict, Any, List, Set, Tuple, Optional, Iterator
 from collections import defaultdict
 from multiprocessing import Pool
 
-
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.exceptions import ConvergenceWarning
 
+from . import Csb_proteins
+from . import myUtil
+
+logger = myUtil.logger
 # Global variables for the databse read only mode
 _con = None
 _cur = None
 
 # Routines for the logistic regression based on presence absence matrices
 
-def train_logistic_from_pam_with_scores(pam, hit_scores, cores=4, target_domains=None):
+def train_logistic_from_pam_with_scores(
+    pam: Dict[str, Dict[str, List[str]]],
+    hit_scores: Dict[str, float],
+    cores: int = 4,
+    target_domains: Optional[Set[str]] = None
+) -> Tuple[Dict[str, LogisticRegression], pd.DataFrame]:
     """
     Trains logistic regression models using both presence/absence and hit scores.
-    Can be restricted to train only for selected target domains.
 
     Args:
         pam (dict): {genomeID: {domain_label: [proteinIDs]}}
         hit_scores (dict): {proteinID: score}
-        cores (int): Number of parallel jobs for sklearn
-        target_domains (list or set, optional): Domain labels to train models for. If None, train for all.
+        cores (int): Number of parallel jobs for sklearn.
+        target_domains (set, optional): Restrict models to these domains.
 
     Returns:
-        models (dict): {domain_label: trained LogisticRegression model}
-        coef_df (pd.DataFrame): Coefficient table (domain_label x features)
+        tuple:
+            - models (dict): {domain_label: LogisticRegression}
+            - coef_df (pd.DataFrame): Coefficient table (domain x features)
+
+    Example:
+        train_logistic_from_pam_with_scores(pam, hit_scores, 4, {'ABC'})
     """
     warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
@@ -76,7 +85,7 @@ def train_logistic_from_pam_with_scores(pam, hit_scores, cores=4, target_domains
         
 
         if y.nunique() <= 1:
-            print(f"[SKIP] {domain} class distribution = {y.value_counts().to_dict()} not enough class variety")
+            logger.debug(f"{domain} class distribution = {y.value_counts().to_dict()} not enough class variety")
             continue  # skip domains with only 1 class
 
         # Exclude self-domain features to prevent leakage
@@ -96,17 +105,21 @@ def train_logistic_from_pam_with_scores(pam, hit_scores, cores=4, target_domains
 
 
 
-def fetch_bsr_scores(database_path, grouped, chunk_size=900):
+def fetch_bsr_scores(
+    database_path: str,
+    grouped: Dict[str, Set[str]],
+    chunk_size: int = 900
+) -> Dict[str, float]:
     """
-    Fetches blast score ratios (BSR) for all proteinIDs in grouped dict from the SQLite database.
+    Fetches BLAST score ratios (BSR) for all proteinIDs in grouped dict from the SQLite database.
 
     Args:
-        database_path (str): Path to the SQLite database.
-        grouped (dict): Dictionary of domain → set(proteinIDs).
+        database_path (str): Path to SQLite DB.
+        grouped (dict): {domain: set(proteinIDs)}
         chunk_size (int): Number of proteinIDs per query batch.
 
     Returns:
-        dict: {proteinID: BSR score} — Missing BSR values will not be included.
+        dict: {proteinID: BSR score}
     """
     all_protein_ids = list({pid for pids in grouped.values() for pid in pids})
     bsr_scores = {}
@@ -129,17 +142,22 @@ def fetch_bsr_scores(database_path, grouped, chunk_size=900):
 
 
 
-def build_presence_score_matrix(df, hit_scores):
+def build_presence_score_matrix(
+    df: pd.DataFrame,
+    hit_scores: Dict[str, float]
+) -> pd.DataFrame:
     """
-    Erstellt binäre Präsenz- und Score-Matrix aus einem Domain-DataFrame.
+    Builds a binary presence and score matrix from a domain DataFrame.
 
     Args:
-        df (pd.DataFrame): DataFrame mit genomeID als Index, Domains als Spalten,
-                           Zellinhalt = Komma-separierte Protein-IDs oder leer
-        hit_scores (dict): Mapping {proteinID: float}
+        df (pd.DataFrame): genomeID as index, domains as columns (comma-separated proteinIDs)
+        hit_scores (dict): {proteinID: float}
 
     Returns:
-        pd.DataFrame: Kombination aus binärer Präsenzmatrix und Scorematrix
+        pd.DataFrame: Combined binary presence/score matrix.
+
+    Example:
+        build_presence_score_matrix(df, hit_scores)
     """
     binary_matrix = pd.DataFrame(index=df.index)
     score_matrix = pd.DataFrame(index=df.index)
@@ -168,19 +186,30 @@ def build_presence_score_matrix(df, hit_scores):
 #########################################################################################
 
 
-def create_presence_absence_matrix(proteinID_sets, database_directory, output, chunk_size=900, cores=8):
+def create_presence_absence_matrix(
+    proteinID_sets: Dict[str, Set[str]],
+    database_directory: str,
+    output: str,
+    chunk_size: int = 900,
+    cores: int = 8
+) -> Dict[str, Dict[str, List[str]]]:
     """
-    Creates a TSV file where each cell contains the proteinID(s) for a domain in a genome,
-    using a grouped dictionary instead of reading FASTA files.
+    Creates a genome-domain-protein presence matrix using the grouped dictionary.
 
     Args:
-        grouped (dict): {domain_label (e.g. "grp0_abc"): set(proteinIDs)}
-        database_directory (str): Path to SQLite database.
-        output_path (str): Path to the output TSV file.
-        chunk_size (int): Max number of proteinIDs per DB query.
-        cores (int): Number of parallel worker processes.
-    """
+        proteinID_sets (dict): {domain_label: set(proteinIDs)}
+        database_directory (str): Path to SQLite DB.
+        output (str): Output label (not written here, see write_pam_to_tsv)
+        chunk_size (int): Max proteinIDs per DB query.
+        cores (int): Parallel worker count.
 
+    Returns:
+        dict: {genomeID: {domain_label: [proteinIDs]}}
+
+    Example:
+        create_presence_absence_matrix({'A': {'p1'}}, 'db.sqlite', 'pam.tsv')
+    """
+    
     all_protein_ids = {pid for pids in proteinID_sets.values() for pid in pids}
 
     if not all_protein_ids:
@@ -217,14 +246,22 @@ def create_presence_absence_matrix(proteinID_sets, database_directory, output, c
     
     return genome_domain_matrix
 
-def write_pam_to_tsv(pam, output_path):
+
+def write_pam_to_tsv(
+    pam: Dict[str, Dict[str, List[str]]],
+    output_path: str
+) -> None:
     """
     Write the presence/absence matrix to a TSV file.
 
     Args:
         pam (dict): {genomeID: {domain_label: [proteinIDs]}}
         output_path (str): Path to TSV output file
+
+    Returns:
+        None
     """
+    
     # Automatisch alle Domänenlabels sammeln
     domain_set = set()
     for domain_map in pam.values():
@@ -244,7 +281,18 @@ def write_pam_to_tsv(pam, output_path):
             writer.writerow(row)
     
     
-def _map_domain_proteins_to_genomes(args):
+def _map_domain_proteins_to_genomes(
+    args: Tuple[str, Set[str], Dict[str, str]]
+) -> Dict[str, List[Tuple[str, str]]]:
+    """
+    Maps a set of protein IDs to genomes for a given domain.
+
+    Args:
+        args: (domain, protein_ids, protein_to_genome)
+
+    Returns:
+        dict: {genomeID: [(domain, proteinID)]}
+    """
     domain, protein_ids, protein_to_genome = args
     result = defaultdict(list)
     for pid in protein_ids:
@@ -254,8 +302,20 @@ def _map_domain_proteins_to_genomes(args):
             
     return result
 
-def chunked(iterable, size):
-    """Yield successive chunk-sized lists from iterable."""
+def chunked(iterable: List[Any], size: int) -> Iterator[List[Any]]:
+    """
+    Yield successive chunk-sized lists from iterable.
+
+    Args:
+        iterable (list): Input list.
+        size (int): Chunk size.
+
+    Returns:
+        Iterator[list]: Yields list of chunk size.
+
+    Example:
+        list(chunked([1,2,3,4,5], 2)) → [[1,2],[3,4],[5]]
+    """
     for i in range(0, len(iterable), size):
         yield list(iterable)[i:i + size]
         
@@ -263,10 +323,15 @@ def chunked(iterable, size):
 ######## Read only database for the PAM mapping #############################
 #############################################################################
 
-def _get_readonly_cursor(database_path: str):
+def _get_readonly_cursor(database_path: str) -> sqlite3.Cursor:
     """
-    Öffnet eine nur-lesende SQLite-Verbindung (URI mode=ro) mit query_only,
-    und cached Verbindung+Cursor pro Prozess.
+    Opens a read-only SQLite connection and caches cursor per process.
+
+    Args:
+        database_path (str): Path to SQLite DB.
+
+    Returns:
+        sqlite3.Cursor: Cursor to DB in read-only mode.
     """
     global _con, _cur
     if _con is None:
@@ -282,12 +347,17 @@ def _get_readonly_cursor(database_path: str):
 # -------------------------------------------------------------------
 # 2) Chunk-weises Protein→Genome Mapping
 # -------------------------------------------------------------------
-def _fetch_protein_to_genome_chunk(args):
+def _fetch_protein_to_genome_chunk(
+    args: Tuple[str, List[str]]
+) -> Dict[str, str]:
     """
+    Maps a list of proteinIDs to genomeIDs for a DB chunk.
+
     Args:
-        args: Tuple(database_path, chunk: List[str])
+        args: (database_path, chunk: List[str])
+
     Returns:
-        Dict[proteinID, genomeID]
+        dict: {proteinID: genomeID}
     """
     database_path, chunk = args
     if not chunk:
@@ -310,7 +380,18 @@ def _fetch_protein_to_genome_chunk(args):
 #########################################################################################
 
 
-def process_domain_hits_pool(args):
+def process_domain_hits_pool(
+    args: Tuple[str, List[str], str, float]
+) -> Tuple[str, Set[str]]:
+    """
+    For a domain and a list of genomes, get best protein hits per genome above BSR threshold.
+
+    Args:
+        args: (domain, genome_list, database_path, bsr_threshold)
+
+    Returns:
+        tuple: (domain, set(proteinIDs))
+    """
     domain, genome_list, database_path, bsr_threshold = args
     best_hits = {}
     con = sqlite3.connect(database_path)
@@ -342,7 +423,27 @@ def process_domain_hits_pool(args):
     return domain, proteinIDs
 
 
-def collect_predicted_singleton_hits_from_db_parallel(predictions_all, database_path, plausible_cutoff=0.6, bsr_cutoff=0.5, max_parallel=4):
+def collect_predicted_singleton_hits_from_db_parallel(
+    predictions_all: Dict[str, pd.Series],
+    database_path: str,
+    plausible_cutoff: float = 0.6,
+    bsr_cutoff: float = 0.5,
+    max_parallel: int = 4
+) -> Dict[str, Set[str]]:
+    """
+    For each singleton domain, collect proteinIDs predicted above cutoff from the DB in parallel.
+
+    Args:
+        predictions_all (dict): {singleton_domain: pd.Series (index=genomeID, value=score)}
+        database_path (str): Path to SQLite DB.
+        plausible_cutoff (float): Prediction probability threshold.
+        bsr_cutoff (float): BSR cutoff for protein hits.
+        max_parallel (int): Parallel workers.
+
+    Returns:
+        dict: {domain: set(proteinIDs)}
+    """
+    
     domain_to_genomes = defaultdict(list)
     for singleton, prediction_series in predictions_all.items():
         domain = singleton.split('_', 1)[-1]
@@ -361,35 +462,6 @@ def collect_predicted_singleton_hits_from_db_parallel(predictions_all, database_
             singleton_hits[domain] = proteinIDs
 
     return singleton_hits
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

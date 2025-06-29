@@ -1,8 +1,11 @@
 #!/usr/bin/python
-import traceback
-import subprocess
 import re
+import subprocess
+from typing import Dict, Optional
 from . import Database
+from . import myUtil
+
+logger = myUtil.logger
 
 
 class Protein:
@@ -10,34 +13,49 @@ class Protein:
     The class Protein organizes protein domains. When constructed the firt domain has to be added and assigned to a proteinID. The proteinID and the list of domains are accessible from outside. Also the coordinates, scores and HMM names are accessible as strings separated by "-". When a domain is added after the construction it is checked for overlapping sequence coordinates. If coordinates overlap in any way the novel domain has to have a higher score than all overlapped domains. If new domain has a lower score than any previously added domain new domain is not added.
     This follows the assumption that the HMM with highest domain is normally assigned to the protein. Here the additional information of other domains is added if it does not interfere with this assumption
     
+    Organizes protein domains and related attributes for a protein. 
+    New domains are only added if they do not overlap with higher-scoring existing domains.
+    All coordinates, scores, and HMM names are accessible as dash-separated strings.
+
     Args:
-        protein_ID - unique string as identifier
-        HMM - protein type designation
-        start - start coordinate of the protein type in the AA sequence
-        end - end coordinate of the protein type in the AA sequence
-        score - bitscore, propability of the dignated protein type
+        proteinID (str): Unique identifier.
+        HMM (str): Domain name.
+        start (int): Start coordinate.
+        end (int): End coordinate.
+        score (float): Domain bitscore.
+        genomeID (str): Genome identifier (optional).
+        ident (int): Percent identity (default: 25).
+        bsr (float): Blast score ratio (default: 1.0).
+
+    Example:
+        p = Protein("Prot1", "HMM_A", 10, 120, 40)
+        p.add_domain("HMM_B", 130, 200, 30)
     """
 
 
-    def __init__(self,proteinID,HMM,start=0,end=0,score=1,genomeID="",ident=25,bsr=1.0): 
-        #Protein attributes
-        self.proteinID = proteinID
-        self.genomeID = genomeID
-        self.protein_sequence = ""
-        
-        #Gene attributes
-        self.gene_contig = ""
-        self.gene_start = 0
-        self.gene_end = 0
-        self.gene_strand = "."
-        self.gene_locustag = ""
-        
-        #Cluster attributes
-        self.clusterID = "" #reziprok mit Cluster class
-        self.keywords = {} #reziprok mit Cluster class
-        
-        self.domains = {}   # dictionary start coordinate => Domain object
-        self.add_domain(HMM,start,end,score,ident,bsr)
+    def __init__(
+        self,
+        proteinID: str,
+        HMM: str,
+        start: int = 0,
+        end: int = 0,
+        score: float = 1,
+        genomeID: str = "",
+        ident: int = 25,
+        bsr: float = 1.0
+    ):
+        self.proteinID: str = proteinID
+        self.genomeID: str = genomeID
+        self.protein_sequence: str = ""
+        self.gene_contig: str = ""
+        self.gene_start: int = 0
+        self.gene_end: int = 0
+        self.gene_strand: str = "."
+        self.gene_locustag: str = ""
+        self.clusterID: str = ""
+        self.keywords: Dict = {}
+        self.domains: Dict[int, Domain] = {}  # start coordinate → Domain object
+        self.add_domain(HMM, start, end, score, ident, bsr)
         
 
     ##### Getter ####
@@ -90,21 +108,23 @@ class Protein:
         return None
         
 
-    def add_domain(self,HMM,start,end,score,ident=25,bsr=1.0):
+
+    def add_domain(
+        self,
+        HMM: str,
+        start: int,
+        end: int,
+        score: float,
+        ident: int = 25,
+        bsr: float = 1.0
+    ) -> int:
         """
-        2.9.22
-        Adds a domain to an existing protein. Only if there is no overlap with a 
-        currently existing domain or of the overlapping domain scores higher than
-        any existing overlapped domain. Overlapped domains with minor scores are deleted
-        
-        Args:
-            HMM - protein type designation
-            start - start coordinate of the protein type in the AA sequence
-            end - end coordinate of the protein type in the AA sequence
-            score - bitscore, propability of the dignated protein type
-        Return: 
-            0 - no domain was added
-            1 - domain was added
+        Adds a domain to the protein only if it does not overlap
+        with a higher-scoring existing domain. If overlap exists with lower-scoring
+        domain, that domain is removed.
+
+        Returns:
+            int: 1 if domain added, 0 if not added.
         """
 
         del_domains = [] # start coordinates/keys of domains to be replace
@@ -129,13 +149,24 @@ class Protein:
 
 class Domain:
 #2.9.22
-    def __init__(self,HMM,start,end,score,ident=1,bsr=1.0):
-        self.HMM = HMM
-        self.start = int(start)
-        self.end = int(end)
-        self.score = int(score)
-        self.identity = int(ident)
-        self.bsr = float(bsr)
+    """
+    Stores domain information (HMM name, coordinates, score, identity, bsr).
+
+    Args:
+        HMM (str): Domain name.
+        start (int): Start coord.
+        end (int): End coord.
+        score (float): Bitscore.
+        ident (int): Percent identity.
+        bsr (float): Blast score ratio.
+    """
+    def __init__(self, HMM: str, start: int, end: int, score: float, ident: int = 1, bsr: float = 1.0):
+        self.HMM: str = HMM
+        self.start: int = int(start)
+        self.end: int = int(end)
+        self.score: float = float(score)
+        self.identity: int = int(ident)
+        self.bsr: float = float(bsr)
     
     def __hash__(self):
         return hash((self.HMM, self.start, self.end, self.score))
@@ -160,28 +191,30 @@ class Domain:
 
 
 
-def parseGFFfile(Filepath, protein_dict):
+def parseGFFfile(
+    filepath: str, protein_dict: Dict[str, Protein]
+) -> Dict[str, Protein]:
     """
     3.9.22
-    
-    Adds the general genomic features to Protein Objects in a dictionary
-    
+    Adds GFF attributes to each Protein object in the dictionary.
+
     Args:
-        Filepath - GFF3 formatted file
-        protein_dict - Dictionary with key proteinID and value Protein Objects
-    Return:
-        protein_dict (even though possibly not necessary)
+        filepath (str): Path to GFF3 file.
+        protein_dict (dict): {proteinID: Protein object}
+
+    Returns:
+        dict: Updated protein_dict.
     """
     locustag_pattern = re.compile(r'locus_tag=(\S*?)(?:[;\s]|$)')
     geneID_pattern = re.compile(r'ID=(cds-)?(\S+?)(?:[;\s]|$)')
     
     grep_pattern = "|".join(protein_dict.keys())
     try:
-        grep_process = subprocess.Popen(['grep', '-E', grep_pattern, Filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        grep_process = subprocess.Popen(['grep', '-E', grep_pattern, filepath], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = grep_process.communicate()
 
         if stderr:
-            print("[ERROR] in grep process:", stderr)
+            logger.error("Grep process:", stderr)
             return protein_dict
         
         for line in stdout.decode('utf-8').split('\n'):
@@ -203,8 +236,7 @@ def parseGFFfile(Filepath, protein_dict):
                 locustag = getLocustag(locustag_pattern, line)
                 protein.gene_locustag = str(locustag)
     except Exception as e:
-        error_message = f"\nError occurred: {str(e)}"
-        print(f"[WARN] Skipped {faa_file} due to an error - {error_message}")
+        logger.warning(f"Error occurred while parsing GFF: {str(e)}")
         return protein_dict
     return protein_dict
 
@@ -258,7 +290,7 @@ def getProteinSequence(Filepath, protein_dict):
             protein.protein_sequence = sequence
     
     except IOError:
-        print(f"[ERROR] File {Filepath} could not be opened.")
+        logger.error(f"Cannot open {filepath}")
     
     finally:
         if reader is not None:
@@ -267,11 +299,17 @@ def getProteinSequence(Filepath, protein_dict):
     return protein_dict
 
 
-def getLocustag(locustag_pattern,string):
-    match = locustag_pattern.search(string)
-    if match:
-        return match.group(1)
-    else:
-        return ""
+def getLocustag(locustag_pattern: re.Pattern, string: str) -> str:
+    """
+    Extracts locus_tag from a string using a regex pattern.
 
+    Args:
+        locustag_pattern (re.Pattern): Regex pattern for locus_tag.
+        string (str): Line to search.
+
+    Returns:
+        str: locus_tag or empty string if not found.
+    """
+    match = locustag_pattern.search(string)
+    return match.group(1) if match else ""
 

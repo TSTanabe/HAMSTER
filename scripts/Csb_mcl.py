@@ -1,16 +1,32 @@
 #!/usr/bin/python
 
+
 import csv
 import os
 import numpy as np
+from typing import Dict, Any, Set, Tuple, Optional
+
 from . import Csb_proteins
 from . import myUtil
 
+logger = myUtil.logger
 
 
 
-def csb_mcl_datasets(options, reference_dict):
 
+
+def csb_mcl_datasets(options: Any, reference_dict: Dict[str, Set[str]]) -> Dict[str, str]:
+    """
+    Runs DIAMOND self-blast and MCL clustering for all .faa files in the given directory.
+
+    Args:
+        options (Any): Settings object, must contain phylogeny_directory and mcl_inflation.
+        reference_dict (dict): {domain: set(reference protein IDs)}.
+
+    Returns:
+        dict: {domain: mcl_cluster_file_path}
+    """
+    
     # Diamond self blast
     blast_results_dict = run_diamond_self_blast(options, options.phylogeny_directory) # domain => result_file
     
@@ -22,23 +38,20 @@ def csb_mcl_datasets(options, reference_dict):
     return mcl_results_dict
 
 
-
-
-
 ##################################################################
 
-##################################################################
-
-def run_diamond_self_blast(options, directory):
+def run_diamond_self_blast(options: Any, directory: str) -> Dict[str, str]:
     """
-    Runs a DIAMOND BLASTp self-search for all .faa files in a directory.
-    If the output file already exists, the DIAMOND search is skipped.
+    Runs DIAMOND BLASTp self-search for all .faa files in the directory.
+    Skips if output already exists.
 
-    Parameters:
-    - options: Settings for the DIAMOND search (e.g., number of threads, memory limits).
-    - directory: Directory containing the .faa files.
+    Args:
+        options: DIAMOND settings.
+        directory (str): Input directory with .faa files.
+
+    Returns:
+        dict: {domain: path_to_diamond_selfblast.tsv}
     """
-
     # List all .faa files in the directory
     faa_files = [f for f in os.listdir(directory) if f.endswith(".faa")]
     # Dictionary to store output file paths
@@ -54,15 +67,15 @@ def run_diamond_self_blast(options, directory):
 
         # Debugging output: Check if files exist before processing
         if os.path.exists(mcl_output_file):
-            print(f"[SKIP] Found existing MCL results for {input_prefix}")
+            logger.debug(f"Found existing MCL results for {input_prefix}")
             continue
 
         if os.path.exists(output_file_path):
-            print(f"[SKIP] DIAMOND BLAST results already exist: {output_file_path}")
+            logger.debug(f"DIAMOND BLAST results already exist: {output_file_path}")
             output_files_dict[input_prefix] = output_file_path
             continue
 
-        print(f"[INFO] Starting DIAMOND self-BLASTp for {faa_file}")
+        logger.debug(f"Starting DIAMOND self-BLASTp for {faa_file}")
 
         # Run DIAMOND BLASTp self-search
         blast_results_path = DiamondSearch(
@@ -73,7 +86,7 @@ def run_diamond_self_blast(options, directory):
 
         # Debugging: Check if DIAMOND output was actually created
         if not os.path.exists(blast_results_path):
-            print(f"[ERROR] DIAMOND output file {blast_results_path} not found after self-BLASTp for MCL")
+            logger.error(f"DIAMOND output file {blast_results_path} not found after self-BLASTp for MCL")
             continue
 
         # If DIAMOND produces an output file, rename it to match the input file prefix
@@ -84,23 +97,31 @@ def run_diamond_self_blast(options, directory):
 
 
 
-def run_mcl_clustering(mcl_input_file, mcl_output_file, mcl_inflation, domain='unknown'):
+def run_mcl_clustering(
+    mcl_input_file: str,
+    mcl_output_file: str,
+    mcl_inflation: float,
+    domain: str = "unknown"
+) -> Optional[str]:
     """
-    Converts a Diamond BLAST output file into an MCL-compatible format
-    and runs MCL clustering.
+    Runs MCL clustering on a DIAMOND tabular output file.
 
     Args:
-    - diamond_tab_file (str): Path to the Diamond BLAST output (tabular format).
-    - mcl_input_file (str): Name of the MCL input file.
-    - mcl_output_file (str): Name of the MCL output file.
+        mcl_input_file (str): Path to DIAMOND BLAST output.
+        mcl_output_file (str): Output file path for MCL clusters.
+        mcl_inflation (float): MCL inflation parameter.
+        domain (str): Domain label (for logging).
+
+    Returns:
+        str: Path to MCL output file if created, else None.
     """
     
     if os.path.isfile(mcl_output_file):
-        print(f"[SKIP] Found existing MCL clustering for {domain}")
+        logger.debug(f"Found existing MCL clustering for {domain}")
         return mcl_output_file
     
     # Step 2: Run MCL clustering
-    print(f"[INFO] Starting MCL clustering for {domain}")
+    logger.debug(f"Starting MCL clustering for {domain}")
     mcl = myUtil.find_executable("mcl")
     os.system(f"{mcl} {mcl_input_file} --abc -I {mcl_inflation} -o {mcl_output_file} > /dev/null 2>&1")
 
@@ -109,16 +130,21 @@ def run_mcl_clustering(mcl_input_file, mcl_output_file, mcl_inflation, domain='u
     return mcl_output_file
 
 
-def run_mcl_for_all_domains(output_files_dict, mcl_directory, mcl_inflation):
+def run_mcl_for_all_domains(
+    output_files_dict: Dict[str, str],
+    mcl_directory: str,
+    mcl_inflation: float
+) -> Dict[str, str]:
     """
-    Iterates over a dictionary of Diamond BLAST output files and runs MCL clustering for each.
+    Runs MCL clustering for all DIAMOND output files.
 
     Args:
-    - output_files_dict (dict): Dictionary where keys are domains and values are Diamond BLAST output file paths.
-    - mcl_directory (str): Path to the directory where MCL output files should be stored.
+        output_files_dict (dict): {domain: path_to_diamond_selfblast.tsv}
+        mcl_directory (str): Directory for output.
+        mcl_inflation (float): MCL inflation value.
 
     Returns:
-    - mcl_output_dict (dict): Dictionary where keys are domains and values are the corresponding MCL output file paths.
+        dict: {domain: path_to_mcl_clusters.txt}
     """
 
     # Ensure the output directory exists
@@ -147,20 +173,29 @@ def run_mcl_for_all_domains(output_files_dict, mcl_directory, mcl_inflation):
 ##################################################################################################################
 #### Main for the mcl cluster iteration ####
 
-def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_threshold=None, reference_threshold=None):
+def select_hits_by_csb_mcl(
+    options: Any,
+    mcl_output_dict: Dict[str, str],
+    reference_dict: Dict[str, Set[str]],
+    density_threshold: Optional[float] = None,
+    reference_threshold: Optional[float] = None
+) -> Tuple[Dict[str, Set[str]], Dict[str, Dict[str, float]]]:
     """
-    Iterates over multiple MCL output files, extracts reference sequences, 
-    and processes them using process_single_mcl_file.
-    Selection is based on F1 score optimized density and reference threshold
+    Selects clusters from MCL output based on density and reference thresholds.
 
     Args:
-    - mcl_output_dict (dict): Dictionary where keys are domains and values are MCL output file paths. These are either grp0_ or without prefix
-    - reference_dict (dict): Dictionary where keys need to be split ('_'), and values are sets of reference sequence IDs. keys are grp0_domain
-    - density_threshold (float): Minimum reference density required.
+        options: Not used here but passed for consistency.
+        mcl_output_dict (dict): {domain: mcl_cluster_file_path}
+        reference_dict (dict): {domain: set(reference sequence IDs)}
+        density_threshold (float): Minimum reference density required.
+        reference_threshold (float): Minimum reference coverage required.
 
     Returns:
-    - all_clusters (dict): Merged dictionary of all high-density clusters.
+        tuple:
+            - all_clusters (dict): {domain: set(selected protein IDs)}
+            - all_cutoffs (dict): {domain: {'density_threshold': x, 'reference_threshold': y}}
     """
+    
     all_clusters = {}
     all_cutoffs = {}
     # Process reference_dict to extract the actual domain names
@@ -169,12 +204,12 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
     }
 
     for domain, mcl_file in mcl_output_dict.items():
-        print(f"\n[INFO] Selecting hits by sequence clustering for {domain}")
+        logger.debug(f"Selecting hits by sequence clustering for {domain}")
 
         # Get reference sequences for the domain (if exists in processed reference dict)
         reference_sequences = processed_reference_dict.get(domain, set())
         if not reference_sequences:
-            print(f"[WARN] No reference sequences found for {domain}")
+            logger.warning(f"No reference sequences found for {domain}")
             continue
         
         
@@ -186,10 +221,10 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
         
         # Get fallback values if thresholds were not provided
         if local_density_thrs is None:
-            print(f"[WARN] MCL density threshold was not calculated for {domain}, fallback 0.1")
+            logger.warning(f"MCL density threshold was not calculated for {domain}, fallback 0.1")
             local_density_thrs = 0.1
         if local_reference_thrs is None:
-            print(f"[WARN] MCL reference threshold was not calculated for {domain}, fallback 0.001")
+            logger.warning(f"MCL reference threshold was not calculated for {domain}, fallback 0.001")
             local_reference_thrs = 0.01
         
         
@@ -208,21 +243,25 @@ def select_hits_by_csb_mcl(options, mcl_output_dict, reference_dict, density_thr
     return all_clusters, all_cutoffs
 
 
-def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences, 
-                                      fixed_density_threshold=None, 
-                                      fixed_reference_threshold=None):
+def calculate_optimized_mcl_threshold(
+    mcl_file: str,
+    domain: str,
+    reference_sequences: Set[str],
+    fixed_density_threshold: Optional[float] = None,
+    fixed_reference_threshold: Optional[float] = None
+) -> Tuple[Optional[float], Optional[float]]:
     """
-    Calculates the optimal (density, reference) thresholds based on F1 score.
+    Finds optimal (density, reference) thresholds for MCL cluster selection based on F1 score.
 
     Args:
-        mcl_file (str): Path to MCL output file.
-        domain (str): Domain name (used for logging/debugging).
-        reference_sequences (set): Set of known reference sequence IDs.
-        fixed_density_threshold (float or None): Optional fixed density threshold.
-        fixed_reference_threshold (float or None): Optional fixed reference threshold.
+        mcl_file (str): MCL clusters file.
+        domain (str): Domain for log output.
+        reference_sequences (set): Known references.
+        fixed_density_threshold (float): Optional override.
+        fixed_reference_threshold (float): Optional override.
 
     Returns:
-        (float, float): Tuple of best (density_threshold, reference_threshold)
+        (density_threshold, reference_threshold)
     """
     
     def parse_mcl_clusters(path):
@@ -233,7 +272,7 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
     n_ref_total = len(reference_sequences)
 
     if n_ref_total == 0:
-        print("[WARN] No reference sequence provided")
+        logger.warning("No reference sequence provided")
         return fixed_density_threshold,fixed_reference_threshold
 
     cluster_metrics = []
@@ -291,16 +330,16 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
 
             # Sanity check
             if not (0 <= precision <= 1):
-                print(f"[ERROR] Invalid precision: {precision} (TP={TP}, FP={FP})")
+                logger.error(f"Invalid precision: {precision} (TP={TP}, FP={FP})")
                 continue
             if not (0 <= recall <= 1):
-                print(f"[ERROR] Invalid recall: {recall} (TP={TP}, FN={FN})")
+                logger.error(f"Invalid recall: {recall} (TP={TP}, FN={FN})")
                 continue
 
             f1 = 2 * (precision * recall) / (precision + recall)
 
             if f1 > 1:
-                print(f"[ERROR] F1 > 1: TP={TP}, FP={FP}, FN={FN}, Precision={precision}, Recall={recall}, F1={f1}")
+                logger.error(f"F1 > 1: TP={TP}, FP={FP}, FN={FN}, Precision={precision}, Recall={recall}, F1={f1}")
                 continue
 
             if f1 >= best_score:
@@ -308,16 +347,29 @@ def calculate_optimized_mcl_threshold(mcl_file, domain, reference_sequences,
                 best_coords = (x_thresh, y_thresh)
 
 
-    print(f"[INFO] {domain} optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
+    logger.debug(f"{domain} optimal MCL cluster inclusion thresholds: density = {best_coords[1]}, reference = {best_coords[0]}, F1 = {best_score:.3f}")
     return best_coords[1], best_coords[0]  # Return in order: (density, reference)
 
 
-def process_single_mcl_file(mcl_file, domain, reference_sequences, density_threshold, reference_fraction_threshold):
+def process_single_mcl_file(
+    mcl_file: str,
+    domain: str,
+    reference_sequences: Set[str],
+    density_threshold: float,
+    reference_fraction_threshold: float
+) -> Dict[str, Set[str]]:
     """
-    Processes a single MCL output file and extracts high-density clusters.
+    Processes a single MCL output file and extracts clusters above threshold.
+
+    Args:
+        mcl_file (str): Path to cluster file.
+        domain (str): Domain label.
+        reference_sequences (set): Known references.
+        density_threshold (float): Min ratio of reference in cluster.
+        reference_fraction_threshold (float): Min coverage of total reference.
 
     Returns:
-    - cluster_dict (dict): Dictionary where keys are "mcl_X_domain" and values are sets of sequence IDs.
+        dict: {cluster_label: set(proteinIDs)}
     """
 
     cluster_dict = {}
@@ -345,10 +397,10 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
     ref_in_clusters = all_cluster_seqs & reference_sequences
     new_candidates = all_cluster_seqs - reference_sequences
 
-    print(f"  Reference sequences provided:    {len(reference_sequences)}")
-    print(f"  Total sequences in kept clusters:{len(all_cluster_seqs)}")
-    print(f"     ├─ from references:           {len(ref_in_clusters)}")
-    print(f"     └─ newly selected sequences:  {len(new_candidates)}")
+    logger.debug(f"  Reference sequences provided:    {len(reference_sequences)}")
+    logger.debug(f"  Total sequences in kept clusters:{len(all_cluster_seqs)}")
+    logger.debug(f"     ├─ from references:           {len(ref_in_clusters)}")
+    logger.debug(f"     └─ newly selected sequences:  {len(new_candidates)}")
 
     return cluster_dict
 
@@ -356,12 +408,34 @@ def process_single_mcl_file(mcl_file, domain, reference_sequences, density_thres
 
         
 
-def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_report_hits_limit, alignment_mode=2, sensitivity = "ultra-sensitive"):
-    # path ist die Assembly FASTA-Datei
-    # query_fasta ist die statische FASTA-Datei mit den Abfragesequenzen
-    
-    #Alignment mode is propably not needed anywhere, but I like args to be consistent with mmseqs
-    
+def DiamondSearch(
+    path: str,
+    query_fasta: str,
+    cores: int,
+    evalue: float,
+    coverage: float,
+    minseqid: float,
+    diamond_report_hits_limit: int,
+    alignment_mode: int = 2,
+    sensitivity: str = "ultra-sensitive"
+) -> str:
+    """
+    Runs DIAMOND BLASTP on a FASTA against itself, output in tab format.
+
+    Args:
+        path (str): FASTA file path.
+        query_fasta (str): Query FASTA.
+        cores (int): Number of threads.
+        evalue (float): E-value cutoff.
+        coverage (float): Coverage threshold.
+        minseqid (float): Minimum sequence identity.
+        diamond_report_hits_limit (int): Report limit.
+        alignment_mode (int): Not used, for consistency.
+        sensitivity (str): Sensitivity flag.
+
+    Returns:
+        str: Path to DIAMOND output file (.diamond.tab)
+    """    
 
     diamond = myUtil.find_executable("diamond")
     # Erstellen der Diamond-Datenbank
@@ -377,7 +451,11 @@ def DiamondSearch(path, query_fasta, cores, evalue, coverage, minseqid, diamond_
     
     return output_results_tab
 
-def validate_mcl_cluster_paths(path_dict, result_files_directory, target_dir="Protein_Phylogeny"):
+def validate_mcl_cluster_paths(
+    path_dict: Dict[str, str],
+    result_files_directory: str,
+    target_dir: str = "Protein_Phylogeny"
+) -> Dict[str, str]:
     """
     Validates a dictionary of {key: path_to_mcl_file}. For each path:
     - If the file exists: keep it.
@@ -386,14 +464,12 @@ def validate_mcl_cluster_paths(path_dict, result_files_directory, target_dir="Pr
     - If neither exists, remove the entry.
 
     Args:
-        path_dict (dict): Dictionary with keys (e.g., domain names) and values as file paths.
-        result_files_directory (str): Root directory to search fallback file under 'Protein_Phylogeny'.
+        path_dict (dict): {key: mcl_path}
+        result_files_directory (str): Root directory to check for fallback.
+        target_dir (str): Fallback subdir.
 
     Returns:
-        dict: Filtered and updated dictionary with only valid paths.
-
-    Raises:
-        FileNotFoundError: If no valid MCL files are found.
+        dict: Only valid MCL file paths by key.
     """
     validated = {}
 
@@ -405,10 +481,10 @@ def validate_mcl_cluster_paths(path_dict, result_files_directory, target_dir="Pr
             if os.path.isfile(fallback_path):
                 validated[key] = fallback_path
             else:
-                print(f"[WARN] No valid MCL file for {key}: '{path}' or fallback '{fallback_path}'")
+                logger.warning(f"No valid MCL file for {key}: '{path}' or fallback '{fallback_path}'")
 
     if not validated:
-        print("No valid MCL cluster files found in any specified or fallback location.")
+        logger.error("No valid MCL cluster files found in any specified or fallback location.")
         return {}
 
     return validated

@@ -177,7 +177,7 @@ def generate_score_limit_dict_from_grouped(
 ################################################################################################
 
 def csb_proteins_datasets_combine(
-    keyword_lists: List[str],
+    grouped_keywords_dict: Dict[str, List[str]],
     csb_proteins_dict: Dict[str, Set[str]]
 ) -> Dict[str, Set[str]]:
     """
@@ -195,22 +195,16 @@ def csb_proteins_datasets_combine(
         csb_proteins_dict = {'a': {'prot1'}, 'b': {'prot2'}}
         Output: {'ABC': {'prot1','prot2'}}
     """
-    combined_protein_sets = {}
-    
-    for domain, keyword_groups in keyword_lists.items():
-        for i, keyword_group in enumerate(keyword_groups):
-            protein_set = set()
-            for keyword in keyword_group:
-                key = (keyword, domain)
-                if key in csb_proteins_dict:
-                    protein_set.update(csb_proteins_dict[key])
-            if protein_set:  # Nur hinzufügen, wenn nicht leer
-                combined_protein_sets[domain] = protein_set
-    
-    return combined_protein_sets
+    combined = {}
+    for group, keyword_list in grouped_keywords_dict.items():
+        combined[group] = set()
+        for keyword in keyword_list:
+            if keyword in csb_proteins_dict:
+                combined[group].update(csb_proteins_dict[keyword])
+    return combined
 
 
-def add_query_ids_to_proteinIDset(combined_protein_sets: Dict[str, Set[str]], database_path: str) -> Dict[str, Set[str]]:
+def add_query_ids_to_proteinIDset(grouped: Dict[str, Set[str]], database_path: str) -> Dict[str, Set[str]]:
     """
     Adds any proteinIDs from the query cluster to each protein group set.
 
@@ -281,9 +275,9 @@ def parse_csb_file_to_dict(filepath: str) -> Dict[str, List[str]]:
         "csb1\tABC\tDEF\n" → {'csb1': ['ABC','DEF']}
     """
     data_dict = {}
-    if not os.path.isfile(filepath):
+    if not os.path.isfile(file_path):
         return data_dict
-    with open(filepath, 'r') as file:
+    with open(file_path, 'r') as file:
         for line in file:
             # Split the line by tabs
             parts = line.strip().split('\t')
@@ -313,23 +307,9 @@ def parse_csb_file_to_dict(filepath: str) -> Dict[str, List[str]]:
 
 
 
-def process_keyword_domains(args: Tuple[str, str, List[str], int]) -> Dict[Tuple[str, str], Set[str]]:
+def process_keyword_domains(args):
     """
-    Efficiently process a keyword and its domains, using chunked SQL queries for large IN clauses.
-
-    Args:
-        args (tuple): (database_path, keyword, domains, min_seqs)
-            - database_path (str): Path to SQLite DB.
-            - keyword (str): Cluster keyword.
-            - domains (list): List of domains.
-            - min_seqs (int): Minimum number of sequences.
-
-    Returns:
-        dict: {(keyword, domain): set(proteinIDs)}
-
-    Example:
-        ('db.sqlite', 'kword', ['ABC', 'DEF'], 5) 
-        → {('kword','ABC'): {'prot1','prot2'}}
+    Optimierte Funktion zur Verarbeitung eines Keywords und seiner Domains mit Chunks für große `IN`-Abfragen.
     """
     database, keyword, domains, min_seqs = args
     result = {}
@@ -384,25 +364,22 @@ def fetch_proteinIDs_dict_multiprocessing(
     csb_dictionary: Dict[str, List[str]],
     min_seqs: int,
     cores: int
-) -> Dict[Tuple[str, str], Set[str]]:
+) -> Dict[str, Set[str]]:
     """
-    Multiprocessing wrapper for process_keyword_domains.
+    Fetches all proteinIDs for each domain using multiprocessing.
 
     Args:
-        database_path (str): SQLite DB path.
-        csb_dictionary (dict): {keyword: [domains]}
+        database_path (str): Path to SQLite DB.
+        csb_dictionary (dict): {key: [domains]}
         min_seqs (int): Minimum sequence count to keep.
-        cores (int): Number of parallel processes.
+        cores (int): Number of CPU cores.
 
     Returns:
-        dict: {(keyword, domain): set(proteinIDs)}
-
-    Example Output:
-        {('A','DEF'): {'prot1', ...}}
+        dict: {domain: set(proteinIDs)}
     """
     # Prepare the arguments for the worker function
     tasks = [
-        (database_path, keyword, domains, min_seqs)
+        (database, keyword, domains, min_seqs)
         for keyword, domains in csb_dictionary.items()
         if keyword != 'default'
     ]
@@ -410,7 +387,7 @@ def fetch_proteinIDs_dict_multiprocessing(
     total_tasks = len(tasks)
 
     # Use multiprocessing to process the items in parallel
-    with Pool(processes=cores) as pool:
+    with Pool(processes=num_workers) as pool:
         results = []
         for i, result in enumerate(pool.imap(process_keyword_domains, tasks), start=1):
             results.append(result)
@@ -488,18 +465,7 @@ def remove_non_query_clusters(database, dictionary):
 #################### Protein to fasta operations ##############################
 ###############################################################################
 
-def fetch_training_data_to_fasta(options: Any, grouped: Dict[str, Set[str]], prefix: str) -> None:
-    """
-    Writes training FASTA files per group/domain, using a prefix.
-
-    Args:
-        options (Namespace): Configuration/options.
-        grouped (dict): {group: set(proteinIDs)}
-        prefix (str): Prefix for each group name (output FASTA: {prefix}_group.faa)
-
-    Returns:
-        None (writes FASTA files).
-    """
+def fetch_training_data_to_fasta(options, grouped, prefix):
 
     extended_grouped_prefixed = {f"{prefix}_{key}": value for key, value in grouped.items()} # Extend dictionary with a prefix
     
@@ -513,31 +479,21 @@ def fetch_training_data_to_fasta(options: Any, grouped: Dict[str, Set[str]], pre
         hardcap=options.hardcap
     )
 
-def fetch_seqs_to_fasta_parallel(
-    database: str,
-    dataset_dict: Dict[str, Set[str]],
-    output_directory: str,
-    min_seq: int,
-    max_seq: int,
-    cores: int = 4,
-    chunk_size: int = 990,
-    hardcap: int = 5000
-) -> None:
+def fetch_seqs_to_fasta_parallel(database, dataset_dict, output_directory, min_seq, max_seq, cores=4, chunk_size=990, hardcap=5000):
     """
-    Write each protein family in dataset_dict to a FASTA file using multiprocessing.
+    Forks off the fetching of sequences for each domain using multiprocessing.
 
     Args:
-        database (str): SQLite DB.
-        dataset_dict (dict): {domain: set(proteinIDs)}
-        output_directory (str): Directory for FASTA output.
-        min_seq (int): Minimum seqs required.
-        max_seq (int): Maximum seqs allowed.
-        cores (int): Multiprocessing processes.
-        chunk_size (int): SQL batch.
-        hardcap (int): Absolute max allowed (protect from runaway).
+        database (str): Path to the SQLite database.
+        dataset_dict (dict): { domain: set(proteinIDs) }
+        output_directory (str): Directory where FASTA files will be stored.
+        min_seq (int): Minimum number of sequences required for processing.
+        max_seq (int): Maximum number of sequences allowed for processing.
+        cores (int): Number of parallel processes.
+        chunk_size (int): Number of protein IDs to process per query batch.
 
     Returns:
-        None (writes FASTA).
+        None
     """
     os.makedirs(output_directory, exist_ok=True)  # Ensure the output directory exists
 
@@ -549,15 +505,15 @@ def fetch_seqs_to_fasta_parallel(
 
         # Check limits and file existence
         if num_sequences < min_seq:
-            logger.warn(f"'{domain}' was skipped due to too few sequences: {num_sequences} < {min_seq}")
+            print(f"[WARN] Sequences for '{domain}' skipped (too few sequences: {num_sequences} < {min_seq})")
             continue  # Skip this domain
 
         if num_sequences > (max_seq + hardcap):
-            logger.warn(f"'{domain}' was skipped due to too many sequences {num_sequences} > {max_seq+hardcap})")
+            print(f"[WARN] Sequences for '{domain}' skipped (too many sequences: {num_sequences} > {max_seq+hardcap})")
             continue  # Skip this domain
 
         if os.path.exists(output_file):
-            logger.debug(f"Skipped '{domain}'. FASTA file already exists: {output_file}")
+            print(f"[SKIP] '{domain}', FASTA file already exists: {output_file}")
             continue  # Skip existing files
 
         # If all checks pass, add to tasks
@@ -573,25 +529,9 @@ def fetch_seqs_to_fasta_parallel(
 
         
         
-def fetch_seq_to_fasta(
-    database: str,
-    domain: str,
-    protein_ids: Set[str],
-    output_directory: str,
-    chunk_size: int = 990
-) -> None:
+def fetch_seq_to_fasta(database, domain, protein_ids, output_directory, chunk_size=990):
     """
-    Fetch sequences for a domain and write to a FASTA file.
-
-    Args:
-        database (str): SQLite DB.
-        domain (str): Domain/family name.
-        protein_ids (set): Protein IDs.
-        output_directory (str): Where to save.
-        chunk_size (int): SQL chunk size.
-
-    Returns:
-        None (writes FASTA).
+    Fetch protein sequences from the database for a specific domain and save them into a FASTA file.
     """
     fasta_file_path = os.path.join(output_directory, f"{domain}.faa")
 
@@ -626,35 +566,27 @@ def fetch_seq_to_fasta(
                     for protein_id, sequence in rows:
                         fasta_file.write(f">{protein_id}\n{sequence}\n")
                 except sqlite3.InterfaceError as e:
-                    logger.error(f"SQL Error in domain {domain}: {e}")  # Debugging message
+                    print(f"[ERROR] SQL Error in domain {domain}: {e}")  # Debugging message
 
-    logger.debug(f"FASTA file saved: {fasta_file_path}")
-
-
+    print(f"[INFO] FASTA file saved: {fasta_file_path}")
 
 
-def fetch_protein_ids_for_domain(
-    database: str,
-    domain: str,
-    lower_limit: float,
-    upper_limit: float,
-    max_count: int = 50000
-) -> Tuple[str, Set[str]]:
+
+
+def fetch_protein_ids_for_domain(database, domain, lower_limit, upper_limit, max_count=50000):
     """
-    Efficiently fetches the top N proteinIDs for a domain within a score range, including all ties.
+    Efficiently fetch top protein IDs for a domain, including all with same score at cutoff,
+    with only one sorted query. Prints a warning if max_count is exceeded due to score ties.
 
     Args:
-        database (str): SQLite DB.
-        domain (str): Domain.
-        lower_limit (float): Lower threshold.
-        upper_limit (float): Upper threshold.
-        max_count (int): Top N (includes ties at boundary).
+        database (str): Path to SQLite database.
+        domain (str): Domain name.
+        lower_limit (float): Lower score threshold.
+        upper_limit (float): Upper score threshold.
+        max_count (int): Minimum number of top scoring entries to fetch (ties allowed above).
 
     Returns:
         tuple: (domain, set(proteinIDs))
-
-    Example Output:
-        ('ABC', {'prot1','prot2'})
     """
 
     with sqlite3.connect(database) as con:
@@ -687,25 +619,24 @@ def fetch_protein_ids_for_domain(
             break
 
     if tie_count > 0:
-        logger.warning(f"max_count {max_count} reached for {domain}, but {tie_count} more proteins with same score ({last_score}) included.")
+        print(f"[WARN] max_count of {max_count} reached for {domain}, but {tie_count} additional protein(s) "
+              f"with the same score ({last_score}) were included.")
 
     return domain, protein_ids
 
 
 
-def filter_existing_faa_files(domain_dict: Dict[str, Any], directory: str) -> Dict[str, Any]:
+def filter_existing_faa_files(domain_dict, directory):
     """
-    Removes entries from domain_dict if a .faa file already exists.
+    Entfernt Einträge aus `domain_dict`, falls bereits eine .faa-Datei 
+    für die jeweilige Domain im `directory` existiert.
 
     Args:
-        domain_dict (dict): {domain: ...}
-        directory (str): Directory to check.
+        domain_dict (dict): Dictionary mit Domains als Keys.
+        directory (str): Verzeichnis, in dem nach bestehenden .faa-Dateien gesucht wird.
 
     Returns:
-        dict: Only domains with no .faa in directory.
-
-    Example:
-        {'A':{...}}, 'dir/' (and 'dir/A.faa' exists) → {}
+        dict: Gefiltertes Dictionary ohne Domains, die bereits .faa-Dateien haben.
     """
     # Hole eine Liste aller existierenden .faa-Dateien im Verzeichnis
     existing_files = {f for f in os.listdir(directory) if f.endswith(".faa")}
@@ -932,83 +863,80 @@ def remove_non_query_clusters(database_path: str, dictionary: Dict) -> Dict:
 
 _thread_local = threading.local()
 
-def _get_thread_cursor(database_path: str) -> sqlite3.Cursor:
+
+def _get_thread_cursor(db_path: str):
     """
-    Opens or reuses a read-only SQLite cursor in a thread, with proper PRAGMAs set.
+    Returns a thread-local Cursor. On the first call in each thread:
+     - Opens the DB in truly read-only+immutable mode
+     - Disables any attempt to create journals or temporary files
 
-    Args:
-        database_path (str): Path to SQLite DB.
-
-    Returns:
-        sqlite3.Cursor: SQLite cursor, thread-local, always read-only.
-
-    Example:
-        cur = _get_thread_cursor("db.sqlite")
+    Subsequent calls from the same thread return the same Cursor.
     """
     if getattr(_thread_local, "cur", None) is None:
-        # 1) Open connection as immutable, no lockfile, no writes
-        uri = f"file:{database_path}?mode=ro&immutable=1&nolockfile=1"
+        # 1) Open connection with mode=ro & immutable=1
+        #    &nolockfile forces SQLite to never try to create a rollback journal
+        uri = f"file:{db_path}?mode=ro&immutable=1&nolockfile=1"
         con = sqlite3.connect(uri, uri=True, check_same_thread=False)
+
+        # 2) We still set row_factory so fetch returns Row objects
         con.row_factory = sqlite3.Row
         cur = con.cursor()
+
+        # 3) Explicitly disable any journaling or temp file usage
+        #    - journal_mode = OFF means no rollback or WAL is ever used
+        #    - temp_store = MEMORY means any temporary table/index is purely in RAM
+        #    - query_only = TRUE forbids any accidental writes
         cur.executescript("""
             PRAGMA query_only = TRUE;
             PRAGMA journal_mode = OFF;
             PRAGMA temp_store = MEMORY;
             PRAGMA defer_foreign_keys = TRUE;
         """)
+
+        # 4) Save to thread-local
         _thread_local.con = con
         _thread_local.cur = cur
+
     return _thread_local.cur
-
-def _fetch_neighbours_chunk(args: Tuple[str, List[str]]) -> Tuple[Dict[str, List[List[str]]], Dict[Tuple, int]]:
+def _fetch_neighbours_chunk(args):
     """
-    Worker for a chunk of protein IDs: fetch cluster, neighbours, and their domains.
-
-    Args:
-        args (tuple): (db_path, protein_ids)
-
-    Returns:
-        tuple:
-          - neighbours: {proteinID: [ [domain1,...], ... ] } (domains for all neighbours in cluster)
-          - comp_counts: {composition tuple: count}
-
-    Example:
-        ("db.sqlite", ["p1","p2"]) ->
-          ({"p1":[["ABC","DEF"],["DEF"]], ...}, {("ABC", "DEF"): 2, ...})
+    Worker für einen Chunk, mit gecachedem Cursor und Timing.
     """
     db_path, protein_ids = args
-    neighbours: Dict[str, List[List[str]]] = {}
-    comp_counts: DefaultDict[Tuple, int] = defaultdict(int)
     if not protein_ids:
         return {}, {}
 
+    # Timer starten
     t0 = time.perf_counter()
+
+    # Cursor holen (erstellt Connection + PRAGMAs einmal pro Thread)
     cur = _get_thread_cursor(db_path)
 
-    # 1) Map hit → clusterID
+    # --- 1) hit → clusterID ---
     ph1 = ",".join("?" for _ in protein_ids)
     cur.execute(
         f"SELECT proteinID, clusterID FROM Proteins WHERE proteinID IN ({ph1})",
         protein_ids
     )
     hit2cid = {r["proteinID"]: r["clusterID"] for r in cur.fetchall()}
+
     if not hit2cid:
         dt = time.perf_counter() - t0
-        logger.debug(f"[TIMING] chunk {len(protein_ids)} (no clusters) in {dt:.3f}s")
-        return {pid: [["singleton"]] for pid in protein_ids}, {}
+        print(f"[TIMING] chunk {len(protein_ids)} (no clusters) in {dt:.3f}s")
+        return {pid:[["singleton"]] for pid in protein_ids}, {}
 
-    # 2) clusterID → all neighbour proteins (sorted)
+    # --- 2) clusterID → neighbours (+ start) ---
     cids = list(set(hit2cid.values()))
     ph2 = ",".join("?" for _ in cids)
     cur.execute(
-        f"SELECT proteinID, clusterID, start FROM Proteins WHERE clusterID IN ({ph2})",
+        f"SELECT proteinID, clusterID, start "
+        f"FROM Proteins WHERE clusterID IN ({ph2})",
         cids
     )
     nbr_rows = list(cur.fetchall())
     nbr_rows.sort(key=lambda r: (r["clusterID"], r["start"]))
 
-    # 3) neighbour protein → domains
+    # --- 3) neighbour → domains ---
     nids = [r["proteinID"] for r in nbr_rows]
     ph3 = ",".join("?" for _ in nids)
     cur.execute(
@@ -1017,19 +945,20 @@ def _fetch_neighbours_chunk(args: Tuple[str, List[str]]) -> Tuple[Dict[str, List
     )
     dom_rows = cur.fetchall()
 
+    # Timer stoppen
     dt = time.perf_counter() - t0
-    logger.debug(f"[TIMING] chunk {len(protein_ids)} → {len(nids)} neighbours in {dt:.3f}s")
+    print(f"[TIMING] chunk {len(protein_ids)} → "
+          f"{len(nbr_rows)} neighbours in {dt:.3f}s")
 
-    # Aggregation
-    domains_by_nid: DefaultDict[str, List[str]] = defaultdict(list)
+    # --- Rest wie gehabt (Aggregation) ---
+    domains_by_nid = defaultdict(list)
     for r in dom_rows:
         domains_by_nid[r["proteinID"]].append(r["domain"] or "no_neighbours")
 
-    cluster_to_nids: DefaultDict[Any, List[str]] = defaultdict(list)
+    cluster_to_nids = defaultdict(list)
     for r in nbr_rows:
         cluster_to_nids[r["clusterID"]].append(r["proteinID"])
 
-    # For each input hit: all its neighbours' domains
     neighbours = {
         hit: [
             domains_by_nid.get(nid, ["singleton"])
@@ -1038,7 +967,7 @@ def _fetch_neighbours_chunk(args: Tuple[str, List[str]]) -> Tuple[Dict[str, List
         for hit, cid in hit2cid.items()
     }
 
-    # Count unique compositions per cluster
+    comp_counts = defaultdict(int)
     for cid, ids in cluster_to_nids.items():
         comp = tuple(
             sorted(tuple(sorted(domains_by_nid.get(nid, ["singleton"])))
@@ -1048,53 +977,47 @@ def _fetch_neighbours_chunk(args: Tuple[str, List[str]]) -> Tuple[Dict[str, List
 
     return neighbours, comp_counts
 
-def fetch_neighbouring_genes_with_domains(
-    db_path: str,
-    protein_ids: Set[str],
-    chunk_size: int = 999,
-    threads: int = 8
-) -> Tuple[Dict[str, List[List[str]]], List[Tuple[Tuple, int]]]:
+
+def fetch_neighbouring_genes_with_domains(db_path,
+                                                  protein_ids,
+                                                  chunk_size: int = 999,
+                                                  threads: int = 8):
     """
-    Threaded: process protein_ids in chunks and get all their cluster neighbours' domain arrays.
-
-    Args:
-        db_path (str): Path to SQLite DB.
-        protein_ids (set): Input protein IDs to analyze.
-        chunk_size (int): How many IDs per thread.
-        threads (int): Thread pool size.
-
-    Returns:
-        tuple:
-            - full_neighbours: {proteinID: [ [domain,...], ... ] }
-            - sorted_compositions: [ (composition tuple, count), ... ] (sorted by count)
-
-    Example:
-        full_neigh, comp = fetch_neighbouring_genes_with_domains("db.sqlite", {"p1","p2"}, 500, 8)
+    Threaded wrapper: chunk_size große Listen parallel in Threads verarbeiten,
+    Ergebnisse zusammenführen und sortierte Kompositionen zurückgeben.
     """
+    # Ensure it's a list so we can index/slice
     protein_list = list(protein_ids)
+
     if not protein_ids:
         return {}, []
 
+    # 1) Chunking
     chunks = [
         protein_list[i : i + chunk_size]
         for i in range(0, len(protein_ids), chunk_size)
     ]
     args = [(db_path, chunk) for chunk in chunks]
 
+    # 2) Parallel mit ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=threads) as executor:
         partials = list(executor.map(_fetch_neighbours_chunk, args))
-
-    full_neighbours: Dict[str, List[List[str]]] = {}
-    total_counts: DefaultDict[Tuple, int] = defaultdict(int)
+    
+    # 3) Merge results
+    full_neighbours = {}
+    total_counts = defaultdict(int)
     for neigh_dict, comp_dict in partials:
         full_neighbours.update(neigh_dict)
         for comp, cnt in comp_dict.items():
             total_counts[comp] += cnt
-
+    
+    # 4) Sort compositions
     sorted_compositions = sorted(
         total_counts.items(), key=lambda x: x[1], reverse=True
     )
+
     return full_neighbours, sorted_compositions
+    
     
     
     
@@ -1102,23 +1025,8 @@ def fetch_neighbouring_genes_with_domains(
 ######################### Extend grouped reference proteins with similar csb #############################
 ##########################################################################################################
 
-def extend_merged_grouped_by_csb_similarity(
-    options: Any,
-    grouped: Dict[str, Set[str]]
-) -> Dict[str, Set[str]]:
-    """
-    Main routine: Extends grouped protein sets by including proteins from highly similar CSB patterns.
-
-    Args:
-        options: Options/config object, must have csb_output_file, jaccard, sqlite_chunks, etc.
-        grouped (dict): {domain: set(proteinIDs)} (starting protein sets).
-
-    Returns:
-        dict: Updated grouped dict with new proteins added.
-
-    Example:
-        {'ABC': {'p1', 'p2'}} → {'ABC': {'p1', 'p2', 'p3', 'p4'}}
-    """    
+def extend_merged_grouped_by_csb_similarity(options, grouped):
+    
     # Main routine for proteins from highly similar csb to the basic csb
     
     # Find keywords that are in jaccard distance to the csb of reference sequences in grouped
@@ -1135,24 +1043,18 @@ def extend_merged_grouped_by_csb_similarity(
 
 
 
-def select_similar_csb_patterns_per_protein(
-    options: Any,
-    merged_grouped: Dict[str, Set[str]],
-    jaccard_threshold: float = 0.7
-) -> Dict[str, Set[str]]:
+def select_similar_csb_patterns_per_protein(options, merged_grouped, jaccard_threshold=0.7):
     """
-    For each domain, finds all CSB patterns with high Jaccard similarity to those associated with the proteins in that domain.
+    Extend merged_grouped by finding CSB patterns with high similarity to the patterns 
+    associated with the current proteins in each domain.
 
     Args:
-        options: Options/config object.
-        merged_grouped (dict): {domain: set(proteinIDs)}
-        jaccard_threshold (float): Similarity threshold.
+        options: Options object containing paths and settings.
+        merged_grouped (dict): Current merged_grouped dictionary { domain: set(proteinIDs) }.
+        jaccard_threshold (float): Jaccard similarity threshold.
 
     Returns:
-        dict: {domain: set(similar CSB keywords)}
-
-    Example:
-        {'ABC': {'p1', 'p2'}} → {'ABC': {'csb1', 'csb2'}}
+        dict: jaccard_included_patterns { domain: set(similar CSB keywords) }.
     """
 
     # Stores the similar CSB keywords for each domain
@@ -1163,13 +1065,13 @@ def select_similar_csb_patterns_per_protein(
 
     # Process each domain
     for domain, protein_ids in merged_grouped.items():
-        logger.debug(f"Processing domain {domain}")
+        print(f"[INFO] Processing protein {domain}")
 
         # Fetch all keywords associated with proteins of this domain
         all_keywords = fetch_keywords_for_proteins(options.database_directory, protein_ids)
 
         if not all_keywords:
-            logger.warning(f"No keywords found for domain {domain}")
+            print(f"[WARN] No keywords found for protein {domain}")
             continue
 
         # Build union of patterns from these keywords
@@ -1177,7 +1079,7 @@ def select_similar_csb_patterns_per_protein(
             *[csb_dictionary[k] for k in all_keywords if k in csb_dictionary]
         )
 
-        logger.debug(f"Domain {domain}: {len(domain_pattern_union)} unique CSB encode reference sequences.")
+        print(f"[INFO] Protein {domain} - Currently selected csb: {len(domain_pattern_union)}")
 
         # Compare against all CSB patterns and collect similar ones
         similar_csb_keywords = set()
@@ -1190,8 +1092,8 @@ def select_similar_csb_patterns_per_protein(
             if similarity >= jaccard_threshold:
                 similar_csb_keywords.add(csb_key)
 
-        logger.debug(f"Domain {domain}: {len(similar_csb_keywords)} similar CSB patterns (Jaccard >= {jaccard_threshold})")
-        
+        print(f"[INFO] Protein {domain} - Found {len(similar_csb_keywords)} similar CSB patterns (Jaccard >= {jaccard_threshold})")
+
         # Store the result for this domain
         jaccard_included_patterns[domain] = similar_csb_keywords
 
@@ -1200,30 +1102,23 @@ def select_similar_csb_patterns_per_protein(
 
 
 
-def fetch_keywords_for_proteins(
-    database_path: str,
-    protein_ids: Set[str],
-    chunk_size: int = 999
-) -> Set[str]:
+def fetch_keywords_for_proteins(database_path, protein_ids, chunk_size=999):
     """
-    Fetches all CSB keywords (cluster identifiers) for a set of protein IDs.
+    Fetch keywords for a list of proteinIDs from the database (chunked).
 
     Args:
-        database_path (str): Path to SQLite database.
-        protein_ids (set): Protein IDs to fetch keywords for.
-        chunk_size (int): DB chunk size.
+        database_path (str): Path to the SQLite database.
+        protein_ids (iterable): List or set of proteinIDs.
+        chunk_size (int): Maximum size of chunks (default 999).
 
     Returns:
-        set: All unique keywords.
-
-    Example:
-        {'p1','p2'} → {'csb1', 'csb2'}
+        set: Union of all keywords associated with these proteinIDs.
     """
 
     protein_to_keywords = defaultdict(set)
 
     if not protein_ids:
-        logger.warning("No proteinIDs provided to fetch_keywords_for_proteins.")
+        print("[WARN] No proteinIDs provided to fetch_keywords_for_proteins.")
         return set()
 
     conn = sqlite3.connect(database_path)
@@ -1256,7 +1151,7 @@ def fetch_keywords_for_proteins(
 
     conn.close()
 
-    logger.debug(f"Retrieved keywords for {len(protein_to_keywords)} proteins.")
+    print(f"[INFO] Retrieved keywords for {len(protein_to_keywords)} proteins.")
 
     # Union of all keywords associated with these reference sequences
     all_keywords = set().union(*protein_to_keywords.values())
@@ -1265,30 +1160,20 @@ def fetch_keywords_for_proteins(
 
 
 
-def integrate_csb_variants_into_merged_grouped(
-    options: Any,
-    merged_grouped: Dict[str, Set[str]],
-    domain_to_new_keywords_dict: Dict[str, Set[str]],
-    chunk_size: int = 999
-) -> Dict[str, Set[str]]:
+def integrate_csb_variants_into_merged_grouped(options, merged_grouped, domain_to_new_keywords_dict, chunk_size=999):
     """
-    For each domain, integrates all proteins whose CSB keyword matches those in domain_to_new_keywords_dict.
+    Integrates proteins matching new CSB keywords into merged_grouped.
 
     Args:
-        options: Options/config object (needs database_directory)
-        merged_grouped (dict): {domain: set(proteinIDs)} to be expanded
-        domain_to_new_keywords_dict (dict): {domain: set(keywords) to add}
-        chunk_size (int): DB chunk size.
+        options: Options object with paths and settings.
+        merged_grouped (dict): Current merged_grouped { domain : set(proteinIDs) }.
+        domain_to_new_keywords_dict (dict): { domain : set(new_keywords) }.
 
     Returns:
-        dict: Updated merged_grouped.
-
-    Example:
-        ({'ABC': {...}}, {'ABC': {'csb5'}}) → {'ABC': {..., 'p55', 'p56'}}
+        updated merged_grouped (dict).
     """
 
-    logger.debug("Integration of added CSB proteins to grouped dataset")
-
+    print(f"\n[INFO] Integration of added csb to basic dataset")
 
     conn = sqlite3.connect(options.database_directory)
     cur = conn.cursor()
@@ -1297,10 +1182,10 @@ def integrate_csb_variants_into_merged_grouped(
 
     for domain, new_keywords in domain_to_new_keywords_dict.items():
         if not new_keywords:
-           logger.debug(f"Domain {domain}: No new keywords to integrate.")
-           continue
+            print(f"[INFO] Protein {domain}: No new keywords to integrate.")
+            continue
 
-        logger.debug(f"Domain {domain}: Integrating sequences from {len(new_keywords)} new keywords.")
+        print(f"[INFO] Protein {domain}: Integrating sequences from {len(new_keywords)} new keywords")
 
         new_keywords_list = list(new_keywords)
         domain_proteins_before = len(merged_grouped.get(domain, set()))
@@ -1329,12 +1214,12 @@ def integrate_csb_variants_into_merged_grouped(
                     proteins_added_this_domain += 1
 
         domain_proteins_after = len(merged_grouped[domain])
-        logger.info(f"Domain {domain}: Added {proteins_added_this_domain} new proteins with matching synteny to reference. New total: {len(merged_grouped[domain])}")
+        print(f"[INFO] Added {proteins_added_this_domain} new {domain} based on similar synteny. New total: {domain_proteins_after}")
 
         total_proteins_added += proteins_added_this_domain
 
     conn.close()
 
-    logger.info(f"Integration completed: {total_proteins_added} proteins added across all domains.")
+    print(f"\n[INFO] Integration completed: {total_proteins_added} proteins added across all domains.\n")
 
     return merged_grouped

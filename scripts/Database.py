@@ -1,22 +1,21 @@
 #!/usr/bin/python
 import sqlite3
 import os
+import sys
 import re
 import traceback
-
+import time
+from typing import List, Dict, Set, Any, Optional
 
 from . import myUtil
 from . import ParseReports
 from . import Csb_finder
 
-"""
-This module keeps all routines for database input and working routines on the database
-if looking for output routines invoked by the user got to Output.py module
-"""
+logger = myUtil.logger
 
 ########## Write output to Database Routines ##########
 
-def create_database(database):
+def create_database(database: str) -> None:
     """
     11.9.22
     Creating a database file for midterm storage of results
@@ -96,9 +95,6 @@ def create_database(database):
               
     con.commit()
     con.close()
-        #res = cur.execute("Select name from sqlite_master")
-        #print(res.fetchall())
-    
         
     return 
     
@@ -108,7 +104,7 @@ def index_database(database):
     Indexes the relevant columns in the database to improve search and join performance.
     This is especially important for large databases (> 3000 genomes).
     """
-    print(f"[INFO] Indexing database {database}")
+    logger.info(f"Indexing database {database}")
     
     # List of indexes to create, each represented as a tuple (index_name, create_statement)
     indexes = [
@@ -132,13 +128,13 @@ def index_database(database):
                     cur.execute(create_stmt)
                 
     except sqlite3.Error as e:
-        print(f"[ERROR] An error occurred while indexing the database: {e}")
+        logger.error(f"Error while indexing the database: {e}")
+        sys.exit(1)
     except Exception as e:
-        print(f"[ERROR] An unexpected error occurred: {e}")
+        logger.error(f"Unexpected error during indexing: {e}")
+        sys.exit(1)
 
-    print(f"[INFO] Finished indexing database {database}")
-
-def insert_database_genomeIDs(database, genomeIDs):
+def insert_database_genomeIDs(database: str, genomeIDs: List[str]) -> None:
     """
     22.6.24
         Args: 
@@ -159,12 +155,14 @@ def insert_database_genomeIDs(database, genomeIDs):
     return    
         
 
-def insert_database_proteins(database, protein_dict):
+def insert_database_proteins(database: str, protein_dict: Dict[str, Any]) -> None:
     """
     Inserts for concated glob hmmsearches. GenomeId must be defined within the protein object
     Args:
-        protein_dict    dictionary with protein objects
+        database (str): Path to database file.
+        protein_dict (dict): Dictionary of protein objects. proteinID => obj
     """
+    
     try:
         with sqlite3.connect(database) as con:
             # Inside 'with con', if an exception occurs, it will rollback automatically
@@ -213,22 +211,21 @@ def insert_database_proteins(database, protein_dict):
             # No need to manually call con.commit() — 'with' will handle it
 
     except Exception as e:
-        error_message = f"\nError occurred: {str(e)}"
-        traceback_details = traceback.format_exc()
-        print(f"[WARN] Due to an error - {error_message}")
-        print(f"\tTraceback details:\n{traceback_details}")
+        logger.warning(f"Proteins were not inserted for {genomeID}.\nError: - {str(e)}\nTraceback: {traceback.format_exc()}")
 
     return
     
     
 
-def insert_database_clusters(database, cluster_dict):
+def insert_database_clusters(database: str, cluster_dict: Dict[str, Any]) -> None:
     """
-    22.06.2024
-        Args:
-            database - path to the database file
-            cluster_dict - dictionary with cluster objects
+    Inserts clusters and associated proteins/keywords.
+
+    Args:
+        database (str): Path to database file.
+        cluster_dict (dict): Cluster objects.
     """
+    
     try:
         with sqlite3.connect(database) as con:
             cur = con.cursor()
@@ -263,27 +260,26 @@ def insert_database_clusters(database, cluster_dict):
             # Batch insert or replace keywords
             cur.executemany("""INSERT OR REPLACE INTO Keywords (clusterID, keyword, completeness, collinearity) VALUES (?, ?, ?, ?)""", keyword_inserts)
     except Exception as e:
-        error_message = f"\nError occurred: {str(e)}"
-        traceback_details = traceback.format_exc()
-        print(f"[WARN] Due to an error - {error_message}")
-        print(f"\tTraceback details:\n{traceback_details}")
- 
+        logger.warning(f"Due to an error - {str(e)}\nTraceback: {traceback.format_exc()}")
+
 
     return
 
   
-def insert_taxonomy_data(database, taxonomy_file):
+
+def insert_taxonomy_data(database: str, taxonomy_file: str) -> None:
     """
     Insert taxonomy data from a file into the Genomes table of the database.
 
     Args:
-        database: Path to the SQLite database file.
-        taxonomy_file: Path to the parsed taxonomy file (tab-separated).
+        database (str): Path to SQLite database.
+        taxonomy_file (str): Path to the parsed taxonomy file (tab-separated).
     """
     try:
         # Check if the database file path is valid
         if not os.path.exists(os.path.dirname(database)):
-            raise FileNotFoundError(f"Directory for database does not exist: {os.path.dirname(database)}")
+            logger.error(f"Directory for database does not exist: {os.path.dirname(database)}")
+            return
 
         # Connect to the SQLite database
         with sqlite3.connect(database) as con:
@@ -299,8 +295,8 @@ def insert_taxonomy_data(database, taxonomy_file):
                     fields = line.strip().split('\t')
                    
                     if len(fields) < 8:
-                        print(f"[SKIP] Line has insufficient columns: {line}")
-                        continue                
+                        logger.warning(f"Line has insufficient columns: {line}")
+                        continue              
                    
                     # Prepare the data for insertion
                     genome_id = fields[0]
@@ -331,16 +327,15 @@ def insert_taxonomy_data(database, taxonomy_file):
             # Commit the transaction
             con.commit()
     
+        logger.info("Inserted taxonomy data from %s", taxonomy_file)
     except sqlite3.OperationalError as e:
-        print(f"[ERROR] SQLite Operational Error: {e}")
-        print(f"Database path: {database}")
-        print(f"Ensure the file exists and you have read/write permissions.")
+        logger.error(f"SQLite Operational Error: {e}\nDatabase path: {database}")
     except sqlite3.Error as e:
-        print(f"[ERROR] SQLite Error: {e}")
+        logger.error(f"SQLite Error: {e}")
     except FileNotFoundError as e:
-        print(f"[ERROR] File Not Found Error: {e}")
+        logger.error(f"File Not Found Error: {e}")
     except Exception as e:
-        print(f"[ERROR] An unexpected error occurred: {e}")
+        logger.error(f"Unexpected error: {e}")
         
         
         
@@ -348,7 +343,7 @@ def insert_taxonomy_data(database, taxonomy_file):
 ########## Alter information from database routines ##########
 ##############################################################
 
-def update_domain(database, protein_diction, old_tag, new_tag):
+def update_domain(database: str, protein_diction: Dict[str, Any], old_tag: str, new_tag: str) -> None:
     """
     18.11.22
         Args:
@@ -357,26 +352,22 @@ def update_domain(database, protein_diction, old_tag, new_tag):
            old_tag     The old domain tag that needs to be updated
            new_tag     The new domain tag that will replace the old tag
     """
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-        query = """UPDATE Domains SET domain = ? WHERE proteinID = ? AND domain = ?"""
-        
-        # Prepare the data for bulk update
-        data = [(new_tag, proteinID, old_tag) for proteinID in protein_diction]
-        
-        # Use executemany for batch processing
-        cur.executemany(query, data)
-        
-        # Commit the transaction (optional, as it is done automatically with 'with' context)
-        con.commit()
-
+    try:
+        with sqlite3.connect(database) as con:
+            cur = con.cursor()
+            query = """UPDATE Domains SET domain = ? WHERE proteinID = ? AND domain = ?"""
+            data = [(new_tag, proteinID, old_tag) for proteinID in protein_diction]
+            cur.executemany(query, data)
+        logger.info(f"Updated {len(protein_diction)} domains from {old_tag} to {new_tag}")
+    except Exception as e:
+        logger.error(f"Error updating domains: {e}")
     return
 
 ##############################################################
 ########## Fetch information from database routines ##########
 ##############################################################
 
-def update_keywords(database, keyword_dict, batch_size=400):
+def update_keywords(database: str, keyword_dict: Dict[str, List[str]], batch_size: int = 400) -> None:
     """
     Update keywords in the database in batches.
     
@@ -386,25 +377,25 @@ def update_keywords(database, keyword_dict, batch_size=400):
         batch_size: Number of (clusterID, keyword) pairs per batch insert.
     """
     if keyword_dict:
-        with sqlite3.connect(database) as con:
-            cur = con.cursor()
-            query = """INSERT INTO Keywords (clusterID, keyword) VALUES (?, ?)"""
-            
-            inserts = []
-            for new_keyword, clusterIDs in keyword_dict.items():
-                for clusterID in clusterIDs:
-                    inserts.append((clusterID, new_keyword))
-            
-            # In Batches verarbeiten
-            for i in range(0, len(inserts), batch_size):
-                batch = inserts[i:i+batch_size]
-                cur.executemany(query, batch)
-
+        try:
+            with sqlite3.connect(database) as con:
+                cur = con.cursor()
+                query = """INSERT INTO Keywords (clusterID, keyword) VALUES (?, ?)"""
+                inserts = []
+                for new_keyword, clusterIDs in keyword_dict.items():
+                    for clusterID in clusterIDs:
+                        inserts.append((clusterID, new_keyword))
+                for i in range(0, len(inserts), batch_size):
+                    batch = inserts[i:i+batch_size]
+                    cur.executemany(query, batch)
+            logger.info(f"Updated keywords with {len(inserts)} entries.")
+        except Exception as e:
+            logger.error(f"Error updating keywords: {e}")
     return
 
 
 
-def delete_keywords_from_csb(database, options):
+def delete_keywords_from_csb(database: str, options: Any) -> None:
     """
     Remove keywords from the database that match the pattern options.csb_name_prefix + a number + options.csb_name_suffix.
 
@@ -431,8 +422,7 @@ def delete_keywords_from_csb(database, options):
     return
 
 
-
-def fetch_genomeIDs(database):
+def fetch_genomeIDs(database: str) -> Set[str]:
     """
     Fetches the distinct genomeIDs from the Genomes table in the SQLite database.
     
@@ -503,13 +493,9 @@ def clean_database_locks(database_path, wait_seconds=10):
     shm_exists = os.path.exists(shm_path)
 
     if not wal_exists and not shm_exists:
-        print("[INFO] WAL/SHM files cleaned up successfully.")
+        logger.info("WAL/SHM files cleaned up successfully.")
     else:
-        print("[WARN] WAL/SHM files still exist. Database might have unclean shutdown earlier.")
-        # Optional: Force delete them if you are absolutely sure
-        # os.remove(wal_path)
-        # os.remove(shm_path)
-
-    print("[INFO] Database cleaning routine finished.")
+        logger.warning("WAL/SHM files still exist. Database might have unclean shutdown earlier.")
+    logger.info("Database cleaning routine finished.")
 
 

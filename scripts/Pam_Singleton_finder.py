@@ -2,21 +2,34 @@
 
 import copy
 import os
-import subprocess
 import sqlite3
-import traceback
 import pandas as pd
 from collections import defaultdict
+from typing import Dict, Any, List, Set, Tuple
 
 from . import Pam_Mx_algorithm
 from . import Csb_proteins
 from . import myUtil
 
+logger = myUtil.logger
+
     
 
 #### Main routine of this module
-def singleton_reference_finder(options, grouped):
-    
+def singleton_reference_finder(options: Any, grouped: Dict[str, Set[str]]) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
+    """
+    Main routine: finds and predicts reference singletons for each protein/domain.
+
+    Args:
+        options (Any): Configuration/options.
+        grouped (dict): {domain: set(proteinIDs)}.
+
+    Returns:
+        tuple:
+            - domain_score_limits (dict): {domain: {'lower_limit', 'upper_limit'}}
+            - singleton_reference_seqs_dict (dict): {domain: set(proteinIDs)}
+    """
+        
     singleton_reference_seqs_dict = myUtil.load_cache(options, 'sng0_training_proteinIDs.pkl')
     domain_score_limits = myUtil.load_cache(options, 'sng0_training_proteinIDs_limits.pkl')
     
@@ -38,21 +51,36 @@ def singleton_reference_finder(options, grouped):
 
     return limits_dict, sng_reference_seq_dict
 
-def get_singleton_reference_sequences(options, non_empty_keys):
+def get_singleton_reference_sequences(options: Any, non_empty_keys: Set[str]) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
+    """
+    Gets singleton reference sequences for domains not present in main training sets.
 
+    Args:
+        options (Any): Config object.
+        non_empty_keys (set): Domains already in grouped.
+
+    Returns:
+        tuple:
+            - domain_score_limits (dict): {domain: {'lower_limit', 'upper_limit'}}
+            - singleton_hits (dict): {domain: set(proteinIDs)}
+
+    Example:
+        ({'ABC': {'lower_limit': 101.1, 'upper_limit': 999.1}}, {'ABC': {'p1', 'p2'}})
+    """
 
     # Load the dictionary from cache if available
     domain_score_limits = myUtil.load_cache(options, "sng_domain_score_limits.pkl")
     singleton_reference_seqs_dict = myUtil.load_cache(options, "sng_reference_seqs_dict.pkl")
     
     if domain_score_limits and singleton_reference_seqs_dict:
-        print("[LOAD] Loaded existing reference sequences for genes without conserved genomic context")
+        logger.debug("Loaded existing reference sequences for genes without conserved genomic context")
+
         return domain_score_limits, singleton_reference_seqs_dict
 
     # Get domains present in query but missing from training sets
     query_names = extract_protein_ids_from_fasta(options.self_query)
     singletons = query_names - non_empty_keys
-    print(f"[INFO] Proteins without recognized genomic context {singletons}")
+    logger.info(f"Proteins without recognized genomic context {singletons}")
 
     # Select the singleton hits with an above blast score ration cutoff
     singleton_hits = defaultdict(set)
@@ -102,28 +130,39 @@ def get_singleton_reference_sequences(options, non_empty_keys):
 
 #######################
 
-def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, singleton, cores, chunk_size=900):
+def predict_singleton_reference_seqs_for_each_domain(
+    database_path: str,
+    grouped: Dict[str, Set[str]],
+    singleton: Dict[str, Set[str]],
+    cores: int,
+    chunk_size: int = 900
+) -> Dict[str, pd.Series]:
     """
     For each singleton protein a linear regression model is generated. This is based on the combined presence absence matrix 
     of singleton domains + the proteins from csb patterns where at least one reference query sequence occurs in the
     pattern. The logistic regression model is then used to predict the presence of the singleton in all genomes where a similar pam
     pattern exists.
     
+    For each singleton protein, trains a logistic regression model and predicts probability of presence for all genomes.
+
     Args:
-        database_path (str): SQLite-Database
-        grouped (dict): Basis-protein presence {domain_label: set(proteinIDs)}.
-        singleton (dict): {singleton_domain_label: set(proteinIDs)}.
-        cores (int): CPUs.
-        chunk_size (int): database chunksize
+        database_path (str): Path to SQLite DB.
+        grouped (dict): {domain: set(proteinIDs)}
+        singleton (dict): {singleton_domain: set(proteinIDs)}
+        cores (int): CPUs for parallelism.
+        chunk_size (int): SQLite chunk size.
 
     Returns:
-        dict: {singleton_domain: prediction_series (genomeID → score)}
+        dict: {singleton_domain: pd.Series(predicted plausibility for each genome)}
+
+    Example:
+        {'ABC': pd.Series(...), ...}
     """
 
     predictions_all = {}
 
     for sng_domain, sng_proteins in singleton.items():
-        print(f"[INFO] Processing protein without conserved context {sng_domain}")
+        logger.info(f"Processing protein without conserved context {sng_domain}")
 
         # 1. Kombiniertes grouped: Basis + aktuelles Singleton
         grouped_plus = copy.deepcopy(grouped)
@@ -144,7 +183,7 @@ def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, sin
         filtered_pam = {genomeID: pam[genomeID] for genomeID in genomeIDs if genomeID in pam}
         filtered_pam = pam
         if not filtered_pam:
-            print(f"[WARN] No genomes with presence of {sng_domain} found – skipping.")
+            logger.warning(f"No genomes with presence of {sng_domain} found – skipping")
             continue
 
         # 4. Hit-Scores für alle ProteinIDs laden
@@ -154,8 +193,8 @@ def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, sin
         models, _ = Pam_Mx_algorithm.train_logistic_from_pam_with_scores(filtered_pam, bsr_hit_scores, cores=cores, target_domains={sng_domain})
 
         if sng_domain not in models:
-            print(models)
-            print(f"[WARN] No model trained for {sng_domain} – skipping.")
+            logger.warning(models)
+            logger.warning(f"No model trained for {sng_domain} – skipping")
             continue
 
         # 6. Testdaten: PAM nur für grouped (ohne das aktuelle Singleton)
@@ -192,7 +231,29 @@ def predict_singleton_reference_seqs_for_each_domain(database_path, grouped, sin
 
 
 
-def collect_predicted_singleton_hits_from_db(predictions_all, database_path, plausible_cutoff=0.6, bsr_threshold=0.5):
+def collect_predicted_singleton_hits_from_db(
+    predictions_all: Dict[str, pd.Series],
+    database_path: str,
+    plausible_cutoff: float = 0.6,
+    bsr_threshold: float = 0.5
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
+    """
+    Collects the best protein hit for each plausible singleton prediction, based on blast score ratio and bitscore.
+
+    Args:
+        predictions_all (dict): {singleton_domain: pd.Series(scores)}
+        database_path (str): SQLite DB path.
+        plausible_cutoff (float): Minimum prediction score.
+        bsr_threshold (float): Minimum BLAST score ratio.
+
+    Returns:
+        tuple:
+            - singleton_score_limits (dict): {domain: {'lower_limit', 'upper_limit'}}
+            - singleton_hits (dict): {domain: set(proteinIDs)}
+
+    Example:
+        ({'ABC': {'lower_limit': 123, ...}}, {'ABC': {'prot1', ...}})
+    """
 
     singleton_hits = defaultdict(set)
     singleton_score_limits = {}
@@ -248,7 +309,22 @@ def collect_predicted_singleton_hits_from_db(predictions_all, database_path, pla
 
 ################ Routines for first main routine singleton _reference_sequences ##########################
     
-def extract_protein_ids_from_fasta(fasta_path):
+def extract_protein_ids_from_fasta(fasta_path: str) -> Set[str]:
+    """
+    Extracts all protein IDs from a FASTA file.
+
+    Args:
+        fasta_path (str): Path to the FASTA file.
+
+    Returns:
+        set: Set of protein IDs.
+
+    Example:
+        >prefix___ABC123 desc
+        >DEF456
+        Output: {"ABC123", "DEF456"}
+    """
+    
     protein_ids = set()
     with open(fasta_path, 'r') as f:
         for line in f:
@@ -259,10 +335,15 @@ def extract_protein_ids_from_fasta(fasta_path):
                 protein_ids.add(protein_id)
     return protein_ids
     
-def extract_domain_names_from_directory(directory_path):
+def extract_domain_names_from_directory(directory_path: str) -> Set[str]:
     """
-    Extrahiert eindeutige Domänennamen aus Dateinamen in einem Verzeichnis.
-    Entfernt Dateiendung und alles bis einschließlich dem ersten '_'.
+    Extracts all unique domain names from files in a directory (removes extension and prefix up to first "_").
+
+    Args:
+        directory_path (str): Path to directory.
+
+    Returns:
+        set: All unique domain names.
     """
     domain_names = set()
     
@@ -275,17 +356,23 @@ def extract_domain_names_from_directory(directory_path):
     
     return domain_names
     
-def get_min_bitscore_for_query(report_path, query_id, blast_score_ratio = 0.9):
+def get_min_bitscore_for_query(
+    report_path: str,
+    query_id: str,
+    blast_score_ratio: float = 0.9
+) -> Tuple[float, float]:
     """
-    Liest einen DIAMOND BLAST Report ein und gibt den kleinsten Bitscore für eine gegebene Query-ID zurück.
-    
+    Reads a DIAMOND BLAST report and returns the min and max bitscore for a query ID.
+
     Args:
-        report_path (str): Pfad zur Diamond-Tabelle (.tab).
-        query_id (str): Die qseqid (Query-ID), nach der gesucht werden soll.
-    
+        report_path (str): Path to DIAMOND .tab file.
+        query_id (str): Query ID to search for.
+        blast_score_ratio (float): Used for single-hit fallback.
+
     Returns:
-        float: Der kleinste Bitscore für die Query, oder None falls nicht gefunden.
+        tuple: (min_bitscore, max_bitscore)
     """
+    
     bitscores = []
     min_cutoff = 100
     max_cutoff = 100

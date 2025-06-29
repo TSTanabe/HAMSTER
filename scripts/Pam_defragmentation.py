@@ -1,20 +1,36 @@
 #!/usr/bin/python
 
+
 import copy
 import os
-import subprocess
 import sqlite3
-import traceback
+from typing import Dict, Set, Any, Tuple
 import pandas as pd
-from collections import defaultdict
 
 from . import Pam_Mx_algorithm
 from . import myUtil
 
+logger = myUtil.logger
+
     
 
 #### Main routine of this module
-def pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_limit_dict):
+def pam_genome_defragmentation_hit_finder(
+    options: Any,
+    basis_grouped: Dict[str, Set[str]],
+    basis_score_limit_dict: Dict
+) -> Dict[str, Set[str]]:
+    """
+    Main routine: For each domain, finds additional genomes/proteins via PAM-based logistic regression, and merges with the basis set.
+
+    Args:
+        options (Any): Config/options object.
+        basis_grouped (dict): {domain: set(proteinIDs)} basic set.
+        basis_score_limit_dict (dict): (not used in logic here, for compatibility).
+
+    Returns:
+        dict: {domain: set(proteinIDs)}, merged set.
+    """
     
     # returns dict: {domain: prediction_series (genomeID → score), only new genomes}
     predicted_genomes = predict_reference_seqs_for_each_domain(options.database_directory, basis_grouped, options.cores, chunk_size=900)
@@ -32,21 +48,26 @@ def pam_genome_defragmentation_hit_finder(options, basis_grouped, basis_score_li
 
 #######################
 
-def predict_reference_seqs_for_each_domain(database_path, grouped, cores, chunk_size=900):
+
+def predict_reference_seqs_for_each_domain(
+    database_path: str,
+    grouped: Dict[str, Set[str]],
+    cores: int,
+    chunk_size: int = 900
+) -> Dict[str, pd.Series]:
     """
-    Für jede Domäne wird ein Modell trainiert und nur neue Präsenz-Vorhersagen gemacht (also für Genome,
-    in denen die Domäne laut PAM nicht vorkommt).
-    
+    For each domain, train a logistic regression model and predict probability of presence for genomes NOT already in grouped.
+
     Args:
-        database_path (str): Pfad zur SQLite-Datenbank.
-        grouped (dict): Basis-Domänenstruktur {domain_label: set(proteinIDs)}.
-        cores (int): Anzahl CPUs.
-        chunk_size (int): DB-Abfragegröße.
+        database_path (str): Path to SQLite DB.
+        grouped (dict): {domain: set(proteinIDs)}.
+        cores (int): Number of CPUs.
+        chunk_size (int): DB query chunk size.
 
     Returns:
-        dict: {domain: prediction_series (genomeID → score), nur neue Genome}
+        dict: {domain: pd.Series (genomeID → probability)} for new genomes only.
     """
-
+    logger.info(f"Training logistic regression {len(grouped.values())} for proteins")
     predictions_all = {}
 
     # 1. PAM berechnen
@@ -66,11 +87,12 @@ def predict_reference_seqs_for_each_domain(database_path, grouped, cores, chunk_
     
     # 4. Vorhersagen je Domain
     for domain in grouped:
-        print(f"[INFO] Fitting logistic regression model for {domain}")
+        logger.debug(f"Fitting logistic regression model for {domain}")
+
         
         model = models.get(domain)
         if model is None:
-            print(f"[WARN] No model found for domain {domain}, skipping.")
+            logger.warning(f"No model found for domain {domain}, skipping.")
             continue
     
         # 4.1 PAM ohne domain
@@ -107,7 +129,22 @@ def predict_reference_seqs_for_each_domain(database_path, grouped, cores, chunk_
 
 ################ Helper routines and print routines ###################
 
-def merge_dicts_of_sets(dict1, dict2):
+def merge_dicts_of_sets(
+    dict1: Dict[str, Set[str]],
+    dict2: Dict[str, Set[str]]
+) -> Dict[str, Set[str]]:
+    """
+    Merges two dicts of sets by keywise union.
+
+    Args:
+        dict1, dict2: {key: set(values)}
+
+    Returns:
+        dict: {key: union of all values}
+
+    Example:
+        {'A':{'x'}}, {'A':{'y'}, 'B':{'z'}} → {'A':{'x','y'}, 'B':{'z'}}
+    """
     merged = {}
 
     all_keys = set(dict1) | set(dict2)  # Vereinigung aller Keys
@@ -122,7 +159,7 @@ def report_added_only_counts(grp1_merged_dict, grp1_added_reference_seq_dict, gr
         basis_set = grp1_basis_grouped_dict.get(key, set())
 
         added_only = added_set - basis_set
-        print(f"[INFO] {len(added_only)} {key} sequences were added due to the presence absence matrix")
+        logger.info(f"{len(added_only)} {key} sequences were added due to the presence propability")
 
 
 

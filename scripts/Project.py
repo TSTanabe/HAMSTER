@@ -2,10 +2,15 @@
 
 import csv
 import os
+import sys
 import tarfile
 from datetime import datetime
 
-def prepare_directory_structure(directory):
+from . import myUtil
+
+logger = myUtil.logger
+
+def prepare_directory_structure(directory: str) -> None:
     """
     Sets up the `bin` and `src` directories within the specified directory.
     Unpacks any `.tar.gz` files in `bin` and deletes the archives.
@@ -26,11 +31,14 @@ def prepare_directory_structure(directory):
     for file_name in os.listdir(bin_dir):
         if file_name.endswith('.tar.xz'):
             file_path = os.path.join(bin_dir, file_name)
+            
             # Unpack the .tar.xz file
             with tarfile.open(file_path, 'r:xz') as tar:
                 tar.extractall(bin_dir)
+            
             # Delete the original .tar.xz file
-            os.remove(file_path)    
+            os.remove(file_path)
+                
     # Create an empty `patterns` file in `src` if it does not exist
     patterns_file = os.path.join(src_dir, 'Patterns')
     if not os.path.exists(patterns_file):
@@ -38,34 +46,55 @@ def prepare_directory_structure(directory):
             pass  # Creates an empty file
 
 
-def prepare_result_space(options, project="project"):
+def prepare_result_space(options, project: str = "project") -> None:
+    """
+    Creates and sets up the results directory for a project, including all needed subdirectories.
+
+    Args:
+        options (Options): Has .location, .result_files_directory, etc.
+        project (str): Project name suffix (default: 'project')
+
+    Output:
+        Updates multiple attributes of options (see docstring).
+
+    Example Input:
+        options.location = '/home/user/myproject'
+        options.result_files_directory = '/home/user/myproject/results'
+    """
+    
     now = datetime.now()
     timestamp = str(datetime.timestamp(now))
 
     default_dir = os.path.join(options.location, "results")
 
-    # Prüfe, ob Standardverzeichnis verwendet wird
+    # Use standard directory if given
     if options.result_files_directory == default_dir:
         # Neues Projekt im Standardverzeichnis anlegen
         if not os.path.isdir(default_dir):
             try:
                 os.mkdir(default_dir)
-            except:
-                raise Exception("\nERROR: No writing rights in default results directory.")
+                logger.info(f"Created results directory: {default_dir}")
+            except Exception as e:
+                 logger.error(f"No writing rights in default results directory. {e}")
+                 sys.exit(1)
+                 
         options.result_files_directory = create_project(default_dir, project)
         write_options_to_tsv(options, options.result_files_directory)
 
-    # Benutzerdefiniertes Verzeichnis: prüfe ob existierendes Projekt
+    # User-defined directory: check for project
     elif not isProjectFolder(options):
         if not os.path.isdir(options.result_files_directory):
             try:
                 os.mkdir(options.result_files_directory)
-            except:
-                raise Exception(f"\nERROR: No writing rights for directory {options.result_files_directory}")
+                logger.info(f"Created results dir: {options.result_files_directory}")
+            except Exception as e:
+                logger.error(f"No writing rights for directory {options.result_files_directory}\n {e}")
+                sys.exit(1)
+                
         options.result_files_directory = create_project(options.result_files_directory, project)
         write_options_to_tsv(options, options.result_files_directory)
 
-    # Definiere Projektstruktur – gilt für beide Fälle
+    # Project structure, applies in both cases
     options.database_directory = options.result_files_directory + "/database.db"
     options.fasta_initial_hit_directory = options.result_files_directory + "/Hit_list"
     options.fasta_output_directory = options.result_files_directory + "/Sequences"
@@ -84,7 +113,7 @@ def prepare_result_space(options, project="project"):
     options.report_output_file = options.result_files_directory + "/Report.txt"
     options.thresholds_output_file = options.result_files_directory + "/Thresholds.txt"
 
-    # Falls neue Verzeichnisse nötig sind – erstelle sie
+    # Create required directories
     for path in [
         options.fasta_initial_hit_directory,
         options.fasta_output_directory,
@@ -98,20 +127,42 @@ def prepare_result_space(options, project="project"):
             os.mkdir(path)
 
 
-def create_project(directory, projectname="project"):
+def create_project(directory: str, projectname: str = "project") -> str:
+    """
+    Creates a new timestamped project subdirectory in the given directory.
+
+    Args:
+        directory (str): Parent directory
+        projectname (str): Project subfolder name (default 'project')
+
+    Returns:
+        str: Full path to the created project directory
+    """
+    
     now = datetime.now()
     timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")  # z. B. "2025-04-16_14-53-21"
     directory = os.path.join(directory, f"{timestamp}_{projectname}")
     
     try:
         os.mkdir(directory)
-    except Exception:
-        raise Exception("\n[ERROR]: No writing rights. Project was not created.")
+    except Exception as e:
+        logger.error(f"No writing rights. Project was not created.\n {e}")
+        sys.exit(1)
     
     return directory
     
 
-def isProjectFolder(options):
+def isProjectFolder(options) -> bool:
+    """
+    Checks if a result_files_directory contains a valid project structure.
+    If a database is found, adjusts options accordingly.
+
+    Args:
+        options (Options): Has .result_files_directory etc.
+
+    Returns:
+        bool: True if project folder found or created, else False.
+    """
 
     #Database may be provided, then consider this as a result directory
     if options.database_directory and os.path.isfile(options.database_directory):
@@ -121,7 +172,7 @@ def isProjectFolder(options):
         database_path = os.path.join(options.result_files_directory, "database.db")
 
         if not os.path.isfile(database_path):
-            print("[WARN] No database file found in expected directory. Searching recursively...")
+            logger.warning("No database file found in expected directory. Searching recursively...")
 
             # Recursive search for database.db
             found_db = None
@@ -131,10 +182,10 @@ def isProjectFolder(options):
                     break
 
             if found_db:
-                print(f"[INFO] Found database at {found_db}")
+                logger.info(f"Found database at {found_db}")
                 options.result_files_directory = os.path.dirname(found_db)
             else:
-                print("[WARN] No database found at all. Creating new project folder structure.")
+                logger.warning("No database found at all. Creating new project folder structure.")
 
         # Now ensure required directories exist
         required_dirs = [
@@ -149,7 +200,7 @@ def isProjectFolder(options):
         for subdir in required_dirs:
             path = os.path.join(options.result_files_directory, subdir)
             if not os.path.isdir(path):
-                print(f"Missing directory {subdir} created")
+                logger.info(f"Missing directory {subdir} created")
                 os.makedirs(path, exist_ok=True)
 
 
@@ -157,7 +208,8 @@ def isProjectFolder(options):
         if os.path.isfile(self_query_path):
             options.self_query = self_query_path
         else:
-            print("[WARN] No internal query file (self_blast.faa) found. Will need to create it later.")
+            logger.warning("No internal query file (self_blast.faa) found. Will need to create it later.")
+
 
         # Find blast table if not already defined
         if options.glob_table is None:
@@ -167,13 +219,24 @@ def isProjectFolder(options):
                     break
 
     except Exception as e:
-        raise Exception(f"[ERROR] An error occurred while checking project folder: {e}")
+        logger.error(f"An error occurred while checking project folder: {e}")
+        sys.exit(1)
 
-    return 1
+    return True
     
     
     
-def any_process_args_provided(args, default_values):
+def any_process_args_provided(args, default_values: dict) -> bool:
+    """
+    Checks if any CLI/process arguments are different from their default values.
+
+    Args:
+        args: The argument object (e.g., argparse.Namespace)
+        default_values (dict): Mapping of argname -> default
+
+    Returns:
+        bool: True if any arg has a value different from default, else False.
+    """
     for arg, default in default_values.items():
         if getattr(args, arg) != default:
             #print(f"{arg} was not {default} but {getattr(args, arg)}")
@@ -181,14 +244,21 @@ def any_process_args_provided(args, default_values):
     return False
     
 
-def write_options_to_tsv(options, output_directory, filename="parameters_summary.tsv"):
+def write_options_to_tsv(options, output_directory: str, filename: str = "parameters_summary.tsv") -> None:
     """
-    Schreibt alle Parameter aus einem argparse-Objekt als TSV-Datei.
+    Writes all parameters from an options object as a TSV file.
 
     Args:
-        options (argparse.Namespace): Dein Argument-Objekt.
-        output_directory (str): Zielverzeichnis für die Datei.
-        filename (str): Name der Ausgabedatei (Standard: parameters_summary.tsv).
+        options: The argument/options object (argparse.Namespace or custom class)
+        output_directory (str): Output directory for the file
+        filename (str): Name of output file (default: parameters_summary.tsv)
+
+    Output:
+        TSV file listing all parameters and their values.
+
+    Example Output:
+        /mydir/parameters_summary.tsv
+
     """
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
@@ -201,7 +271,7 @@ def write_options_to_tsv(options, output_directory, filename="parameters_summary
         for key, value in vars(options).items():
             writer.writerow([key, value])
     
-    print(f"[INFO] Parameters saved: {output_path}")   
+    logger.info(f"Parameters saved: {output_path}")
      
 
 

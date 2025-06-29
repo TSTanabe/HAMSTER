@@ -32,9 +32,9 @@ from . import Reports
 
 
 # TODO mcl durch linclust ersetzt, daher sollte auch das menü geändert werden
-# TODO print kommandos ersetzen
 
-
+# Initilize the logger and location
+logger = myUtil.logger
 
 if getattr(sys, 'frozen', False):
     __location__ = os.path.split(sys.executable)[0]
@@ -43,6 +43,10 @@ else:
 
 
 class Options:
+    """
+    Holds all pipeline options and state variables.
+    All attributes are set by CLI arguments or runtime.
+    """
     def __init__(self):
     
 
@@ -78,21 +82,35 @@ class Options:
         
         self.hardcap=10000 # Allowed number of seqs to exceed the hardcap
         
-def parse_arguments(arguments):
+def parse_arguments(arguments: list) -> Options:
     """
-        Argument parsing section, defines all parameters with default values and passes them to the options object
-        This object is used by many stages as container for the parameters and results
+    Parses CLI arguments for the pipeline.
+    
+    Args:
+        arguments (list): sys.argv[1:] or custom list of args (as strings)
+        
+    Returns:
+        options (Options): Parsed options object with all config attributes.
+        
+    Example Output:
+        options.fasta_file_directory = "./genomes"
+        options.query_file = "./query.fasta"
+        options.stage = 1
+        options.end = 10
+        options.verbose = 1
+        ...
     """
     
     formatter = lambda prog: argparse.HelpFormatter(prog,max_help_position=96,width =300)
     
     #parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, description = "HAMSTER version 0.0.8 \nSyntax: HAMSTER [OPTIONS]",epilog = "")
     parser = argparse.ArgumentParser(
-    description="HAMSTER",
-    epilog="",
-    usage=argparse.SUPPRESS,   # turn of usage section
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="HAMSTER: Homolog and Synteny Mining Pipeline",
+        epilog="",
+        usage=argparse.SUPPRESS,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    parser.add_argument('-v', '--verbose', type=int, default=1, choices=[0, 1, 2], help="Logging verbosity: 0=WARNING, 1=INFO, 2=DEBUG")
     
     essential = parser.add_argument_group("Essential parameters: Provide either (-q & -f) or -r")
     essential.add_argument('-f', dest='fasta_file_directory', type=myUtil.dir_path, default = __location__, metavar = '<directory>', help='Directory of the target fasta files, need -q option')
@@ -183,7 +201,16 @@ def parse_arguments(arguments):
     
     return options
     
-def validate_options(options):
+def validate_options(options: Options) -> None:
+    """
+    Validates input arguments (directories/files).
+    
+    Args:
+        options (Options): The options object.
+        
+    Raises:
+        SystemExit if no valid input provided.
+    """
     # Check if a database file exists
     database_provided = options.database_directory and os.path.isfile(options.database_directory)
     
@@ -200,20 +227,36 @@ def validate_options(options):
     
     # Only proceed if one of the conditions is met
     if not (database_provided or result_directory_provided or fasta_and_query_provided):
-        sys.exit("[ERROR]: Please provide either a database file, a result directory, or both a fasta file directory and a query file using the -f and -q arguments.")
-    
+        logger.error("[ERROR]: Please provide either a database file, a result directory, or both a fasta file directory and a query file using the -f and -q arguments.")
+        sys.exit(1) 
 
-def fasta_preparation(options):
-   
+def fasta_preparation(options: Options) -> None:
+    """
+    Prepares/queues genome fasta files for analysis, supports concatenation and deconcatenation.
+    
+    Args:
+        options (Options): Main pipeline options
+        
+    Input Example:
+        options.glob_search: bool = True
+        options.glob_faa: str = "all.faa"
+        options.fasta_file_directory: str = "./genomes"
+        
+    Output:
+        - Queues or deconcatenates files for search
+        - Generates glob files if needed
+    """
+     
     if not options.glob_search:
-        print("[INFO] Not concatenating protein fasta files")
+        logger.info("Queue individual protein fasta files to speed up diamond blastp")
         Queue.queue_files(options)
         return
     
     # Concatenate the fasta files, in case of a glob fasta file is provided deconcat it
     # Glob files are faster for diamond search, but slow for sequence retrieval. Both are needed
     if options.glob_faa and options.glob_gff:
-        print(f"[INFO] Preparing separate files from {options.glob_faa}")
+        logger.info(f"Prepare separate files from {options.glob_faa}")
+        
         #create separated files for faster sequence finding
         Translation.deconcat(options)
         Queue.queue_files(options)
@@ -227,17 +270,32 @@ def fasta_preparation(options):
         # concat to to globfile if search results are not already provided
         Queue.queue_files(options)
         if not options.glob_table:
-            print("[INFO] Generating concatenated glob faa file", end="\r")
-            Translation.create_glob_file(options) #fasta_file_directory, options.cores, concat the files with the genomeIdentifier+ ___ + proteinIdentifier
-            print("[INFO] Generating concatenated glob faa file -- ok")
-            options.glob_flag = 1   
-    
+            logger.info("Concatenate individual protein fasta files to speed up diamond blastp")
+            Translation.create_glob_file(options)
+            options.glob_flag = 1
+            
     # Create self query file. Selfblast of query files is needed for hitscore statistics and inclusion into results
     Translation.create_selfquery_file(options)
     
     return
 
-def initial_search(options):
+def initial_search(options: Options) -> None:
+    """
+    Executes the initial protein search using DIAMOND or BLAST.
+    
+    Args:
+        options (Options): The main pipeline options
+        
+    Input Example:
+        options.database_directory: str = "./results/my_db.sqlite"
+        options.glob_search: bool = True
+        options.glob_faa: str = "./output/all_genomes.faa"
+        
+    Output:
+        Populates result tables in options.database_directory.
+        Deletes deconcatenated files as needed.
+    """
+    
     # Writes a database with the protein hits and their gene clusters for later use.
 
     if not os.path.isfile(options.database_directory):
@@ -256,11 +314,22 @@ def initial_search(options):
         os.remove(options.glob_faa)
     
 
-def csb_finder(options):
+def csb_finder(options: Options) -> None:
+    """
+    Runs the CSB finder algorithm and updates the database with syntenic block clusters.
     
-    # Use the Csb finder algorithm to find the collinear syntenic blocks
+    Args:
+        options (Options): Pipeline options
+        
+    Input Example:
+        options.database_directory: str = "./results/my_db.sqlite"
+        
+    Output:
+        Database is updated with new CSB clusters.
+    """
+    
     Csb_cluster.csb_prediction(options)
-    csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options, 0.0) # Do not merge csb but create the csb cluster dict
+    csb_gene_cluster_dict = Csb_cluster.csb_jaccard(options, 0.0) # 0.0 does merge csb but create the csb cluster dict
 
     Database.index_database(options.database_directory)
     Database.delete_keywords_from_csb(options.database_directory, options) # remove keys with options.csb_name_prefix options.csb_name_suffix to avoid old keyword interference
@@ -268,7 +337,7 @@ def csb_finder(options):
 
 
 
-def basis_sequence_fasta(options):
+def basis_sequence_fasta(options: Options) -> None:
     """
         prepare the sequence fasta and identifier lists. Seqs are derived from
         named gene clusters and csb finder gene clusters that encode a protein sequence
@@ -285,6 +354,16 @@ def basis_sequence_fasta(options):
                     "lower_limit": min(bitscores),
                     "upper_limit": max(bitscores)
                 }
+    Args:
+        options (Options): Pipeline options
+        
+    Output:
+        - FASTA files for the 'grp0' (basis) dataset.
+        - Updates options.grouped and options.score_limit_dict with results.
+        
+    Example Output:
+        options.grouped: dict[str, set[str]] = {'domainA': {'seq1', 'seq2', ...}, ...}
+        options.score_limit_dict: dict[str, dict[str, float]] = {'domainA': {'lower_limit': 10.0, 'upper_limit': 200.0}}
     """
     Database.index_database(options.database_directory)
     
@@ -292,7 +371,7 @@ def basis_sequence_fasta(options):
     grp_score_limit_dict, grouped = Csb_proteins.prepare_csb_grouped_training_proteins(options)
     
     ### Collect singletons without any conserved csb
-    print("\n\n[INFO] Collecting highly similar homologs from query hits without any conserved genomic context")
+    logger.info("Collecting highly similar homologs from query hits without any conserved genomic context")
     sng_score_limit_dict, sng_ref_seqs_dict = Pam_Singleton_finder.singleton_reference_finder(options, grouped) # Very strict reference seqs with 0.9 blast score ratio
 
     # Merge groups and limits from csb and sng
@@ -312,7 +391,7 @@ def basis_sequence_fasta(options):
     
     return
 
-def pam_defragmentation(options):
+def pam_defragmentation(options: Options) -> None:
     """
         Find additional plausible hits based on presence absence patterns. This should include hits
         from fragmented assemblies or split csb
@@ -324,6 +403,15 @@ def pam_defragmentation(options):
         Also add csb that are below jaccard distance threshold from the grp0 csb
         
         Output: are the grp1 fasta files
+        
+        Finds additional plausible hits based on presence/absence patterns (grp1 dataset).
+        
+        Args:
+            options (Options): Pipeline options
+            
+        Output:
+            - Updates options.grouped for further analysis.
+            - Writes grp1 FASTA files.
     """
     basis_grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'basis_merged_grouped.pkl')
     basis_score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'basis_merged_score.pkl')
@@ -374,7 +462,7 @@ def pam_defragmentation(options):
 
 
 
-def mcl_family_clustering_sequences(options):
+def mcl_family_clustering_sequences(options: Options) -> None:
     """
         This routine prepares the sequence clustering via linclust
         
@@ -389,17 +477,25 @@ def mcl_family_clustering_sequences(options):
         For predicted presences select from the genome the best hit
 
         Output: are the grp2 fasta files
+
+        Prepares sequence clustering via linclust (replaces MCL).
+        
+        Args:
+            options (Options): Pipeline options
+            
+        Output:
+            - FASTA files for protein families.
+            - Clustering result files for further analysis.
     """
     
     # Load grp1 datasets, that includes basis + proteins with similar csb and presence absence patterns
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options,'grp1_merged_grouped.pkl')
     score_limit_dict = options.score_limit_dict if hasattr(options, 'score_limit_dict') else myUtil.load_cache(options, 'grp1_merged_score_limits.pkl')
     
-    print("\n[INFO] Including homologs without genomic context based on protein sequence clustering")
-    print("[INFO] Generating protein family fasta files")
+    logger.info("Prepare protein sequence identity clustering")
     Csb_proteins.fetch_protein_family_sequences(options, options.phylogeny_directory, score_limit_dict, grouped)
 
-    # Cluster sequences with linclust at 30 % identitiy and 70 % coverage
+    # Cluster sequences with linclust at 40 % identitiy
     linclust_mcl_format_output_files_dict = Seq_clustering.run_mmseqs_linclust_lowlevel(options.phylogeny_directory, options.mcl_min_seq_id, "0.7", options.cores) 
 
     myUtil.save_cache(options, 'linclust_clustering_results.pkl', linclust_mcl_format_output_files_dict)
@@ -423,7 +519,20 @@ def mcl_family_clustering_sequences(options):
     
 
 
-def mcl_select_grp2_clusters(options):
+def mcl_select_grp2_clusters(options: Options) -> dict:
+    """
+    Selects MCL clusters with sufficient fraction of reference sequences (grp2).
+    
+    Args:
+        options (Options): Pipeline options
+        
+    Output:
+        - grp2 FASTA files written to disk.
+        - Returns mcl_extended_grouped dictionary.
+        
+    Returns:
+        mcl_extended_grouped: dict[str, set[str]]
+    """
     
     # Load grp1 reference sets
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
@@ -434,7 +543,7 @@ def mcl_select_grp2_clusters(options):
     mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory)
     myUtil.save_cache(options, 'linclust_clustering_results.pkl', mcl_clustering_results_dict, overwrite=True)
 
-    print("\n[INFO] Generating grp2: Selecting MCL clusters with sufficient fraction of reference sequences with conserved genomic vicinity")
+    logger.info("Generating grp2: Selecting MCL clusters with sufficient reference fraction")
     mcl_extended_grouped, mcl_cutoffs = Csb_mcl.select_hits_by_csb_mcl(
         options, mcl_clustering_results_dict, grouped,
         options.mcl_density_thrs, options.mcl_reference_thrs
@@ -448,8 +557,22 @@ def mcl_select_grp2_clusters(options):
     return mcl_extended_grouped
 
 
-def mcl_select_grp3_clusters(options, mcl_extended_grouped_grp2):
-    print("\n[INFO] Generating grp3: Extended MCL cluster selection by csb and presence plausibility")
+def mcl_select_grp3_clusters(options: Options, mcl_extended_grouped_grp2: dict) -> dict:
+    """
+    Extends grp2 by PAM model, produces grp3.
+
+    Args:
+        options (Options): Pipeline options
+        mcl_extended_grouped_grp2 (dict): Output from mcl_select_grp2_clusters
+
+    Output:
+        - grp3 FASTA files written to disk.
+        - Returns merged_grouped (grp3) dictionary.
+
+    Returns:
+        merged_grouped: dict[str, set[str]]
+    """
+    logger.info("Generating grp3: Extended MCL cluster selection by csb and presence plausibility")
 
     grouped = options.grouped if hasattr(options, 'grouped') else myUtil.load_cache(options, 'grp1_merged_grouped.pkl')
     mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
@@ -495,18 +618,50 @@ def mcl_select_grp3_clusters(options, mcl_extended_grouped_grp2):
 
 
         
-def model_alignment(options):
+def model_alignment(options: Options) -> None:
+    """
+    Runs sequence alignments for all clusters.
+    
+    Args:
+        options (Options): Pipeline options
+
+    Input Example:
+        options.fasta_output_directory: str = "./output/aln"
+
+    Output:
+        - Alignments written to disk (e.g., .fasta_aln files)
+    """
     
     Alignment.initial_alignments(options, options.fasta_output_directory)
 
     return
 
-def cross_validation(options):
+def cross_validation(options: Options) -> None:
+    """
+    Performs cross-validation on HMMs and protein sets.
 
-    print("Initialize training data subsamples")
+    Args:
+        options (Options): Pipeline options
 
-    Validation.create_hmms_from_msas(options.fasta_output_directory, options.Hidden_markov_model_directory, "fasta_aln","hmm",options.cores) #create the full hmms for later use
+    Output:
+        - HMM files, validation reports.
+        - Updates options.sequence_faa_file and targeted sequence sets.
 
+    Example Output:
+        options.sequence_faa_file: str = "./crossval/sequences.faa"
+        options.targeted_sequence_faa_file_dict: dict[str, str] = {...}
+    """
+
+    logger.info("Generating hidden Markov models")
+
+    Validation.create_hmms_from_msas(
+        options.fasta_output_directory,
+        options.Hidden_markov_model_directory,
+        "fasta_aln",
+        "hmm",
+        options.cores
+    )
+    
     Reports.move_HMMs(options.fasta_output_directory,options.Hidden_markov_model_directory,"hmm") #move the hmms to the Hidden markov model folder
     
     Csb_proteins.fetch_domains_superfamily_to_fasta(options, options.cross_validation_directory) #Target file for each HMM excluding seqs already below threshold
@@ -514,7 +669,7 @@ def cross_validation(options):
     Csb_proteins.fetch_all_proteins(options.database_directory, options.cross_validation_directory+"/sequences.faa") #Backup target file if something fails
 
 
-    print("Initialize target sequence sets")
+    logger.info("Generating validation sequence sets")
     
     options.sequence_faa_file = options.cross_validation_directory+"/sequences.faa" #File with all sequences to be searched
     
@@ -528,32 +683,53 @@ def cross_validation(options):
 
     return
        
-def report_cv_performance(options):
-    
-    #Initial validation
-    print(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
+def report_cv_performance(options: Options) -> None:
+    """
+    Generates and saves all validation/cutoff performance reports.
+
+    Args:
+        options (Options): Pipeline options
+
+    Output:
+        - Performance plots, cutoff files, summary reports.
+        - Various reports saved to options.Hidden_markov_model_directory
+
+    Example Output:
+        Files: cv_cutoff_performance.txt, cv_strict_cutoffs.txt, plots, etc.
+    """
+    logger.info(f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}")
     mcl_clustering_results_dict = myUtil.load_cache(options, 'linclust_clustering_results.pkl')
     
     mcl_clustering_results_dict = Csb_mcl.validate_mcl_cluster_paths(mcl_clustering_results_dict, options.result_files_directory) # Check for path existence
 
     myUtil.save_cache(options, 'mcl_clustering_results.pkl', mcl_clustering_results_dict, overwrite = True)
     
-    Reports_printing.process_initial_validations(options, options.result_files_directory, options.fasta_alignment_directory, options.database_directory)
+    Reports_printing.process_initial_validations(
+        options,
+        options.result_files_directory,
+        options.fasta_alignment_directory,
+        options.database_directory
+    )
+    
+    # External R scripts
     try:
         Reports_plotting.process_initial_plotting(options)
-    except:
-        print("[ERROR] An error occured during the R plotting")
+    except Exception as e:
+        logger.error("An error occurred during the R plotting: %s", str(e))
     #cross validation
-    print("\n[INFO] Starting cross-validation")
-    print(f"[INFO] Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}")
+    logger.info("Starting cross-validation")
+    logger.info(f"Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}")
     
-    options.reports = Reports.parse_matrices_to_report(options.cross_validation_directory,"_cv_matrices.txt")
-    
-    Reports.create_performance_file(options,options.reports,options.Hidden_markov_model_directory,"/cv_cutoff_performance.txt")
-    
-    Reports.concatenate_cv_cutoff_files(options.cross_validation_directory, "_cv_thresholds.txt", options.Hidden_markov_model_directory+"/cv_strict_cutoffs.txt")
-
-
+    options.reports = Reports.parse_matrices_to_report(
+        options.cross_validation_directory, "_cv_matrices.txt"
+    )
+    Reports.create_performance_file(
+        options, options.reports, options.Hidden_markov_model_directory, "/cv_cutoff_performance.txt"
+    )
+    Reports.concatenate_cv_cutoff_files(
+        options.cross_validation_directory, "_cv_thresholds.txt",
+        options.Hidden_markov_model_directory + "/cv_strict_cutoffs.txt"
+    )
 
 
 
@@ -568,10 +744,33 @@ def report_cv_performance(options):
     
     
   
-def main(args=None):
+def main(args: list = None) -> None:
+    """
+    Main entrypoint for the HAMSTER pipeline.
+    
+    Args:
+        args (list, optional): sys.argv[1:] or custom list.
+        
+    Steps:
+        1. Prepare directories
+        2. Prepare/queue genome files
+        3. Run search
+        4. CSB prediction
+        5. Basis FASTA
+        6. PAM defragmentation
+        7. Linclust/MCL
+        8. Alignment
+        9. Cross-validation
+       10. Reporting
+        
+    Output:
+        None
+    """
+    options = parse_arguments(args)
+    log_file = os.path.join(options.result_files_directory, "execution_logfile.txt")    
+    myUtil.setup_logging(getattr(options, 'verbose', 0), log_file)
 #1
     Project.prepare_directory_structure(__location__)
-    options = parse_arguments(args)
     myUtil.print_header("\n 1. Preparing space for the results")
     Project.prepare_result_space(options)
     
@@ -593,31 +792,31 @@ def main(args=None):
 
 #5
     if options.stage <= 5 and options.end >= 5:
-        myUtil.print_header("\n 5. Preparing training data fasta files")
+        myUtil.print_header("\n 5. Selecting homologs to reference seqs by similarity and synteny")
         basis_sequence_fasta(options) # grp0 dataset
 
 #6
     if options.stage <= 6 and options.end >= 6:
-        myUtil.print_header("\n 6. Markov chain clustering for protein family sequences")
+        myUtil.print_header("\n 6. Sequence similarity clustering for protein sequences")
         pam_defragmentation(options) # grp1 dataset
         
         
 #7   
     if options.stage <= 7 and options.end >= 7:
-        myUtil.print_header("\n 7. Selecting MCL clusters with reference sequences")
+        myUtil.print_header("\n 7. Selecting protein similarity clusters with reference sequences")
         mcl_family_clustering_sequences(options)
         mcl_extended_grouped_grp2 = mcl_select_grp2_clusters(options)
         mcl_extended_grouped_grp3 = mcl_select_grp3_clusters(options, mcl_extended_grouped_grp2)
 #8    
     if options.stage <= 8 and options.end >= 8:
-        myUtil.print_header("\n 8. Aligning sequences")
+        myUtil.print_header("\n 8. Aligment of sequence datasets")
         model_alignment(options)
         
 #9        
     #make cross validation files
     #Validation.CV(options.fasta_output_directory,options.cores)
     if options.stage <= 9 and options.end >= 9:
-        myUtil.print_header("\n 9. Performing cross valdation procedure")
+        myUtil.print_header("\n 9. Performing validation procedure")
         cross_validation(options)
 
 #10  

@@ -4,8 +4,11 @@ import sys
 import shutil
 import subprocess
 import multiprocessing
+from typing import List, Dict, Any
 
 from . import myUtil
+
+logger = myUtil.logger
 
 
 ####################################################
@@ -16,12 +19,26 @@ from . import myUtil
 #it aligns with mafft and removes gaps with trimal at 95 % 
             
             
-def initial_alignments(options, fasta_output_directory):
+def initial_alignments(options: Any, fasta_output_directory: str) -> List[str]:
+    """
+    Aligns all .faa files in a directory with MAFFT, then trims with trimAl.
 
+    Args:
+        options (Any): Options/config object (must contain gap_remove_threshold).
+        fasta_output_directory (str): Directory containing .faa files.
+
+    Returns:
+        list: List of resulting .fasta_aln files.
+
+    Example:
+        initial_alignments(options, "/tmp/fastas/")
+    """
+    logger.info(f"Align sequences with MAFFT")
     filepaths = make_alignments(options, fasta_output_directory)
     
 
     # Trim the concatenated alignment using trimAl
+    logger.info(f"Trimming alignments with {options.gap_remove_threshold} column gap threshold")
     for fasta_file in filepaths:
         base_name = os.path.splitext(os.path.basename(fasta_file))[0] # Extract the filename without the .faa extension
         output_fasta = os.path.join(fasta_output_directory, f"{base_name}.fasta_aln")
@@ -34,15 +51,18 @@ def initial_alignments(options, fasta_output_directory):
     alignment_files = myUtil.getAllFiles(fasta_output_directory,".fasta_aln")
     return alignment_files
     
-def make_alignments(options,fasta_output_directory):
+def make_alignments(options: Any, fasta_output_directory: str) -> List[str]:
     """
-    02.11.22
-        Args:
-            filepaths with the files to be processed
-            directory for the concatenated seqs file
-        Alignment files should be concated if header is the same            
-    """
+    Aligns all .faa files in a directory using MAFFT, skipping if already aligned.
 
+    Args:
+        options (Any): Options/config object (must contain cores).
+        fasta_output_directory (str): Directory with .faa files.
+
+    Returns:
+        list: List of .faa_aln alignment files.
+    """
+    
     fasta_files = myUtil.getAllFiles(fasta_output_directory,".faa") 
     for fasta_file in fasta_files:
         input_dir = os.path.dirname(fasta_file)
@@ -50,7 +70,7 @@ def make_alignments(options,fasta_output_directory):
         output_fasta = os.path.join(input_dir, f"{base_name}.faa_aln") # Create the output filename with .aln extension in the same directory as the input file
 
         if os.path.isfile(output_fasta):
-            print(f"[SKIP] {output_fasta} already exists")
+            logger.debug(f"{output_fasta} already exists - skipping")
             continue
         #Align with default mafft
         align_fasta_with_mafft(fasta_file, output_fasta, options.cores)
@@ -59,11 +79,14 @@ def make_alignments(options,fasta_output_directory):
     
     return alignment_files
 
-def get_executable_dir():
+def get_executable_dir() -> str:
     """
-    Get the directory of the current executable or script.
-    This works whether the script is compiled or run directly as a Python script.
+    Returns the directory of the current script or executable.
+
+    Returns:
+        str: Directory path.
     """
+    
     if getattr(sys, 'frozen', False):
         # If the program is compiled, sys.frozen is True, and sys.executable gives the path to the executable
         return os.path.dirname(sys.executable)
@@ -71,11 +94,19 @@ def get_executable_dir():
         # If running as a script, __file__ gives the path to the script
         return os.path.dirname(os.path.abspath(__file__))
 
-def find_executable(executable):
+
+def find_executable(executable: str) -> str:
     """
-    Find the MAFFT executable.
-    First check in the system's PATH, then in the local ./bin directory relative to the executable/script.
-    Returns the path to the MAFFT executable.
+    Finds an executable in the system PATH or in ./bin relative to script.
+
+    Args:
+        executable (str): Executable name (e.g. "mafft").
+
+    Returns:
+        str: Full path to executable.
+
+    Raises:
+        FileNotFoundError: If executable not found.
     """
     # Check if MAFFT is in the system's PATH
     executable_path = shutil.which(f"{executable}")
@@ -106,14 +137,14 @@ def align_fasta_with_mafft(input_fasta, output_fasta, cores=2):
         with open(output_fasta, "w") as output_file:
             # Pass the file object to stdout and stderr
             subprocess.run([mafft, "--thread", str(cores), "--auto", input_fasta], stdout=output_file, stderr=subprocess.PIPE, check=True)
-        print(f"[INFO] Alignment complete: {output_fasta}")
+        logger.debug(f"Completed alignment: {output_fasta}")
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
-        print(f"[ERROR] occurred during MAFFT alignment: {error_message}")
-        print(f"[SKIP] file {input_fasta} due to the error.")
+        logger.error(f"Occurred during MAFFT alignment: {error_message}")
+        logger.error(f"Skipping file {input_fasta} due to the error.")
 
     except FileNotFoundError:
-        print("[ERROR] MAFFT executable not found. Please make sure MAFFT is installed and in your system's PATH.")
+        logging.error("MAFFT executable not found. Please make sure MAFFT is installed and in your system's PATH.")
 
 
 
@@ -127,7 +158,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         gap_threshold: Proportion of gaps allowed in a column (default: 0.95).
     """
     trimal = find_executable("trimal")
-    print(f"[INFO] Trimming {input_fasta} with {gap_threshold} gap threshold")
+    logger.debug(f"Trimming {input_fasta} with {gap_threshold} gap threshold")
     try:
         # Run the trimAl command with the gap threshold
         subprocess.run([
@@ -141,8 +172,7 @@ def remove_gaps_with_trimal(input_fasta, output_alignment, gap_threshold=0.05):
         #print(f"Trimming complete: {input_fasta} -> {output_alignment}")
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode('utf-8') if e.stderr else "Unknown error"
-        print(f"[ERROR] occurred during trimming with trimAl: {error_message}")
-        print(f"[SKIP] file {input_fasta} due to the error.")
+        logger.error(f"Error occurec during trimming of {input_fasta}: {error_message}")
 
 
 

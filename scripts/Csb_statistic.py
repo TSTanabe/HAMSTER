@@ -6,24 +6,33 @@ import sqlite3
 import csv
 import multiprocessing
 import pickle
+from typing import Dict, Any, List, Tuple, Set, Optional
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
+
 from . import myUtil
 
+logger = myUtil.logger
 
 
-def group_gene_cluster_statistic(options):
+
+def group_gene_cluster_statistic(options: Any) -> Tuple[Dict, Dict, Dict, Dict]:
     """
-    Calculates and saves the hit score statistic for each gene cluster
-    
+    Calculates and saves the hit score statistic for each gene cluster.
+
     Args:
-        options: configuration and parameter container
-    
+        options (Any): configuration and parameter container.
+
     Returns:
-        tuple: 
+        tuple:
+            - domain_score_limits (dict)
             - filtered_stats_dict (dict)
             - grouped_keywords (dict)
             - clustered_excluded_keywords (dict)
+
+    Example:
+        >>> group_gene_cluster_statistic(options)
+        ({'ABC_trans': {'lower_limit': 100, 'upper_limit': 1850}}, {...}, {...}, {...})
     """
 
     filtered_stats_dict = myUtil.load_cache(options, "stat_filtered_stats.pkl")
@@ -32,25 +41,30 @@ def group_gene_cluster_statistic(options):
     distant_keywords = myUtil.load_cache(options, "stat_distant_keywords.pkl")
     clustered_excluded_keywords = myUtil.load_cache(options, "stat_clustered_excluded_keywords.pkl")
     query_score_dict = myUtil.load_cache(options, "stat_query_score_dict.pkl")  # Try loading from cache first
-    
+    logger.info("Computing selection parameters for reference sequences from csb")
     
     if domain_score_limits and filtered_stats_dict and grouped_keywords and clustered_excluded_keywords:
-        print("[LOAD] existing CSB grouping from cache")
+        logger.info("Loading Existing reference sequence and csb selection from cache")
         return domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
 
     # Step 1: Calculate hit score statistics
     if not filtered_stats_dict or not query_score_dict:
-        print("[INFO] Computing hitscore range per protein per collinear syntenic block")
+        logger.info("Computing hitscore range per protein per collinear syntenic block")
         stats_dict = get_keyword_statistics_parallel(options.database_directory, options.cores)
 
         # Step 2: Extract highest selfblast hitscore
-        print("[INFO] Extracting highest bitscores per hit for query-selfblast")
+        logger.info("Extracting highest bitscores per hit for query-selfblast")
         query_score_dict = get_highest_bitscores_for_genome(options.database_directory, "QUERY")
         myUtil.save_cache(options, "stat_query_score_dict.pkl", query_score_dict)
 
         # Step 3: Remove clusters where all hits are blow threshold. This should remove all low similarity csb of distant homologs
-        print(f"[INFO] Filtering out csb were all hits are below exclude_csb_hitscore {options.low_hitscore_csb_cutoff}")
-        filtered_stats_dict = filter_out_low_quality_csb(stats_dict, query_score_dict, options.low_hitscore_csb_cutoff, min(10,options.min_seqs))
+        logger.info(f"Filtering out CSBs where all hits are below exclude_csb_hitscore {options.low_hitscore_csb_cutoff}")
+        filtered_stats_dict = filter_out_low_quality_csb(
+            stats_dict,
+            query_score_dict,
+            options.low_hitscore_csb_cutoff,
+            min(10, options.min_seqs)
+        )
         
         myUtil.save_cache(options, "stat_filtered_stats.pkl", filtered_stats_dict)
     
@@ -61,7 +75,7 @@ def group_gene_cluster_statistic(options):
     # This uses the pattern to include distantly similar homologs with the same function under the assumption that similar co-occurence
     # retains the original function
     if not grouped_keywords or not distant_keywords:
-        print("[INFO] Grouping keywords by domain")
+        logger.info("Selecting csb patterns that encode for highly similar query homologs")
 
         grouped_keywords, distant_keywords = group_keywords_by_domain_extended(filtered_stats_dict, query_score_dict, options.low_hitscore_csb_cutoff)
         myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
@@ -69,14 +83,14 @@ def group_gene_cluster_statistic(options):
 
     # Step 6: Group the clusters that are below cutoff. Not used in any case in this program but might be in the future
     if not clustered_excluded_keywords:
-        print("[INFO] Clustering gene clusters with low hitscores by similarity")
+        logger.info("Grouping gene clusters with low hitscores by similarity")
 
         clustered_excluded_keywords = group_excluded_keywords_by_similarity(filtered_stats_dict, distant_keywords)
         myUtil.save_cache(options, "stat_clustered_excluded_keywords.pkl", clustered_excluded_keywords)
 
     # Step 7: Upper and lower score limits for grouped csbs without outliers. Score limits are later used
     if not domain_score_limits:
-        print("[INFO] Computing protein sequence hit score limits for grouped csbs")
+        logger.info("Computing for each protein hit score range across all selected csb")
  
         domain_score_limits = compute_score_limits(filtered_stats_dict, grouped_keywords)
         myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
@@ -94,26 +108,44 @@ def group_gene_cluster_statistic(options):
 # Fetch for each csb for each domain all the possible scores. Calculate the min,max,mean,median and std_dev and print them
     
 
-def wrapped_fetch_keyword_scores(database, chunk, progress_counter, lock):
-    """Fetches keyword scores and updates progress."""
+def wrapped_fetch_keyword_scores(
+    database: str,
+    chunk: List[str],
+    progress_counter: multiprocessing.Value,
+    lock: multiprocessing.Lock
+) -> Dict[str, Dict[str, List[float]]]:
+    """
+    Fetches keyword scores and updates progress for multiprocessing.
+
+    Args:
+        database (str): Path to SQLite database.
+        chunk (list): List of keywords for this worker.
+        progress_counter (multiprocessing.Value): Shared counter for progress.
+        lock (multiprocessing.Lock): For progress.
+
+    Returns:
+        dict: {keyword: {domain: [scores]}}
+    """
+    
     result = fetch_keyword_scores(database, chunk)
     with lock:
         progress_counter.value += 1
-        print(f"[INFO] Progress: {progress_counter.value} cluster statistics completed", end="\r")
+        print(f"Progress: {progress_counter.value} cluster statistics completed", end="\r")
     return result
 
-def get_keyword_statistics_parallel(database, num_workers=4):
+def get_keyword_statistics_parallel(
+    database: str,
+    num_workers: int = 4
+) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
-    Parallelized version of keyword statistics calculation using multiprocessing.
-    Shows a progress update when workers complete their tasks.
+    Parallelized version of keyword statistics calculation.
 
     Args:
         database (str): Path to SQLite database.
         num_workers (int): Number of parallel workers.
 
     Returns:
-        dict: { keyword: { domain: { 'n': int, 'min': float, 'max': float, 
-                                     'mean': float, 'median': float, 'std_dev': float } } }
+        dict: {keyword: {domain: {'n', 'min', 'max', 'mean', 'median', 'std_dev'}}}
     """
     with sqlite3.connect(database) as con:
         cur = con.cursor()
@@ -149,53 +181,51 @@ def get_keyword_statistics_parallel(database, num_workers=4):
     return compute_statistics_for_keywords(merged_raw_scores)
 
 
-def fetch_keyword_scores(database, keyword_list):
+def fetch_keyword_scores(
+    database: str,
+    keyword_list: List[str]
+) -> Dict[str, Dict[str, List[float]]]:
     """
-    Fetches raw domain scores for a given list of keywords.
+    Fetches raw domain scores for a list of keywords.
 
     Args:
-        database (str): Path to SQLite database.
-        keyword_list (list): List of keywords to process.
+        database (str): Path to SQLite DB.
+        keyword_list (list): List of keywords.
 
     Returns:
-        dict: { keyword: { domain: [scores] } }
+        dict: {keyword: {domain: [scores]}}
     """
-    raw_scores = {}
+    raw_scores: Dict[str, Dict[str, List[float]]] = {}
+    if not keyword_list:
+        return raw_scores
 
     with sqlite3.connect(database) as con:
         cur = con.cursor()
-        
-        query = """
-        SELECT k.keyword, d.domain, d.score
-        FROM Keywords k
-        JOIN Domains d ON k.clusterID = (SELECT clusterID FROM Proteins WHERE proteinID = d.proteinID)
-        WHERE k.keyword IN ({})
-        AND d.domain IS NOT NULL 
-        AND d.score IS NOT NULL;
-        """.format(",".join(["?"] * len(keyword_list)))
-        
+        query = f"""
+            SELECT k.keyword, d.domain, d.score
+            FROM Keywords k
+            JOIN Domains d ON k.clusterID = (SELECT clusterID FROM Proteins WHERE proteinID = d.proteinID)
+            WHERE k.keyword IN ({','.join(['?'] * len(keyword_list))})
+            AND d.domain IS NOT NULL
+            AND d.score IS NOT NULL;
+        """
         cur.execute(query, keyword_list)
-        
         for keyword, domain, score in cur.fetchall():
-            if keyword not in raw_scores:
-                raw_scores[keyword] = {}
-            if domain not in raw_scores[keyword]:
-                raw_scores[keyword][domain] = []
-            raw_scores[keyword][domain].append(score)
-
+            raw_scores.setdefault(keyword, {}).setdefault(domain, []).append(score)
     return raw_scores
 
 
-def compute_statistics_for_keywords(raw_scores):
+def compute_statistics_for_keywords(
+    raw_scores: Dict[str, Dict[str, List[float]]]
+) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
-    Computes statistical values (count, min, max, mean, median, std_dev) for the given raw scores.
+    Computes count, min, max, mean, median, std_dev for each domain per keyword.
 
     Args:
-        raw_scores (dict): { keyword: { domain: [bitscores] } }
+        raw_scores (dict): {keyword: {domain: [scores]}}
 
     Returns:
-        dict: { keyword: { domain: { 'n': int, 'min': float, 'max': float, 
-                                     'mean': float, 'median': float, 'std_dev': float } } }
+        dict: {keyword: {domain: {'n', 'min', 'max', 'mean', 'median', 'std_dev'}}}
     """
     stats_dict = {}
 
@@ -219,7 +249,11 @@ def compute_statistics_for_keywords(raw_scores):
 
 
 
-def save_stats_to_tsv(stats_dict, output_directory, filename="bitscore_statistics.tsv"):
+def save_stats_to_tsv(
+    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    output_directory: str,
+    filename: str = "bitscore_statistics.tsv"
+) -> str:
     """
     Saves the computed bitscore statistics to a TSV file.
 
@@ -259,16 +293,19 @@ def save_stats_to_tsv(stats_dict, output_directory, filename="bitscore_statistic
 ###########################################################################################################
 # Rountines to combine specific csbs that have similarly high bitscore hits to the reference sequences
 
-def get_highest_bitscores_for_genome(database, genome_id):
+def get_highest_bitscores_for_genome(
+    database: str,
+    genome_id: str
+) -> Dict[str, float]:
     """
-    Retrieves all domains for a given genomeID and stores only the highest bitscore for each domain.
+    Gets the highest bitscore for each domain for a given genome.
 
     Args:
-        database (str): Path to the SQLite database.
-        genome_id (str): The genomeID for which to retrieve domain information.
+        database (str): Path to SQLite DB.
+        genome_id (str): GenomeID.
 
     Returns:
-        dict: { domain: highest_bitscore }
+        dict: {domain: highest_bitscore}
     """
     domain_max_bitscores = {}
 
@@ -290,7 +327,12 @@ def get_highest_bitscores_for_genome(database, genome_id):
 
     return domain_max_bitscores
 
-def filter_out_low_quality_csb(stats_dict, query_score_dict, threshold=0.2, min_occurrences=10):
+def filter_out_low_quality_csb(
+    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    query_score_dict: Dict[str, float],
+    threshold: float = 0.2,
+    min_occurrences: int = 10
+) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
     Filters out CSBs where all domains have a median score less than the given threshold of the query reference.
 
@@ -329,7 +371,12 @@ def filter_out_low_quality_csb(stats_dict, query_score_dict, threshold=0.2, min_
     return filtered_csb
 
 
-def group_keywords_by_domain_extended(stats_dict, query_score_dict, acceptable_deviation=0.30,score_type='max'):
+def group_keywords_by_domain_extended(
+    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    query_score_dict: Dict[str, float],
+    acceptable_deviation: float = 0.30,
+    score_type: str = 'max'
+) -> Tuple[Dict[str, List[List[str]]], Dict[str, List[str]]]:
     """
     Erweitert die Gruppierung von Keywords pro Domain, indem alle Proteine innerhalb eines Genclusters berücksichtigt werden,
     wenn eine der Domänen eines Genclusters das Kriterium erfüllt. Das Keyword dieses Genclusters wird dann zu allen
@@ -379,7 +426,12 @@ def group_keywords_by_domain_extended(stats_dict, query_score_dict, acceptable_d
     
     
 
-def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshold=0.2, num_clusters=None):
+def group_excluded_keywords_by_similarity(
+    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    excluded_domains: Dict[str, List[str]],
+    threshold: float = 0.2,
+    num_clusters: Optional[int] = None
+) -> Dict[str, List[List[str]]]:
     """
     Groups excluded keywords into clusters based on statistical similarity, preserving domain information.
 
@@ -408,7 +460,7 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
                 ])
 
     if not keyword_vectors:
-        print("[WARN] There were no keyword statistics for distinct keywords")
+        logger.warning("There were no keyword statistics for distinct keywords")
         return {}
 
     keyword_vectors = np.array(keyword_vectors)
@@ -438,11 +490,8 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
         try:
             clustered_keywords[domain][cluster_mapping[label]].append(keyword)
         except IndexError:
-            print(f"[SKIP] Skipping {domain} with label {label} and keyword {keyword} due to high dissimilarity.")
-            #print("Clustered Keywords")
-            #pprint(clustered_keywords)
-            #print("Mapping")
-            #pprint(cluster_mapping)
+            logger.warning(f"Skipping {domain} with label {label} and keyword {keyword} due to high dissimilarity.")
+            continue
 
             continue  # Move to the next keyword instead of failing
 
@@ -450,7 +499,10 @@ def group_excluded_keywords_by_similarity(stats_dict, excluded_domains, threshol
 
 ####################################################################################
 
-def compute_score_limits(filtered_stats_dict, grouped_keywords_dict):
+def compute_score_limits(
+    filtered_stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    grouped_keywords_dict: Dict[str, List[List[str]]]
+) -> Dict[str, Dict[str, float]]:
     """
     Compute upper and lower score limits per domain based on the grouped CSBs
     and their statistical properties from filtered_stats_dict.

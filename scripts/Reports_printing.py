@@ -1,12 +1,14 @@
 #!/usr/bin/python
 
+
 import os
 import csv
 import glob
 import hashlib
 import pickle
-import pandas as pd
+from typing import Dict, List, Set, Any, Optional
 
+import pandas as pd
 import numpy as np
 
 from collections import Counter, defaultdict
@@ -16,12 +18,30 @@ from . import Reports
 from . import Csb_proteins
 from . import Pam_Mx_algorithm
 
+logger = myUtil.logger
 
-def process_initial_validations(options,
-                                report_directory: str,
-                                init_val_dir: str,
-                                db_path: str,
-                                output_dir: str = None):
+
+def process_initial_validations(
+    options: Any,
+    report_directory: str,
+    init_val_dir: str,
+    db_path: str,
+    output_dir: Optional[str] = None
+) -> None:
+    """
+    Main entry: loads performance and cutoff PKLs, writes summary tables and all per-protein reports.
+
+    Args:
+        options: Main options/config object.
+        report_directory (str): Path to main reports directory.
+        init_val_dir (str): Path to directory with initial validation PKLs.
+        db_path (str): Path to SQLite DB.
+        output_dir (Optional[str]): Where to save summary/output. If None, 'Reports' subdir of report_directory.
+
+    Returns:
+        None. Writes output files.
+    """
+    
     # Prepare directories and file lists
     output_dir = _prepare_output_dir(report_directory, output_dir)
     pkl_files = _find_pkl_files(init_val_dir)
@@ -61,21 +81,27 @@ def process_initial_validations(options,
 ####################################
 
 
-def _prepare_output_dir(report_directory, output_dir):
+def _prepare_output_dir(report_directory: str, output_dir: Optional[str]) -> str:
+
     if output_dir is None:
         output_dir = os.path.join(report_directory, 'Reports')
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
 
 
-def _find_pkl_files(init_val_dir):
+def _find_pkl_files(init_val_dir: str) -> List[str]:
     pattern = os.path.join(init_val_dir, '*.ini_performance_pkl')
     return glob.glob(pattern)
 
 
 # --- Data Loading & Collection ---
 
-def _collect_cutoff_and_performance(pkl_files, init_val_dir, options):
+def _collect_cutoff_and_performance(
+    pkl_files: List[str],
+    init_val_dir: str,
+    options: Any
+) -> Dict[str, Dict]:
+
     cutoffs = {}
     performance = {}
     for pkl in pkl_files:
@@ -86,7 +112,11 @@ def _collect_cutoff_and_performance(pkl_files, init_val_dir, options):
     return {'cutoffs': cutoffs, 'performance': performance}
 
 
-def _extract_cutoff_and_performance(pkl_file, init_val_dir, options):
+def _extract_cutoff_and_performance(
+    pkl_file: str,
+    init_val_dir: str,
+    options: Any
+) -> (str, Dict, Dict):
     protein = os.path.splitext(os.path.basename(pkl_file))[0]
     cutoffs_file = os.path.join(init_val_dir, f"{protein}.ini_cutoffs_pkl")
     data = myUtil.load_cache(options, f"{protein} cutoffs", file_path=cutoffs_file)
@@ -106,14 +136,27 @@ def _extract_cutoff_and_performance(pkl_file, init_val_dir, options):
 ####
 #################################################
 
-def write_pkl_tsv_reports(options, db_path, collections, output_dir, pkl_files):
+def write_pkl_tsv_reports(
+    options: Any,
+    db_path: str,
+    collections: Dict,
+    output_dir: str,
+    pkl_files: List[str]
+) -> None:
     """
-        This routine generated a dataframe that is used to
-        1. write the roc and mcc tsv files
-        2. write the enriched report table
-        3. generate the neighbourhood sorted confusion matrix tsv file
-        
+    For each per-protein PKL, generates all tabular/TSV reports.
+
+    Args:
+        options: Main config/options.
+        db_path (str): SQLite DB path.
+        collections (dict): {'cutoffs':..., 'performance':...}
+        output_dir (str): Directory for output.
+        pkl_files (list): List of performance PKL files.
+
+    Returns:
+        None.
     """
+    
     for pkl_file in pkl_files:
         protein = os.path.splitext(os.path.basename(pkl_file))[0]
         report_dir = os.path.join(output_dir, protein)
@@ -139,24 +182,32 @@ def write_pkl_tsv_reports(options, db_path, collections, output_dir, pkl_files):
     return
 
 
-def _load_and_validate_report(options, pkl_file):
+def _load_and_validate_report(options: Any, pkl_file: str) -> Optional[pd.DataFrame]:
+
     report = myUtil.load_cache(options, 'Report metrics', pkl_file)
     df = pd.DataFrame.from_dict(report, orient='index')
     df.index.name = 'hit_id'
 
     if df.empty:
-        print(f"[ERROR] Missing data for {os.path.basename(pkl_file)}")
+        logger.error(f"Missing data for pkl cache file {os.path.basename(pkl_file)}")
         return None
 
     required = ['bitscore', 'MCC', 'TP', 'FP', 'FN', 'TN']
     missing = [c for c in required if c not in df.columns]
     if missing:
-        print(f"[ERROR] Missing columns {missing} in {os.path.basename(pkl_file)}")
+        logger.error(f"Missing columns {missing} in {os.path.basename(pkl_file)}")
         return None
 
     return df
 
-def _add_neighborhood_info(df, protein, options, db_path):
+
+def _add_neighborhood_info(
+    df: pd.DataFrame,
+    protein: str,
+    options: Any,
+    db_path: str
+) -> pd.DataFrame:
+
     domain = protein.split('_', 1)[-1]
     cache_name = f"mcl_gene_vicinity_dict_{domain}.pkl"
     neighbors = myUtil.load_cache(options, cache_name) or {}
@@ -170,7 +221,13 @@ def _add_neighborhood_info(df, protein, options, db_path):
     df['neighborhood'] = df.index.map(lambda hid: neighbors.get(hid, [['singleton']]))
     return df
     
-def _skip_if_all_outputs_exist(protein, report_dir, collections):
+
+def _skip_if_all_outputs_exist(
+    protein: str,
+    report_dir: str,
+    collections: Dict
+) -> bool:
+
     enriched_path = os.path.join(report_dir, f"{protein}_enriched.txt")
     roc_file = os.path.join(report_dir, f"{protein}_roc.txt")
     mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
@@ -181,12 +238,17 @@ def _skip_if_all_outputs_exist(protein, report_dir, collections):
     ]
     all_expected = [enriched_path, roc_file, mcc_file] + confusion_files
     if all(os.path.exists(path) for path in all_expected):
-        print(f"[SKIP] All outputs exist for {protein}, skipping.")
+        logging.debug(f"All outputs exist for {protein} - skipping.")
         return True
     return False
 
 
-def _plot_roc_and_mcc(df, report_dir, protein, cutoffs):
+def _plot_roc_and_mcc(
+    df: pd.DataFrame,
+    report_dir: str,
+    protein: str,
+    cutoffs: Dict
+) -> None:
     trusted = cutoffs.get('trusted cutoff')
     noise = cutoffs.get('noise cutoff')
     opt = cutoffs.get('optimized cutoff')
@@ -199,13 +261,13 @@ def _plot_roc_and_mcc(df, report_dir, protein, cutoffs):
         optimized_cutoff=opt,
         output_path=roc_file
     )
-    print(f"[SAVE] ROC: {roc_file}")
+    logging.debug(f"Saved ROC: {roc_file}")
 
     mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
     export_existing_mcc_curve(
         df, score_col='bitscore', mcc_col='MCC', output_path=mcc_file
     )
-    print(f"[SAVE] MCC: {mcc_file}")
+    logging.debug(f"Saved MCC: {mcc_file}")
 
 
 def _write_neighborhood_confusions(df, report_dir, cutoffs):
@@ -401,7 +463,7 @@ def _write_mcl_plots_if_available(
                 mcl1_cutoff[key]['reference_threshold'],
                 output_dir=report_dir
             )
-            print(f"[SAVE] MCL grp1: {key}")
+            logging.debug(f"Saved MCL grp1: {key}")
         if key in grp2_refs and key in mcl2_cutoff:
             write_mcl_vs_references(
                 mcl_results[key],
@@ -411,9 +473,9 @@ def _write_mcl_plots_if_available(
                 mcl2_cutoff[key]['reference_threshold'],
                 output_dir=report_dir
             )
-            print(f"[SAVE] MCL grp2: {key}")
+            logging.debug(f"Saved MCL grp2: {key}")
     else:
-        print(f"[WARN] No MCL data for {key}, skipping plots.")
+        logging.warning(f"No MCL data for {key}, skipping plots.")
 
 
 
@@ -502,7 +564,7 @@ def write_roc_from_metrics_to_tsv(df: pd.DataFrame,
 
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     out_df.to_csv(output_path, sep='\t', index=False)
-    print(f"[SAVE] Saved ROC data to {output_path}")
+    logging.debug(f"Saved ROC data to {output_path}")
 
 
 
@@ -573,7 +635,7 @@ def write_neighborhood_confusion_data(df: pd.DataFrame,
 
     out_df = pd.DataFrame(out_rows)
     out_df.to_csv(path, sep='\t', index=False)
-    print(f"[SAVE] Saved neighborhood confusion data to {path}")
+    logging.debug(f"Saved neighborhood confusion data to {path}")
 
     df.drop(columns=['_conf_label','_nb'], inplace=True)
     
@@ -609,7 +671,7 @@ def write_mcl_vs_references(mcl_file: str,
     clusters = parse_mcl_clusters(mcl_file)
     n_ref_total = len(ref_ids)
     if n_ref_total == 0:
-        print(f"[WARN] No reference sequences for {protein_type}")
+        logging.warning(f"No reference sequences for {protein_type} in mcl vs reference printing")
         return
 
     # Compute cluster statistics
@@ -629,7 +691,7 @@ def write_mcl_vs_references(mcl_file: str,
     # Save output TSV
     out_df = pd.DataFrame(rows)
     out_df.to_csv(out_path, sep='\t', index=False)
-    print(f"[SAVE] Saved MCL-reference data to {out_path}")
+    logging.debug(f"Saved MCL-reference data to {out_path}")
 
 
 def parse_mcl_clusters(mcl_file_path):
@@ -657,7 +719,7 @@ def export_existing_mcc_curve(df: pd.DataFrame, score_col: str, mcc_col: str, ou
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     sorted_df.to_csv(output_path, sep='\t', index=False)
-    print(f"[SAVE] MCC curve data exported to {output_path}")
+    logging.debug(f"Saved MCC curve data exported to {output_path}")
 
 
 
@@ -665,7 +727,11 @@ def export_existing_mcc_curve(df: pd.DataFrame, score_col: str, mcc_col: str, ou
 ### Save cutoff tables and performance tables in the report directory ###
 #########################################################################
         
-def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
+def save_cutoffs_table(
+    cutoffs_collection: Dict[str, Dict[str, float]],
+    output_dir: str,
+    filename: str = 'cutoffs.tsv'
+) -> None:
     """
     Saves the cutoffs_collection into a tab-separated file.
 
@@ -674,6 +740,12 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
                                    'optimized cutoff', 'trusted cutoff', 'noise cutoff'
         output_dir (str): Directory in which to save the TSV.
         filename (str): Name of the TSV file (default: 'cutoffs.tsv').
+    Saves the cutoffs_collection into a tab-separated file.
+
+    Args:
+        cutoffs_collection (dict): name -> dict with keys 'optimized cutoff', 'trusted cutoff', 'noise cutoff'
+        output_dir (str): Output directory.
+        filename (str): Name of the TSV file.
     """
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, filename)
@@ -697,18 +769,24 @@ def save_cutoffs_table(cutoffs_collection, output_dir, filename='cutoffs.tsv'):
                 'noise':     cuts.get('noise cutoff'),
             })
 
-    print(f"[SAVE] Cutoffs table saved to {out_path}")
+    logging.info(f"Saved HMM score cutoffs table to {out_path}")
         
 
-def save_performance_table(performance_collection, output_dir, filename='performance.tsv'):
+def save_performance_table(
+    performance_collection: Dict[str, Dict[str, Any]],
+    output_dir: str,
+    filename: str = 'performance.tsv'
+) -> None:
     """
-    Saves the performance_collection into a tab-separated file, sorted by the 'name'-Spalte.
+    Saves the performance_collection into a tab-separated file, sorted by 'name'.
 
-    Parameters:
-        performance_collection (dict): Mapping name -> dict mit Schlüsseln
-                                       'MCC' und 'Matrix [TP,FP,FN,TN]'
-        output_dir (str): Verzeichnis, in dem die TSV-Datei abgelegt wird.
-        filename (str): Dateiname (default: 'performance.tsv').
+    Args:
+        performance_collection (dict): name -> dict with keys 'MCC', 'Matrix [TP,FP,FN,TN]'
+        output_dir (str): Directory for TSV file.
+        filename (str): File name.
+
+    Returns:
+        None.
     """
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, filename)
@@ -739,7 +817,7 @@ def save_performance_table(performance_collection, output_dir, filename='perform
                 'TN':   TN,
             })
 
-    print(f"[SAVE] Performance table saved to {out_path}")
+    logging.info(f"Saved HMM validation performance table to {out_path}")
 
         
         

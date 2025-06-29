@@ -1,34 +1,47 @@
 #!/usr/bin/python
 
-
-
 import csv
 import heapq
 import os
 import sqlite3
 import subprocess
 import pickle
-from . import myUtil
-
 from collections import defaultdict
 from multiprocessing import Pool, Manager
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
 import numpy as np
+from . import myUtil
+
+logger = myUtil.logger
 
 
+def initial_self_recognition_validation(options: Any) -> None:
+    """
+    Main validation routine for self-recognition (train/test on same set).
+    Computes cutoffs and confusion matrix for all alignments in parallel.
 
+    Args:
+        options: Object with options, directories, etc.
 
-def initial_self_recognition_validation(options):
+    Returns:
+        None. Writes output to file.
+
+    Example:
+        initial_self_recognition_validation(options)
+    """
+    
     #####
     # MAIN VALIDATION ROUTINE
     #####
-    print("[INFO] Initilize validation of training dataset recognition")
+    logger.info("Initilize validation of training datasets")
     
     # Prepare shared data
     all_seq_number = count_fasta_headers(options.sequence_faa_file) # Number of all TP + TN
     alignment_files = [os.path.join(options.fasta_output_directory, f) for f in os.listdir(options.fasta_output_directory) if f.endswith(".fasta_aln")]
     files_number = len(alignment_files)
     
-    print("[INFO] Calculate cutoffs and performance on training dataset without folds")
+    logger.info("Calculating cutoffs and performance on training dataset without folds")
 
     # Prepare task-specific arguments
     args_list = [(options, alignment_file, all_seq_number, files_number) for alignment_file in alignment_files]
@@ -52,14 +65,23 @@ def initial_self_recognition_validation(options):
 ####################  Initial validation procedure start  ##########################
 ####################################################################################
 
-def initial_training_data_performance(options, alignment_file, all_sequence_number, files_number):
+def initial_training_data_performance(
+    options: Any, 
+    alignment_file: str, 
+    all_sequence_number: int, 
+    files_number: int
+) -> Optional[Tuple[str, float, float, float, float]]:
     """
-    Runs in parallel to test the full HMM against a single test target.
-    Calculates the confusion matrix and returns:
-    - HMM name
-    - MCC
-    - Cutoffs
-    - Confusion matrix from validation
+    Test full HMM against a single target, calculate confusion matrix, cutoffs, MCC.
+
+    Args:
+        options: Options/config object.
+        alignment_file: Alignment file for the domain.
+        all_sequence_number: Number of all TP+TN.
+        files_number: Number of files.
+
+    Returns:
+        Tuple: (hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC)
     """
     
     # Define directory and protein name
@@ -77,14 +99,14 @@ def initial_training_data_performance(options, alignment_file, all_sequence_numb
     
     # Define HMM for the test
     if not (hmm := os.path.join(options.Hidden_markov_model_directory, f"{hmm_protein_name}.hmm")) or not os.path.isfile(hmm):
-        print(f"[WARN] HMM file not found for {hmm_protein_name}: {hmm}")
+        logger.warning(f"HMM file not found for {hmm_protein_name}: {hmm}")
         return
     # Define target file    
     if not (sequence_faa_file := options.targeted_sequence_faa_file_dict.get(protein_name, options.sequence_faa_file)):
-        print(f"[WARN] No target sequence file found for {protein_name}")
+        logger.warning(f"No target sequence file found for {protein_name}")
         return
     
-    print(f"[INFO] Initial validation of HMM {hmm_protein_name}")    
+    logger.debug(f"Initial validation of HMM {hmm_protein_name}")    
     
     # Define the output report path
     output_report = os.path.join(initial_validation_directory, f"{hmm_protein_name}.hmmreport")
@@ -103,23 +125,23 @@ def initial_training_data_performance(options, alignment_file, all_sequence_numb
     myUtil.save_cache(options, f"{hmm_protein_name}.ini_performance_pkl", report, initial_validation_directory)
     myUtil.save_cache(options, f"{hmm_protein_name}.ini_cutoffs_pkl", (hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, matrix), initial_validation_directory)
     
-    print(f"[INFO] Finished HMM {hmm_protein_name} optimized cutoff: {optimized_cutoff} trusted cutoff: {trusted_cutoff} noise cutoff: {noise_cutoff} and MCC: {best_MCC}")
+    logger.debug(f"Finished HMM {hmm_protein_name} optimized cutoff: {optimized_cutoff} trusted cutoff: {trusted_cutoff} noise cutoff: {noise_cutoff} and MCC: {best_MCC}")
     
     return hmm_protein_name, optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC
 
 
 
 
-def get_target_sets(directory):
+def get_target_sets(directory: str) -> Dict[str, str]:
     """
-    Finds all files in the given directory that start with 'superfamily_' and end with '.faa'.
-    Stores the file paths in a dictionary with keys as the filename without the prefix and extension.
-    
-    Parameters:
-        directory (str): The directory to search for files.
+    Finds all files in the directory with prefix 'superfamily_' and '.faa' extension.
+    Keys are file names without prefix/suffix, values are full paths.
+
+    Args:
+        directory (str): Directory to search.
 
     Returns:
-        dict: A dictionary with keys as modified filenames and values as file paths.
+        dict: {name: file_path}
     """
     result = {}
     
@@ -160,8 +182,16 @@ def get_target_sets(directory):
 ####################################################################################
 
     
-def parallel_cross_validation(options):    
+def parallel_cross_validation(options: Any) -> None:
+    """
+    Runs parallel cross-validation for all alignments in the output directory.
 
+    Args:
+        options: Config/options object (with .fasta_output_directory, .sequence_faa_file, .cores).
+
+    Returns:
+        None. Saves results to disk.
+    """
         
     all_seq_number = count_fasta_headers(options.sequence_faa_file) # Number of all TP + TN
     alignment_files = [os.path.join(options.fasta_output_directory, f) for f in os.listdir(options.fasta_output_directory) if f.endswith(".fasta_aln")]
@@ -169,7 +199,7 @@ def parallel_cross_validation(options):
 
     args_list = [(alignment_file, options, all_seq_number, files_number) for alignment_file in alignment_files]
 
-    print("Cross-validation initilized")
+    logger.info("Cross-validation initilized")
     #Makes the cross validation and assigns the cutoff values 
     with Pool(processes=options.cores) as pool:
         
@@ -184,15 +214,29 @@ def parallel_cross_validation(options):
 
 
     
-def process_cross_folds(alignment_file, options, all_sequence_number, files_number):
-    # This process is running in parallel
-    # Prepare the folds and HMMs
-    #alignment_file, options, all_sequence_number, files_number  = args_tuple
-    # Generate the cross-validation directory
+def process_cross_folds(
+    alignment_file: str, 
+    options: Any, 
+    all_sequence_number: int, 
+    files_number: int
+) -> None:
+    """
+    Worker for cross-validation of one alignment/HMM.
+
+    Args:
+        alignment_file: Alignment file.
+        options: Options/config.
+        all_sequence_number: TP+TN.
+        files_number: Unused.
+
+    Returns:
+        None. Writes results to disk.
+    """
+    
     cv_directory, cv_subfolder_name = setup_cross_validation_directory(alignment_file, options.cross_validation_directory)
 
 
-    print(f"Cross-validation of HMM {cv_subfolder_name}")
+    logger.debug(f"Cross-validation of HMM {cv_subfolder_name}")
     # Check if the task was already completed
     if os.path.exists(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt")):
         return None
@@ -221,14 +265,36 @@ def process_cross_folds(alignment_file, options, all_sequence_number, files_numb
     
 ### HELPER ROUTINES FOR PROCESS CROSS FOLDS
     
-def setup_cross_validation_directory(alignment_file, cross_validation_directory):
+def setup_cross_validation_directory(
+    alignment_file: str, 
+    cross_validation_directory: str
+) -> Tuple[str, str]:
     """Generates the cross-validation directory and returns its path."""
     cv_subfolder_name = os.path.splitext(os.path.basename(alignment_file))[0]
     cv_directory = os.path.join(cross_validation_directory, cv_subfolder_name)
     return cv_directory, cv_subfolder_name   
 
     
-def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="hmm_cv", cores=1):
+def create_hmms_from_msas(
+    directory: str, 
+    target_dir: str, 
+    ending: str = "fasta_aln", 
+    extension: str = "hmm_cv", 
+    cores: int = 1
+) -> None:
+    """
+    Builds HMMs from all MSA files in a directory for cross-validation.
+
+    Args:
+        directory: Input directory with MSA files.
+        target_dir: Output directory for HMMs.
+        ending: Input file suffix.
+        extension: Output HMM file suffix.
+        cores: CPUs.
+
+    Returns:
+        None.
+    """
     # Ensure the target directory exists
     os.makedirs(target_dir, exist_ok=True)
 
@@ -242,39 +308,59 @@ def create_hmms_from_msas(directory, target_dir, ending="fasta_aln", extension="
 
         # Skip if the HMM file already exists in the target directory
         if os.path.isfile(hmm_file):
-            print(f"HMM {hmm_file} already exists. Skipping...")
+            logger.debug(f"HMM {hmm_file} already exists - skipping")
             continue
 
         # Construct the hmmbuild command
         hmmbuild_cmd = f"hmmbuild --amino --cpu {cores} {hmm_file} {msa_path}"
         
         # Run the hmmbuild command
-        print(f"Running hmmbuild for {msa_file} -> {hmm_file}")
+        logger.debug(f"Running hmmbuild for {msa_file} -> {hmm_file}")
         subprocess.run(hmmbuild_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
     
-def get_cv_hmms(cv_directory):
+def get_cv_hmms(cv_directory: str) -> List[str]:
     """Returns a list of all HMM files used in cross-validation."""
     return [os.path.join(cv_directory, f) for f in os.listdir(cv_directory) if f.endswith(".hmm_cv")]
 
-def get_target_sequence_file(cv_subfolder_name, options):
+def get_target_sequence_file(cv_subfolder_name: str, options: Any) -> str:
     """Determines the correct sequence file based on the alignment file name."""
     name = cv_subfolder_name.split('_')[-1]
     return options.targeted_sequence_faa_file_dict.get(name, options.sequence_faa_file)
 
-def run_hmmsearch_for_cv_hmms(cv_hmms, sequence_faa_file):
+def run_hmmsearch_for_cv_hmms(cv_hmms: List[str], sequence_faa_file: str) -> None:
     """Executes HMMsearch for each cross-validation HMM model."""
     for hmm in cv_hmms:
         HMMsearch(hmm, sequence_faa_file, hmm + ".report", 1)
 
-def get_cv_reports(cv_directory):
+def get_cv_reports(cv_directory: str) -> List[str]:
     """Retrieves all HMMsearch reports from the cross-validation directory."""
     return [os.path.join(cv_directory, f) for f in os.listdir(cv_directory) if f.endswith(".report")]
             
 
-def process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_number, cv_directory, cv_subfolder_name, database_directory):
-    """Processes cutoffs from cross-validation reports, saves results, and generates hit reports."""
+def process_cutoffs_and_save_results(
+    alignment_file: str, 
+    cv_reports: List[str], 
+    all_sequence_number: int, 
+    cv_directory: str, 
+    cv_subfolder_name: str, 
+    database_directory: str
+) -> None:
+    """
+    Processes cutoffs and saves results for a cross-validation run.
+
+    Args:
+        alignment_file: Path to alignment file.
+        cv_reports: List of report files.
+        all_sequence_number: Number of all TP+TN.
+        cv_directory: Directory for output.
+        cv_subfolder_name: Domain label.
+        database_directory: Not used.
+
+    Returns:
+        None.
+    """
     # Get true positive sequence IDs
     TP_seqIDs = extract_record_ids_from_alignment(alignment_file)
     TN = all_sequence_number - len(TP_seqIDs)
@@ -295,17 +381,17 @@ def process_cutoffs_and_save_results(alignment_file, cv_reports, all_sequence_nu
 
     # Generate detailed hit reports
 
-def save_thresholds(cv_directory, cv_subfolder_name, strict_report):
+def save_thresholds(cv_directory: str, cv_subfolder_name: str, strict_report: Any) -> None:
     """Writes the calculated cutoff thresholds to a file."""
     with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_thresholds.txt"), 'w') as writer:
         writer.write(f"{cv_subfolder_name}\t{strict_report[2]}\t{strict_report[3]}\t{strict_report[4]}\n")
 
-def save_matrices(cv_directory, cv_subfolder_name, fold_matrix):
+def save_matrices(cv_directory: str, cv_subfolder_name: str, fold_matrix: List[List[int]]) -> None:
     """Writes the confusion matrices to a file."""
     with open(os.path.join(cv_directory, f"{cv_subfolder_name}_cv_matrices.txt"), 'w') as writer:
         writer.write('\n'.join(['\t'.join(map(str, row)) for row in fold_matrix]))
 
-def cleanup_temp_files(cv_directory):
+def cleanup_temp_files(cv_directory: str) -> None:
     """Removes temporary training data files from the cross-validation directory."""
     for file in os.listdir(cv_directory):
         if file.startswith("training_data_"):
@@ -315,9 +401,25 @@ def cleanup_temp_files(cv_directory):
             
 ## CROSS FOLD CREATION            
             
-def create_cross_validation_sets(alignment_file, output_directory, ending=".cv", num_folds=5):
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
+def create_cross_validation_sets(
+    alignment_file: str, 
+    output_directory: str, 
+    ending: str = ".cv", 
+    num_folds: int = 5
+) -> None:
+    """
+    Splits an alignment file into train/test folds for cross-validation.
+
+    Args:
+        alignment_file: Input file.
+        output_directory: Where to save folds.
+        ending: File ending for training files.
+        num_folds: Number of folds.
+
+    Returns:
+        None.
+    """
+    os.makedirs(output_directory, exist_ok=True)
 
     # **Change `sequences` to a dictionary**
     sequences = {}
@@ -370,7 +472,16 @@ def create_cross_validation_sets(alignment_file, output_directory, ending=".cv",
 ####################################################################################
 
 
-def extract_record_ids_from_alignment(alignment_file):
+def extract_record_ids_from_alignment(alignment_file: str) -> Set[str]:
+    """
+    Extracts all record IDs (FASTA headers) from an alignment file.
+
+    Args:
+        alignment_file: Path to alignment file.
+
+    Returns:
+        set: All record IDs.
+    """
     record_ids = set()
 
     # Open the alignment file and iterate over each line
@@ -386,7 +497,24 @@ def extract_record_ids_from_alignment(alignment_file):
     return record_ids
 
 
-def HMMsearch(library, input_file, output_file, cores=1):
+def HMMsearch(
+    library: str, 
+    input_file: str, 
+    output_file: str, 
+    cores: int = 1
+) -> None:
+    """
+    Runs HMMsearch and writes results to output_file.
+
+    Args:
+        library: Path to HMM library.
+        input_file: FASTA to search.
+        output_file: Output table.
+        cores: Number of threads.
+
+    Returns:
+        None.
+    """
     
     if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
         return
@@ -398,10 +526,26 @@ def HMMsearch(library, input_file, output_file, cores=1):
     status = subprocess.call(hmmsearch_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     if status > 0:
-        print(f"ERROR: {hmmsearch_cmd}\nDied with exit code: {status}")
+        logger.error(f"{hmmsearch_cmd}\nDied with exit code: {status}")
         # You may raise an exception here or handle the error as needed
 
-def calculateMetric(metric, TP, FP, FN, TN):
+def calculateMetric(
+    metric: str, 
+    TP: int, FP: int, FN: int, TN: int
+) -> float:
+    """
+    Calculates the given metric (MCC) from confusion matrix.
+
+    Args:
+        metric: Only 'MCC' supported.
+        TP, FP, FN, TN: Counts.
+
+    Returns:
+        float: Score.
+
+    Example:
+        calculateMetric("MCC", 10, 5, 3, 20)
+    """
     if metric == "MCC":
         numerator = TP * TN - FP * FN
         denominator = ((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) ** 0.5
@@ -413,11 +557,21 @@ def calculateMetric(metric, TP, FP, FN, TN):
 
 
 
-def cutoffs(true_positives, true_negatives, report_filepath):
+def cutoffs(
+    true_positives: Set[str], 
+    true_negatives: int, 
+    report_filepath: str
+) -> Tuple[float, float, float, Dict[str, Any], float, List[int]]:
     """
     Calculate the optimal cutoff based on MCC, sort proteinIDs into TP, FP, FN, TN.
+
+    Args:
+        true_positives: Set of known positive IDs.
+        true_negatives: Total number of negatives.
+        report_filepath: HMMsearch output.
+
     Returns:
-        optimized_cutoff, trusted_cutoff, noise_cutoff, best_MCC, best_matrix, hit_id_distribution, all_matrices
+        optimized_cutoff, trusted_cutoff, noise_cutoff, hit_report, best_MCC, best_matrix
     """
 
     sum_TP = len(true_positives)
@@ -438,7 +592,7 @@ def cutoffs(true_positives, true_negatives, report_filepath):
             if line.startswith('#'): continue
             fields = line.strip().split()
             if len(fields) < 8:
-                print(f"[WARN] Malformed line (skipped): {line.strip()}")
+                logger.warning(f"Malformed line (skipped): {line.strip()}")
                 continue
 
             hit_id, bitscore = fields[0], float(fields[7])
@@ -500,7 +654,7 @@ def cutoffs(true_positives, true_negatives, report_filepath):
 
     # Sanity-Check: Warn if no optimal cutoff was found
     if optimized_cutoff is None:
-        print('[WARN] No optimized cutoff found')
+        logger.warning("No optimized cutoff found for {report_filepath}")
         optimized_cutoff = trusted_cutoff
 
     # Second pass: assign based on optimized_cutoff
@@ -533,17 +687,17 @@ def cutoffs(true_positives, true_negatives, report_filepath):
 
 
 
-def calculate_performance_and_sum_matrices(cross_validation_folds):
+def calculate_performance_and_sum_matrices(
+    cross_validation_folds: List[List[Any]]
+) -> Tuple[List[int], List[List[int]], float, float, float]:
     """
-    Computes the best performance metrics from multiple cross-validation folds.
+    Computes best performance metrics from multiple cross-validation folds.
 
     Args:
-        cross_validation_folds (list of tuples): Each tuple contains:
-            (optimized_cutoff, trusted_cutoff, noise_cutoff, mcc, confusion_matrix)
+        cross_validation_folds: List of folds, each as [optimized_cutoff, trusted_cutoff, noise_cutoff, mcc, matrix].
 
     Returns:
-        tuple: (summed_confusion_matrix, all_folds_matrices, best_optimized_cutoff, 
-                highest_trusted_cutoff, lowest_noise_cutoff)
+        tuple: (sum_matrix, fold_matrices, best_optimized_cutoff, highest_trusted_cutoff, lowest_noise_cutoff)
     """
 
     # Initilize
