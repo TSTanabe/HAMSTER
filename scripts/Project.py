@@ -134,8 +134,8 @@ def prepare_result_space(options, project: str = "project") -> None:
     
     # 5. If using a pre-existing project, force pipeline to start at stage 3
     if not options.new_project and options.stage < 3:
-        logger.warning("Existing project directory detected. Setting start stage to 3.")
-        options.stage = 3
+        logger.warning("Existing project directory detected. Setting start stage to 4.")
+        options.stage = 4
 
 
 

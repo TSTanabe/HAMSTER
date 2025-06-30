@@ -163,6 +163,8 @@ def initial_glob_search(options: Any) -> None:
             options.evalue, options.searchcoverage, options.minseqid, 
             options.diamond_report_hits_limit, options.alignment_mode,
         )
+    else:
+        logger.info(f"Using DIAMOND BLASTp result table {blast_results_table}")    
     
     # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
     logger.info("Filtering raw DIAMOND BLASTp results by score, e-value, identity and blast score ratio parameters")
@@ -182,7 +184,7 @@ def initial_glob_search(options: Any) -> None:
 
     # Step 4: Extract and store unique genome IDs
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
-    logger.info(f"Found hits in {len(genomeIDs_set)} genomes")
+    logger.info(f"Found hits in {len(genomeIDs_set)} genomes in {blast_results_table}")
     
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
@@ -758,8 +760,10 @@ def filter_blast_table(
     """
 
     # Determine the output file path
-    #output_file = os.path.join(os.path.dirname(blast_file), f"filtered_{os.path.basename(blast_file)}")
-    
+    if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
+        logger.info(f"Filtered hit results file already exists and is non-empty: {output_file}")
+        return output_file
+        
     # Open input and output files using CSV reader/writer
     with open(blast_file, 'r') as infile, open(output_file, 'w', newline='') as outfile:
         reader = csv.reader(infile, delimiter='\t')
