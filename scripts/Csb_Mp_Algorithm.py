@@ -299,12 +299,12 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash,gene_clusters,k=1,q=1):
                     
                     initilized = initialize_Instances(pattern, key, gene_clusters, InstanceListP, MatchLists, NextMatch)
                     count = expand_redundancy(redundancy_hash,key,initilized)
-                    if count > q:
+                    if count >= q:
                         active_expanding_keys = initilized
                 else:
                     extended = findInstances(pattern, key, gene_clusters, InstanceListP, MatchLists, NextMatch,active_expanding_keys,k,q)
                     count = expand_redundancy(redundancy_hash,key,extended)
-                    if count > q:
+                    if count >= q:
                         discontinued = active_expanding_keys - extended # returns the keys of gene clusters that were not extended
                         active_expanding_keys = active_expanding_keys & extended # returns the keys of the gene clusters that were extended and will be tested in the next round
                         
