@@ -573,8 +573,12 @@ def fetch_seqs_to_fasta_parallel(
         pool.starmap(fetch_seq_to_fasta, tasks)
 
 
-        
-        
+
+def connect_readonly(db_path):
+    # helper routine for the fetch seq to fasta database connection
+    uri = f"file:{db_path}?mode=ro&immutable=1"
+    return sqlite3.connect(uri, uri=True, check_same_thread=False)
+
 def fetch_seq_to_fasta(
     database: str,
     domain: str,
@@ -600,12 +604,9 @@ def fetch_seq_to_fasta(
     if not protein_ids or os.path.exists(fasta_file_path):
         return  # Skip empty domains or if the file already exists
 
-    with sqlite3.connect(database, timeout=120.0) as con:
+
+    with connect_readonly(database) as con:
         cur = con.cursor()
-        con.execute('PRAGMA journal_mode=WAL;')
-        con.execute('PRAGMA synchronous=NORMAL;')
-        con.execute('PRAGMA temp_store=MEMORY;')
-        con.execute('PRAGMA cache_size=-25000;')  # ca. 100MB Cache
         
         with open(fasta_file_path, "w") as fasta_file:
             protein_id_list = list(protein_ids)
