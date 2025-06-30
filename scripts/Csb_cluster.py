@@ -42,9 +42,9 @@ def csb_prediction(options: Any) -> None:
         options.gene_clusters_file = "gene_clusters.txt"
         options.glob_chunks = 10000
     """
-    logger.info("Detecting and sorting gene clusters for with scb finder algorithm")
+    logger.info("Detecting and sorting gene clusters for with csb finder algorithm")
 
-    options.gene_clusters_file = sort_file_by_first_column_external(options.gene_clusters_file, options.glob_chunks)
+    options.gene_clusters_file = sort_file_by_first_column_external(options.gene_clusters_file, options.glob_chunks, options.max_csb_size)
     #Finds collinear syntenic blocks with the csb finder algorithm using a printed representation of the clusters.
     options.redundant,options.non_redundant = dereplicate(options.gene_clusters_file) #returns two filepaths, dereplicates identical gene clusters
     
@@ -116,13 +116,20 @@ def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:
 ################ Subroutines used here #################################################
 ########################################################################################
 
-def sort_file_by_first_column_external(input_file: str, chunk_size: int = 10000) -> str:
+def sort_file_by_first_column_external(
+    input_file: str, 
+    chunk_size: int = 10000,
+    max_columns: int = None
+) -> str:
     """
-    Sorts a file by column count and then by the first column's string. Merges using external sort to support large files.
+    Sorts a file by column count and then by the first column's string. 
+    Merges using external sort to support large files.
+    Can exclude lines with more than max_columns columns.
 
     Args:
         input_file (str): File to sort (TSV: first column is genome identifier).
         chunk_size (int): Lines per chunk (default: 10000).
+        max_columns (int, optional): If set, lines with more columns are excluded.
 
     Returns:
         str: Path to sorted output file.
@@ -131,17 +138,32 @@ def sort_file_by_first_column_external(input_file: str, chunk_size: int = 10000)
         input_file = "gene_clusters.txt"
         return "sorted_gene_clusters.txt"
     """
-    # Generate the output file path with 'sorted_' prefix
+    
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Sorting csb result file by csb length and alphabet for reproducibility. Removing csb exceeding {max_columns} genes")
+
+    # Output file
     directory, filename = os.path.split(input_file)
     output_file = os.path.join(directory, f"sorted_{filename}")
-    
     temp_files = []
 
     # Step 1: Read file in chunks, sort each chunk, and write to temporary files
     with open(input_file, 'r') as infile:
         while True:
-            lines = [infile.readline().strip() for _ in range(chunk_size)]
-            lines = [line for line in lines if line]  # Remove any empty lines
+            lines = []
+            for _ in range(chunk_size):
+                line = infile.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                # Filter on column count if needed
+                if max_columns is not None:
+                    ncol = len(line.split())
+                    if ncol > max_columns:
+                        continue
+                lines.append(line)
             if not lines:
                 break
             # Sort by number of columns, then by first column string
@@ -154,15 +176,24 @@ def sort_file_by_first_column_external(input_file: str, chunk_size: int = 10000)
     # Step 2: Merge sorted temporary files
     with open(output_file, 'w') as outfile:
         open_files = [open(temp_file, 'r') for temp_file in temp_files]
-        sorted_stream = heapq.merge(*(f for f in open_files), key=lambda x: (len(x.split()), x.split()[0]))
+        def file_iter(f):
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                yield line
+        sorted_stream = heapq.merge(*(file_iter(f) for f in open_files), 
+                                    key=lambda x: (len(x.split()), x.split()[0]))
         for line in sorted_stream:
-            outfile.write(line)
+            outfile.write(line + '\n')
         
         # Close and remove temporary files
         for f in open_files:
             f.close()
         for temp_file in temp_files:
             os.remove(temp_file)
+
+    logger.info(f"Sorted file written: {output_file}")
     return output_file
             
             
@@ -178,6 +209,8 @@ def dereplicate(filepath: str) -> Tuple[str, str]:
     Returns:
         Tuple[str, str]: (redundant_file, non_redundant_file)
     """
+    logger.debug("Dereplicate csbs with multiple occurences")
+    
     # Dictionary to store lines based on variable columns
     line_dict = {}
 

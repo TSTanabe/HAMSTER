@@ -230,6 +230,10 @@ def parse_arguments(arguments: list):
             help="Minimum number of genes in a csb." if show_advanced else argparse.SUPPRESS
         )
         csb.add_argument(
+            '-max_csb_size', dest='max_csb_size', type=int, default=20, metavar='<int>',
+            help="Maximum number of genes in a csb." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
             '-jaccard', dest='jaccard', type=float, default=0.0, metavar='<float>',
             help="Maximum Jaccard dissimilarity allowed for csb clustering." if show_advanced else argparse.SUPPRESS
         )
