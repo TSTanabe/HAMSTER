@@ -260,6 +260,7 @@ def DiamondSearch(path: str, query_fasta: str, cores: int, evalue: float, covera
 
     diamond = myUtil.find_executable("diamond")
     target_db_name = f"{path}.dmnd"
+    logger.debug(f'{diamond} makedb --quiet --in {path} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
     os.system(f'{diamond} makedb --quiet --in {path} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null')
     
     output_results_tab = f"{path}.diamond.tab"

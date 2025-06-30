@@ -80,7 +80,7 @@ class Options:
         
         self.hardcap=10000 # Allowed number of seqs to exceed the hardcap
         
-        
+        self.new_project = False # make a new project
         
 
 def parse_arguments(arguments: list):
@@ -305,14 +305,20 @@ def parse_arguments(arguments: list):
         parser.print_help()
         sys.exit(0)
 
-
-    if len(arguments) == 0: # Print help if no arguments were provided
+    # Print help if no arguments were provided
+    if len(arguments) == 0:
         parser.print_help()
         sys.exit("Please provide arguments. For help use -h or --help_all")
 
+    # Define the options object
     options = Options()
     parser.parse_args(namespace=options)
     options.location = __location__
+    
+    # Check if results dir is default location
+    if options.result_files_directory == __location__+'/results':
+        # default location is not an existing project
+        options.new_project = True
     
     # Define automatic calculation for these    
     if options.mcl_density_thrs == 'auto':
