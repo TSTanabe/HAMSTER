@@ -3,7 +3,7 @@
 
 import os
 import heapq
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Dict, List, Set, Tuple, Any
 
 from . import Database
@@ -15,8 +15,6 @@ from sklearn.cluster import AgglomerativeClustering
 
 logger = myUtil.logger
 
-
-            
             
 # For the clustering of csbs by jaccard and agglomerativeClustering
 def csb_prediction(options: Any) -> None:
@@ -44,22 +42,23 @@ def csb_prediction(options: Any) -> None:
     """
     logger.info("Detecting and sorting gene clusters for with csb finder algorithm")
 
-    options.gene_clusters_file = sort_file_by_first_column_external(options.gene_clusters_file, options.glob_chunks, options.max_csb_size)
+    # Sort the all gene clusters that were detected in the search
+    options.gene_clusters_file = sort_by_first_column_and_filter_csb(options.gene_clusters_file, options.glob_chunks, options.min_csb_size, options.max_csb_size, options.max_domain_repeats)
+    
     #Finds collinear syntenic blocks with the csb finder algorithm using a printed representation of the clusters.
     options.redundant,options.non_redundant = dereplicate(options.gene_clusters_file) #returns two filepaths, dereplicates identical gene clusters
     
+    logger.debug("Initilizing hashes for the Csb match point algorithm")
     options.redundancy_hash = create_redundancy_hash(options.redundant) # value is an integer, number of existing replicates
     gene_clusters = create_gene_cluster_hash(options.non_redundant)
     extend_redundancy_hash(options.non_redundant,options.redundancy_hash) # for all which do not have a redundant gene cluster
     #modified CsbfinderS algorithm
+    logger.debug("Initilizing Csb match point algorithm for csb pattern recoginition")
     computed_Instances_dict = Csb_Mp_Algorithm.csb_finderS_matchpoint_algorithm(options.redundancy_hash,gene_clusters,options.insertions,options.occurence) #k insertions und q occurences müssen über die optionen festgelegt werden
 
     # Combine reverse csbs
     reverse_pairs = find_reverse_pairs(computed_Instances_dict)
     computed_Instances_dict = merge_sets_for_pairs(computed_Instances_dict, reverse_pairs)
-    
-    # Remove repetitive gene clusters
-    csb_remove_repetitives(computed_Instances_dict,options.min_csb_size)
     
     # Reduce redundancy in the keys
     options.computed_Instances_dict = csb_collapse_to_longest_pattern(computed_Instances_dict)
@@ -116,20 +115,27 @@ def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:
 ################ Subroutines used here #################################################
 ########################################################################################
 
-def sort_file_by_first_column_external(
+def sort_by_first_column_and_filter_csb(
     input_file: str, 
-    chunk_size: int = 10000,
-    max_columns: int = None
+    chunk_size: int = 10000, 
+    min_columns: int = None, 
+    max_columns: int = None,
+    max_repeats: int = None
 ) -> str:
     """
-    Sorts a file by column count and then by the first column's string. 
-    Merges using external sort to support large files.
-    Can exclude lines with more than max_columns columns.
-
+    Sorts a file by column count and then by the first column's string. Merges using external sort to support large files. Also filters die gene clusters by length and repetitive occurence of genes
+    
+    Do not copy to filtered list if not:
+        - minimal number of unique domains is reached
+        - maximal csb size is exceeded
+        - any domain is more than max_repeats times repeated
+    
     Args:
         input_file (str): File to sort (TSV: first column is genome identifier).
         chunk_size (int): Lines per chunk (default: 10000).
-        max_columns (int, optional): If set, lines with more columns are excluded.
+        min_columns (int, optional): Minimum columns (inclusive).
+        max_columns (int, optional): Maximum columns (inclusive).
+        max_repeats (int, optional): Maximum number of repeats per gene in csb (inclusive)
 
     Returns:
         str: Path to sorted output file.
@@ -139,12 +145,14 @@ def sort_file_by_first_column_external(
         return "sorted_gene_clusters.txt"
     """
     
-    logger = logging.getLogger(__name__)
-    logger.debug(f"Sorting csb result file by csb length and alphabet for reproducibility. Removing csb exceeding {max_columns} genes")
-
-    # Output file
+    logger.debug(
+        f"Sorting csb result file by csb length and alphabet for reproducibility. "
+        f"min_columns={min_columns}, max_columns={max_columns}, remove repetitives"
+    )
+    # Generate the output file path with 'sorted_' prefix
     directory, filename = os.path.split(input_file)
     output_file = os.path.join(directory, f"sorted_{filename}")
+    
     temp_files = []
 
     # Step 1: Read file in chunks, sort each chunk, and write to temporary files
@@ -158,14 +166,22 @@ def sort_file_by_first_column_external(
                 line = line.strip()
                 if not line:
                     continue
-                # Filter on column count if needed
-                if max_columns is not None:
-                    ncol = len(line.split())
-                    if ncol > max_columns:
-                        continue
+                columns = line.split()
+                
+                # The csb are filtered at this point by length and composition criteria
+                unique_domains = set(columns[1:])
+                n_domains = len(columns) - 1 
+                if min_columns is not None and len(unique_domains) < min_columns:
+                    continue
+                if max_columns is not None and n_domains > max_columns:
+                    continue
+                if max_repeats is not None and csb_too_many_repeats(columns[1:], max_repeats):
+                    continue
+                
                 lines.append(line)
             if not lines:
                 break
+
             # Sort by number of columns, then by first column string
             lines.sort(key=lambda x: (len(x.split()), x.split()[0]))
             temp_file = f'temp_{len(temp_files)}.txt'
@@ -173,27 +189,19 @@ def sort_file_by_first_column_external(
                 f.write('\n'.join(lines) + '\n')
             temp_files.append(temp_file)
 
+
     # Step 2: Merge sorted temporary files
     with open(output_file, 'w') as outfile:
         open_files = [open(temp_file, 'r') for temp_file in temp_files]
-        def file_iter(f):
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                yield line
-        sorted_stream = heapq.merge(*(file_iter(f) for f in open_files), 
-                                    key=lambda x: (len(x.split()), x.split()[0]))
+        sorted_stream = heapq.merge(*(f for f in open_files), key=lambda x: (len(x.split()), x.split()[0]))
         for line in sorted_stream:
-            outfile.write(line + '\n')
+            outfile.write(line)
         
         # Close and remove temporary files
         for f in open_files:
             f.close()
         for temp_file in temp_files:
             os.remove(temp_file)
-
-    logger.info(f"Sorted file written: {output_file}")
     return output_file
             
             
@@ -595,6 +603,21 @@ def csb_remove_repetitives(csb_dict: Dict[Any, Any], min_csb_size: int) -> None:
     keys_to_remove = [k for k in csb_dict if len(set(k)) < min_csb_size]
     for k in keys_to_remove:
         del csb_dict[k]
+
+
+def csb_too_many_repeats(domains: list, max_repeats: int = 3) -> bool:
+    """
+    Returns True if any domain occurs more than max_repeats times.
+    Args:
+        domains (list): Domains (z.B. columns[1:])
+        max_repeats (int): Allowed repeat count (default: 3)
+    Example:
+        csb_too_many_repeats(['A','A','A','B'], 3) -> False
+        csb_too_many_repeats(['A','A','A','A'], 3) -> True
+    """
+    domain_counts = Counter(domains)
+    return any(count > max_repeats for count in domain_counts.values())
+
 
 def csb_collapse_to_longest_pattern(input_dict: Dict[Any, Set[Any]]) -> Dict[Any, Set[Any]]:
     """

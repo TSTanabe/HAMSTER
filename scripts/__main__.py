@@ -230,8 +230,12 @@ def parse_arguments(arguments: list):
             help="Minimum number of genes in a csb." if show_advanced else argparse.SUPPRESS
         )
         csb.add_argument(
-            '-max_csb_size', dest='max_csb_size', type=int, default=20, metavar='<int>',
+            '-max_csb_size', dest='max_csb_size', type=int, default=40, metavar='<int>',
             help="Maximum number of genes in a csb." if show_advanced else argparse.SUPPRESS
+        )
+        csb.add_argument(
+            '-max_gene_repeats', dest='max_domain_repeats', type=int, default=2, metavar='<int>',
+            help="Maximum number of repeated genes in a csb." if show_advanced else argparse.SUPPRESS
         )
         csb.add_argument(
             '-jaccard', dest='jaccard', type=float, default=0.0, metavar='<float>',
