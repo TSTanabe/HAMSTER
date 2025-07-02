@@ -217,7 +217,7 @@ def prodigalFaaToGff(filepath: str) -> str:
                     line = line[1:]
                     ar = line.split("#")
                     #print(ar)
-                    contig = re.split("\_{1}\d+\W+$",ar[0])
+                    contig = re.split(r"_{1}\d+\W+$", ar[0])
                     #print(contig)
                     strand = '+' if ar[3] == ' 1 ' else '-'
                     writer.write(contig[0]+"\tprodigal\tcds\t"+ar[1]+"\t"+ar[2]+"\t0.0\t"+strand+"\t0\tID=cds-"+ar[0]+";Genome="+genomeID+"\n")
