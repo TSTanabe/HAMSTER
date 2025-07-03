@@ -186,6 +186,9 @@ def initial_glob_search(options: Any) -> None:
     genomeIDs_set = collect_genomeIDs(blast_results_table) #returns a set of all genomeIDs
     logger.info(f"Found hits in {len(genomeIDs_set)} genomes in {blast_results_table}")
     
+    # Remove genomeIDs without faa and gff file. It is possible that a blast result table has more/other IDs as the provided files
+    genomeIDs_set = filter_genomeIDs_with_existing_files(genomeIDs_set, options.faa_files, options.gff_files)
+    
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
     
     # Step 5: Process genome hits in parallel
@@ -299,6 +302,36 @@ def collect_genomeIDs(report_path: str, div: str = '___') -> Set[str]:
                 key = columns[0].split(div)[0]
                 genomeIDs.add(key)
     return genomeIDs
+
+def filter_genomeIDs_with_existing_files(genomeIDs, faa_files, gff_files):
+    """
+    Entfernt alle genomeIDs, für die entweder FAA oder GFF nicht als existierende Datei vorliegt.
+
+    Args:
+        genomeIDs (Iterable[str]): Zu prüfende genomeIDs.
+        faa_files (dict[str, str]): Map genomeID → faa-Dateipfad.
+        gff_files (dict[str, str]): Map genomeID → gff-Dateipfad.
+
+    Returns:
+        set[str]: Gefilterte genomeIDs mit existierenden FAA- und GFF-Files.
+    """
+    valid_ids = set()
+    missing_ids = []
+
+    for gid in genomeIDs:
+        faa = faa_files.get(gid)
+        gff = gff_files.get(gid)
+        if faa and gff and os.path.isfile(faa) and os.path.isfile(gff):
+            valid_ids.add(gid)
+        else:
+            missing_ids.append(gid)
+
+    logger.info(f"Filtered genomeIDs: {len(valid_ids)} valid, {len(missing_ids)} with missing files (FAA/GFF)")
+    if missing_ids:
+        logger.debug(f"GenomeIDs removed due to missing files: {', '.join(missing_ids)}")
+
+    return valid_ids
+
     
 def split_genomeIDs_into_batches(genomeIDs_list: List[str], num_batches: int) -> List[List[str]]:
     """
