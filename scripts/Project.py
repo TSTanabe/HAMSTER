@@ -197,7 +197,8 @@ def isProjectFolder(options) -> bool:
                 logger.info(f"Found database at {found_db}")
                 options.result_files_directory = os.path.dirname(found_db)
             else:
-                logger.warning("No database found at all. Creating new project folder structure.")
+                logger.warning("No database found at all. Existing project was not found.")
+                return False
 
         # Now ensure required directories exist
         required_dirs = [
@@ -231,7 +232,7 @@ def isProjectFolder(options) -> bool:
                     break
 
     except Exception as e:
-        logger.error(f"An error occurred while checking project folder: {e}")
+        logger.error(f"An error occurred while checking for existing project folder: {e}")
         sys.exit(1)
 
     return True
