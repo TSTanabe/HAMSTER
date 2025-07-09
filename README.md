@@ -90,6 +90,7 @@ All outputs are organized into a results directory, including:
   Performance of all HMMs during classification of the underlying training data
   
 ## Installation
+HAMSTER is either available via the github directory or as a compiled binary file
 
 1. **Clone this repository:**
     ```bash
@@ -97,15 +98,10 @@ All outputs are organized into a results directory, including:
     cd HAMSTER
     ```
 
-2. **Install Python dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
+2. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
 
 ## Dependencies
-
+### Required libraries
 - **Python** 3.8 or higher
 - **Python packages**:
   - `numpy`
@@ -113,7 +109,8 @@ All outputs are organized into a results directory, including:
   - `scikit-learn`
   - `scipy`
 - **R** (for optional plotting scripts)
-- External tools may be required for full functionality 
+
+### Required external tools for functionality 
 
   - **DIAMOND** — for fast protein BLAST-like searches (https://github.com/bbuchfink/diamond)
   - **Prodigal** — for gene prediction from prokaryotic genomes (https://github.com/hyattpd/Prodigal)
