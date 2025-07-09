@@ -3,15 +3,6 @@
 
 HAMSTER is a modular command-line pipeline for the high-throughput identification and analysis of homologous genes, gene clusters, and collinear syntenic blocks across multiple genome datasets. It provides automated, reproducible workflows for genome mining, synteny block detection, and protein sequence clustering with advanced visualization and reporting.
 
-## Features
-
-- Automated detection of homologs and synteny blocks across large numbers of genomes
-- Flexible protein clustering using MCL, PAM, and CSB approaches
-- Stepwise, checkpointed workflow—resume or start at any stage
-- Supports both simple and highly configurable command-line operation
-- Produces rich outputs: gene clusters, alignments, statistical reports, and PDF plots
-- Modular structure for extension and integration
-
 ## Quick Start
 
 **Typical usage for a new project:**
@@ -36,8 +27,11 @@ python hamster.py --help-all
 - **Results directory**: (optional) Output directory. If an existing results folder is provided resume the analysis
 
 ## Outputs
-
-All outputs are organized into a results directory, including:
+For each new attempt to generate hidden Markov Models a new results folder is created that organizes the output files.
+An example output folder structure with the most important output files is given below. The HMMs are located in the Hidden markov models
+subdirectory and together with the cutoffs in the _ini_cutoffs.txt file. The training data for each HMM are located in the Sequences
+subdirectory and a detailed report on each sequence in each training dataset in the Reports folder. HMMs, training data fasta files
+and report files that belong together share the same basename.
 
 ### Output Folders
 
@@ -46,7 +40,7 @@ All outputs are organized into a results directory, including:
     - **Sequences/**
       Protein sequences (FASTA) of assumed functional equivalent sequences from the analysis
     - **Hidden_markov_models/** 
-      Generated profile Hidden Markov Models for each protein
+      Generated profile Hidden Markov Models for each protein with each selection rule and corresponding cutoffs
     - **Reports/** 
       Generated detailed reports for each sequence set, including a list of all selected sequences with the genomic vicinity
     - **Collinear_syntenic_blocks/** 
@@ -96,6 +90,7 @@ HAMSTER is either available via the github directory or as a compiled binary fil
     ```bash
     git clone https://github.com/TSTanabe/HAMSTER.git
     cd HAMSTER
+    python hamster.py -f ./genomes -q queries.faa
     ```
 
 2. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
