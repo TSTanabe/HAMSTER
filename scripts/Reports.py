@@ -21,7 +21,7 @@ class ReportObject:
         self.mcc = 0        
 
 def move_HMMs(input_folder,output_folder,file_extension):
-    print(f"Saving HMMs in the  directory: {output_folder}")
+    print(f"Saving HMMs in the directory: {output_folder}")
     for datafile in os.listdir(input_folder):
         if datafile.endswith(file_extension):
             source = os.path.join(input_folder, datafile)

@@ -6,6 +6,7 @@ import re
 import traceback
 import subprocess
 import multiprocessing
+from collections import Counter
 from multiprocessing import Manager, Pool
 from typing import List, Set, Dict, Any, Tuple, Optional
 
@@ -16,9 +17,6 @@ from . import ParseReports
 from . import Alignment
 
 logger = myUtil.logger
-
-
-
 
 
 ################################################################################################        
@@ -190,8 +188,11 @@ def initial_glob_search(options: Any) -> None:
     genomeIDs_set = filter_genomeIDs_with_existing_files(genomeIDs_set, options.faa_files, options.gff_files)
     
     Database.insert_database_genomeIDs(options.database_directory, genomeIDs_set) # Insert genomeIDs into database
+
+    # Step 5 Check if the filterd fasta file has correct genomeIDs ___ proteinID combinations with unique ids
+    options.glob_table = fix_sseqid_prefix_suffix_uniqueness(options.glob_table, options)
     
-    # Step 5: Process genome hits in parallel
+    # Step 6: Process genome hits in parallel
     logger.info("Parsing hits from filtered results table")
     genomeID_batches = split_genomeIDs_into_batches(list(genomeIDs_set), options.cores-1) # batch sets of genomeIDs for each worker
     
@@ -855,6 +856,62 @@ def filter_blast_table(
             writer.writerows(buffer)
 
     return output_file  
+
+
+def fix_sseqid_prefix_suffix_uniqueness(filtered_file: str, options) -> str:
+    """
+    Checks if sseqid prefix matches queued_genomes and suffixes are unique.
+    If not, prepends the prefix and replaces the file in place.
+    """
+    
+    logger.info("Validating genomeIDs and proteinIDs in the filtered blast result table")
+    
+    temp_file = filtered_file + ".tmp"
+    rows = []
+    prefixes = []
+    suffixes = []
+    queued_genomes = options.queued_genomes  # set of genomeIDs
+
+    with open(filtered_file, 'r') as infile:
+        reader = csv.reader(infile, delimiter='\t')
+        for row in reader:
+            sseqid = row[0]
+            # Split at the FIRST occurrence of ___
+            parts = sseqid.split('___', 1)
+            if len(parts) == 2:
+                prefix, suffix = parts
+            else:
+                prefix = sseqid
+                suffix = ''
+            prefixes.append(prefix)
+            suffixes.append(suffix)
+            rows.append(row)
+
+    # Schritt 1: Prefix-Check
+    prefix_in_queued = [p for p in prefixes if p in queued_genomes]
+    if not prefix_in_queued:
+        logger.error("No prefix in any sseqid matches a genomeID in the provided fasta files")
+        raise ValueError("No prefix in sseqid matches a genomeID in queued_genomes")
+    
+    # Schritt 2: Suffix-Check
+    suffix_counter = Counter(suffixes)
+    has_duplicate_suffix = any(count > 1 for count in suffix_counter.values() if suffixes)
+    if not has_duplicate_suffix:
+        logger.info("All genomeID and proteinID combination generate unique identifiers.")
+        return filtered_file
+
+    logger.warning("Duplicate proteinID found after first '___'. Attempting to fix by adding '___' prefix as new genomeID.")
+
+    # Korrektur: Prepende Prefix und '___' zu sseqid, dann Datei ersetzen
+    with open(temp_file, 'w', newline='') as outfile:
+        writer = csv.writer(outfile, delimiter='\t')
+        for row, prefix in zip(rows, prefixes):
+            row[0] = f"{prefix}___{row[0]}"
+            writer.writerow(row)
+    os.replace(temp_file, filtered_file)
+    logger.info(f"Sequence identifier entries fixed with genomeID prefix in {filtered_file}")
+    return filtered_file
+
 
     
 ################################################################################################        

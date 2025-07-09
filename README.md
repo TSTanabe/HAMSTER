@@ -31,20 +31,64 @@ python hamster.py --help-all
 
 ## Inputs
 
-- **FASTA files**: Directory containing genome assemblies (required)
-- **Query file**: FASTA file with protein or gene sequences of interest (required)
-- **GFF files**: (optional) for annotated features
-- **Results directory**: Resume or continue an analysis by providing an existing results folder
+- **FASTA files**: Directory containing genome assemblies with .fna suffix or .faa with corresponding .gff files (required)
+- **Query file**: FASTA file with protein sequences of interest usually encoded in a syntenic gene cluster (required)
+- **Results directory**: (optional) Output directory. If an existing results folder is provided resume the analysis
 
 ## Outputs
 
 All outputs are organized into a results directory, including:
-- Gene clusters and syntenic blocks
-- Protein sequences and alignments
-- Statistical and cross-validation reports
-- Plots and figures (PDF, requires R for some scripts)
-- Logs and pipeline configuration files
 
+### Output Folders
+
+- **results/** 
+  Main results directory (contains all project outputs)
+    - **Sequences/**
+      Protein sequences (FASTA) of assumed functional equivalent sequences from the analysis
+    - **Hidden_markov_models/** 
+      Generated profile Hidden Markov Models for each protein
+    - **Reports/** 
+      Generated detailed reports for each sequence set, including a list of all selected sequences with the genomic vicinity
+    - **Collinear_syntenic_blocks/** 
+      CSB (synteny block) files, cluster assignments, and instance summaries
+    - **Protein_Phylogeny/** 
+      Temporary files from the sequence sorting. May accelerate future runs
+    - **pkl_cache/** 
+      Cached files from the execution. May accelerate future runs
+    - **Hit_list/** 
+      Filtered BLAST hit tables for each genome/assembly
+    - **Initial_validation/** 
+      Reports from the HMM search against all hits
+    - **Cross_validation/** 
+      Cross-validation reports
+
+### Main output files (in results/)
+
+- **database.db** 
+  SQLite database storing all annotation, cluster, and synteny data
+- **filtered_blast_results_table** 
+  Filtered and merged BLAST hits across all genomes
+- **div_output_file.faa** 
+  Non-redundant representative protein sequences (FASTA)
+- **execution_logfile.txt** 
+  Detailed logfile for the last run
+
+### Key files in Collinear_syntenic_blocks/
+
+- **Csb_output.txt** 
+  Main collinear syntenic block patterns that were found
+- **All_gene_clusters.txt** 
+  All detected syntenic gene clusters across all genomes
+
+### Key files in Reports/
+
+- **grp[proteins]_enriched.txt** 
+  Main report for each sequence in the set, including genomic vicinity and assignment during initial validation
+- **all_cutoffs.txt** 
+  Optimized, trusted and noise cutoff for all generated HMMs
+- **all_performance.txt** 
+  Performance of all HMMs during classification of the underlying training data
+  
 ## Installation
 
 1. **Clone this repository:**
@@ -63,9 +107,19 @@ All outputs are organized into a results directory, including:
 ## Dependencies
 
 - **Python** 3.8 or higher
-- Python packages: `numpy`, `pandas`, `scikit-learn`, `sqlite3`, and others (see `requirements.txt`)
-- **R** (for plotting scripts)
-- External tools may be required for full functionality (e.g., [DIAMOND](https://github.com/bbuchfink/diamond), [Prodigal](https://github.com/hyattpd/Prodigal), [mmseqs2](https://github.com/soedinglab/MMseqs2)).
+- **Python packages**:
+  - `numpy`
+  - `pandas`
+  - `scikit-learn`
+  - `scipy`
+- **R** (for optional plotting scripts)
+- External tools may be required for full functionality 
+
+  - **DIAMOND** — for fast protein BLAST-like searches (https://github.com/bbuchfink/diamond)
+  - **Prodigal** — for gene prediction from prokaryotic genomes (https://github.com/hyattpd/Prodigal)
+  - **mmseqs2** — for fast and sensitive protein sequence searching and clustering (https://github.com/soedinglab/MMseqs2)
+  - **MAFFT** — for multiple sequence alignment (https://mafft.cbrc.jp/alignment/software/)
+  - **trimAl** — for automated alignment trimming (http://trimal.cgenomics.org/downloads)
 
 ## Command-line Arguments
 
@@ -78,31 +132,10 @@ python hamster.py --help
 python hamster.py --help-all
 ```
 
-## Documentation
-
-Detailed documentation, including parameter explanations and advanced usage, is available at:
-[https://github.com/TSTanabe/HAMSTER](https://github.com/TSTanabe/HAMSTER)
-
 ## Citation
 
 If you use HAMSTER in your research, please cite:
 
 > [Add your publication/preprint/citation here]
-
-## License
-
-[Specify your license, e.g., MIT, GPL-3.0, or custom license]
-
-## Contact
-
-For questions, bug reports, or feature requests, please use the [GitHub Issues](https://github.com/TSTanabe/HAMSTER/issues) page  
-or contact: [your.email@domain.com] (replace with your actual email)
-
----
-
-### Acknowledgments
-
-- Developed by [YOUR NAME/LAB/INSTITUTION]
-- Powered by open-source tools including Python, R, scikit-learn, pandas, and more.
 
 ---

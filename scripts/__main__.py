@@ -388,9 +388,12 @@ def fasta_preparation(options: Options) -> None:
         - Queues or deconcatenates files for search
         - Generates glob files if needed
     """
-     
+
+    # Create self query file. Selfblast of query files is needed for hitscore statistics and inclusion into results
+    Translation.create_selfquery_file(options)
+    
     if not options.glob_search:
-        logger.info("Queue individual protein fasta files to speed up diamond blastp")
+        logger.info("Queue individual protein fasta files")
         Queue.queue_files(options)
         return
     
@@ -416,8 +419,7 @@ def fasta_preparation(options: Options) -> None:
             Translation.create_glob_file(options)
             options.glob_flag = 1
             
-    # Create self query file. Selfblast of query files is needed for hitscore statistics and inclusion into results
-    Translation.create_selfquery_file(options)
+
     
     return
 
