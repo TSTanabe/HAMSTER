@@ -37,14 +37,27 @@ and report files that belong together share the same basename.
 
 - **results/** 
   Main results directory (contains all project outputs)
+  Subdirectories:
     - **Sequences/**
       Protein sequences (FASTA) of assumed functional equivalent sequences from the analysis
     - **Hidden_markov_models/** 
       Generated profile Hidden Markov Models for each protein with each selection rule and corresponding cutoffs
     - **Reports/** 
       Generated detailed reports for each sequence set, including a list of all selected sequences with the genomic vicinity
+      - **grp[proteins]_enriched.txt** 
+        Main report for each sequence in the set, including genomic vicinity and assignment during initial validation
+      - **all_cutoffs.txt** 
+        Optimized, trusted and noise cutoff for all generated HMMs
+      - **all_performance.txt** 
+        Performance of all HMMs during classification of the underlying training data
+
     - **Collinear_syntenic_blocks/** 
       CSB (synteny block) files, cluster assignments, and instance summaries
+      - **Csb_output.txt** 
+        Main collinear syntenic block patterns that were found
+      - **All_gene_clusters.txt** 
+        All detected syntenic gene clusters across all genomes
+
     - **Protein_Phylogeny/** 
       Temporary files from the sequence sorting. May accelerate future runs
     - **pkl_cache/** 
@@ -56,32 +69,6 @@ and report files that belong together share the same basename.
     - **Cross_validation/** 
       Cross-validation reports
 
-### Main output files (in results/)
-
-- **database.db** 
-  SQLite database storing all annotation, cluster, and synteny data
-- **filtered_blast_results_table** 
-  Filtered and merged BLAST hits across all genomes
-- **div_output_file.faa** 
-  Non-redundant representative protein sequences (FASTA)
-- **execution_logfile.txt** 
-  Detailed logfile for the last run
-
-### Key files in Collinear_syntenic_blocks/
-
-- **Csb_output.txt** 
-  Main collinear syntenic block patterns that were found
-- **All_gene_clusters.txt** 
-  All detected syntenic gene clusters across all genomes
-
-### Key files in Reports/
-
-- **grp[proteins]_enriched.txt** 
-  Main report for each sequence in the set, including genomic vicinity and assignment during initial validation
-- **all_cutoffs.txt** 
-  Optimized, trusted and noise cutoff for all generated HMMs
-- **all_performance.txt** 
-  Performance of all HMMs during classification of the underlying training data
   
 ## Installation
 HAMSTER is either available via the github directory or as a compiled binary file
