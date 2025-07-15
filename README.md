@@ -1,7 +1,7 @@
 # Generic draft
 # HAMSTER: Homolog and Synteny Mining Pipeline
 
-HAMSTER is a modular command-line pipeline for the high-throughput identification and analysis of homologous genes, gene clusters, and collinear syntenic blocks across multiple genome datasets. It provides automated, reproducible workflows for genome mining, synteny block detection, and protein sequence clustering with advanced visualization and reporting.
+HAMSTER is a modular command-line pipeline for the high-throughput identification of homologous genes with collinear syntenic blocks across multiple genome datasets. It provides an automated, reproducible workflow to sort sequences into functional equivalent groups based on genomic synteny block detection, presence propability and protein sequence clustering. It is also compatible with the globDB genome collection.
 
 ## Features
 
@@ -33,7 +33,7 @@ python hamster.py --help-all
 
 - **FASTA files**: Directory containing genome assemblies with .fna suffix or .faa with corresponding .gff files (required)
 - **Query file**: FASTA file with protein sequences of interest usually encoded in a syntenic gene cluster (required)
-- **Results directory**: (optional) Output directory. If an existing results folder is provided resume the analysis
+- **Results directory**: (optional) Output directory. If an existing results folder is provided resume the analysis.
 
 ## Outputs
 
@@ -46,15 +46,15 @@ All outputs are organized into a results directory, including:
     - **Sequences/**
       Protein sequences (FASTA) of assumed functional equivalent sequences from the analysis
     - **Hidden_markov_models/** 
-      Generated profile Hidden Markov Models for each protein
+      One profile hidden Markov Models per protein for each group
     - **Reports/** 
       Generated detailed reports for each sequence set, including a list of all selected sequences with the genomic vicinity
     - **Collinear_syntenic_blocks/** 
       CSB (synteny block) files, cluster assignments, and instance summaries
     - **Protein_Phylogeny/** 
-      Temporary files from the sequence sorting. May accelerate future runs
+      Temporary files from the sequence sorting. These are kept for resuming runs
     - **pkl_cache/** 
-      Cached files from the execution. May accelerate future runs
+      Cached files from the execution. These are kept for resuming runs
     - **Hit_list/** 
       Filtered BLAST hit tables for each genome/assembly
     - **Initial_validation/** 
