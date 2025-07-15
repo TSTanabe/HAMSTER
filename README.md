@@ -3,15 +3,6 @@
 
 HAMSTER is a modular command-line pipeline for the high-throughput identification of homologous genes with collinear syntenic blocks across multiple genome datasets. It provides an automated, reproducible workflow to sort sequences into functional equivalent groups based on genomic synteny block detection, presence propability and protein sequence clustering. It is also compatible with the globDB genome collection.
 
-## Features
-
-- Automated detection of homologs and synteny blocks across large numbers of genomes
-- Flexible protein clustering using MCL, PAM, and CSB approaches
-- Stepwise, checkpointed workflow—resume or start at any stage
-- Supports both simple and highly configurable command-line operation
-- Produces rich outputs: gene clusters, alignments, statistical reports, and PDF plots
-- Modular structure for extension and integration
-
 ## Quick Start
 
 **Typical usage for a new project:**
@@ -36,21 +27,37 @@ python hamster.py --help-all
 - **Results directory**: (optional) Output directory. If an existing results folder is provided resume the analysis.
 
 ## Outputs
-
-All outputs are organized into a results directory, including:
+For each new attempt to generate hidden Markov Models a new results folder is created that organizes the output files.
+An example output folder structure with the most important output files is given below. The HMMs are located in the Hidden markov models
+subdirectory and together with the cutoffs in the _ini_cutoffs.txt file. The training data for each HMM are located in the Sequences
+subdirectory and a detailed report on each sequence in each training dataset in the Reports folder. HMMs, training data fasta files
+and report files that belong together share the same basename.
 
 ### Output Folders
 
 - **results/** 
   Main results directory (contains all project outputs)
+  Subdirectories:
     - **Sequences/**
       Protein sequences (FASTA) of assumed functional equivalent sequences from the analysis
     - **Hidden_markov_models/** 
-      One profile hidden Markov Models per protein for each group
+      Generated profile Hidden Markov Models for each protein with each selection rule and corresponding cutoffs
     - **Reports/** 
       Generated detailed reports for each sequence set, including a list of all selected sequences with the genomic vicinity
+      - **grp[proteins]_enriched.txt** 
+        Main report for each sequence in the set, including genomic vicinity and assignment during initial validation
+      - **all_cutoffs.txt** 
+        Optimized, trusted and noise cutoff for all generated HMMs
+      - **all_performance.txt** 
+        Performance of all HMMs during classification of the underlying training data
+
     - **Collinear_syntenic_blocks/** 
       CSB (synteny block) files, cluster assignments, and instance summaries
+      - **Csb_output.txt** 
+        Main collinear syntenic block patterns that were found
+      - **All_gene_clusters.txt** 
+        All detected syntenic gene clusters across all genomes
+
     - **Protein_Phylogeny/** 
       Temporary files from the sequence sorting. These are kept for resuming runs
     - **pkl_cache/** 
@@ -62,50 +69,21 @@ All outputs are organized into a results directory, including:
     - **Cross_validation/** 
       Cross-validation reports
 
-### Main output files (in results/)
-
-- **database.db** 
-  SQLite database storing all annotation, cluster, and synteny data
-- **filtered_blast_results_table** 
-  Filtered and merged BLAST hits across all genomes
-- **div_output_file.faa** 
-  Non-redundant representative protein sequences (FASTA)
-- **execution_logfile.txt** 
-  Detailed logfile for the last run
-
-### Key files in Collinear_syntenic_blocks/
-
-- **Csb_output.txt** 
-  Main collinear syntenic block patterns that were found
-- **All_gene_clusters.txt** 
-  All detected syntenic gene clusters across all genomes
-
-### Key files in Reports/
-
-- **grp[proteins]_enriched.txt** 
-  Main report for each sequence in the set, including genomic vicinity and assignment during initial validation
-- **all_cutoffs.txt** 
-  Optimized, trusted and noise cutoff for all generated HMMs
-- **all_performance.txt** 
-  Performance of all HMMs during classification of the underlying training data
   
 ## Installation
+HAMSTER is either available via the github directory or as a compiled binary file
 
 1. **Clone this repository:**
     ```bash
     git clone https://github.com/TSTanabe/HAMSTER.git
     cd HAMSTER
+    python hamster.py -f ./genomes -q queries.faa
     ```
 
-2. **Install Python dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
+2. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
 
 ## Dependencies
-
+### Required libraries
 - **Python** 3.8 or higher
 - **Python packages**:
   - `numpy`
@@ -113,7 +91,8 @@ All outputs are organized into a results directory, including:
   - `scikit-learn`
   - `scipy`
 - **R** (for optional plotting scripts)
-- External tools may be required for full functionality 
+
+### Required external tools for functionality 
 
   - **DIAMOND** — for fast protein BLAST-like searches (https://github.com/bbuchfink/diamond)
   - **Prodigal** — for gene prediction from prokaryotic genomes (https://github.com/hyattpd/Prodigal)
