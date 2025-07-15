@@ -7,6 +7,7 @@ import random
 import logging
 from datetime import datetime
 from typing import Optional, Union, List, Dict, Set, Any
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,26 @@ def generate_color(seed_int: int) -> str:
     """Generates a consistent random color hex string from a seed integer."""
     random.seed(seed_int)
     return '#{:06x}'.format(random.randint(0, 0xFFFFFF))
+
+
+
+
+def compare_file_lists(directory: str, ext1: str, ext2: str) -> Set[str]:
+    """
+    Compares files in a directory: finds files with ext1 that do not have a corresponding file with ext2.
+    
+    Returns:
+        Set[str]: Set of filepaths (with ext1) that lack a matching file with ext2.
+    """
+    directory = Path(directory)
+    files1 = {f.stem: f for f in directory.glob(f'*{ext1}') if f.is_file()}
+    files2 = {f.stem: f for f in directory.glob(f'*{ext2}') if f.is_file()}
+    
+    # Set comprehension to collect missing file paths
+    missing = {str(files1[stem]) for stem in files1 if stem not in files2}
+    return missing
+
+
 
 def getAllFiles(directory: str, ending: Union[str, int] = 0) -> List[str]:
     """

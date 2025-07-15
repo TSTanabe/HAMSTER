@@ -30,10 +30,14 @@ def parallel_translation(directory: str, cores: int) -> None:
         If the filepaths include parentheses prodigal is not working
     """
     
-    zipFnaFiles = myUtil.compareFileLists(directory,".fna.gz",".faa.gz") 
-    FnaFiles = myUtil.compareFileLists(directory,".fna",".faa")
-    fastaFiles = myUtil.getAllFiles(directory,".fasta")
-    NucleotideFastaFiles = zipFnaFiles + FnaFiles + fastaFiles
+    # Check for the combinations of fasta files
+    zipped_fna_files = myUtil.compare_file_lists(directory,".fna.gz",".faa.gz")
+    unzip_fna_files = myUtil.compare_file_lists(directory, ".fna.gz", ".faa")
+    fna_files = zipped_fna_files - unzip_fna_files
+     
+    FnaFiles = myUtil.compare_file_lists(directory,".fna",".faa")
+    fastaFiles = set(myUtil.getAllFiles(directory,".fasta"))
+    NucleotideFastaFiles = FnaFiles | fna_files | fastaFiles
     logger.info(f"Found {len(NucleotideFastaFiles)} assemblies in nucleotide or ambiguous format for prodigal")
 
     
@@ -77,7 +81,7 @@ def translate_fasta(args: Tuple[str, int, multiprocessing.Value, multiprocessing
         
     with lock:
         counter.value += 1
-        print(f"[INFO] Processing assembly {counter.value} of {length}", end ='',flush=True)        
+        print(f"[INFO] Processing assembly {counter.value} of {length}", end ='\r',flush=True)        
     return
 
 
@@ -125,7 +129,7 @@ def parallel_transcription(directory: str, cores: int) -> None:
     logger.info(f"Found {len(gffFiles)} gff files")
     logger.info(f"Found {len(faaFiles)} faa files")   
         	
-    FaaFiles = myUtil.compareFileLists(directory,".faa",".gff")
+    FaaFiles = myUtil.compare_file_lists(directory,".faa",".gff")
     logger.info(f"Found {len(FaaFiles)} protein fasta files without gff")
       
     manager = multiprocessing.Manager()

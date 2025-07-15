@@ -860,16 +860,18 @@ def filter_blast_table(
 
 def fix_sseqid_prefix_suffix_uniqueness(filtered_file: str, options) -> str:
     """
-    Checks if sseqid prefix matches queued_genomes and suffixes are unique.
+    Checks if sseqid prefix matches queued_genomes and that (suffix, col2) pairs are unique.
     If not, prepends the prefix and replaces the file in place.
     """
-    
     logger.info("Validating genomeIDs and proteinIDs in the filtered blast result table")
     
+    from collections import Counter, defaultdict
+
     temp_file = filtered_file + ".tmp"
     rows = []
     prefixes = []
     suffixes = []
+    col2_vals = []
     queued_genomes = options.queued_genomes  # set of genomeIDs
 
     with open(filtered_file, 'r') as infile:
@@ -885,6 +887,7 @@ def fix_sseqid_prefix_suffix_uniqueness(filtered_file: str, options) -> str:
                 suffix = ''
             prefixes.append(prefix)
             suffixes.append(suffix)
+            col2_vals.append(row[1] if len(row) > 1 else '')
             rows.append(row)
 
     # Schritt 1: Prefix-Check
@@ -893,14 +896,17 @@ def fix_sseqid_prefix_suffix_uniqueness(filtered_file: str, options) -> str:
         logger.error("No prefix in any sseqid matches a genomeID in the provided fasta files")
         raise ValueError("No prefix in sseqid matches a genomeID in queued_genomes")
     
-    # Schritt 2: Suffix-Check
-    suffix_counter = Counter(suffixes)
-    has_duplicate_suffix = any(count > 1 for count in suffix_counter.values() if suffixes)
-    if not has_duplicate_suffix:
-        logger.info("All genomeID and proteinID combination generate unique identifiers.")
+    # Schritt 2: Suffix/Col2-Pair-Check
+    pair_counter = Counter(zip(suffixes, col2_vals))
+    duplicated_pairs = [pair for pair, count in pair_counter.items() if count > 1 and pair[0]]
+    if duplicated_pairs:
+        logger.warning(f"Duplicated proteinID/query pairs found: {duplicated_pairs}")
+
+    has_duplicate_pair = bool(duplicated_pairs)
+    if not has_duplicate_pair:
+        logger.info("All genomeID, proteinID and query combination generate unique identifiers.")
         return filtered_file
 
-    logger.warning("Duplicate proteinID found after first '___'. Attempting to fix by adding '___' prefix as new genomeID.")
 
     # Korrektur: Prepende Prefix und '___' zu sseqid, dann Datei ersetzen
     with open(temp_file, 'w', newline='') as outfile:
