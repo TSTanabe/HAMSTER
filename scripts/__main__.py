@@ -212,7 +212,7 @@ def parse_arguments(arguments: list):
             help="Maximum nucleotide distance between syntenic genes in a cluster." if show_advanced else argparse.SUPPRESS
         )
         genecluster.add_argument(
-            '-p', dest='patterns_file', metavar='<filepath>', default=None,
+            '-p', dest='patterns_file', metavar='<filepath>', default=__location__+'/src/Patterns',
             help="Tab-separated file with predefined syntenic gene cluster patterns." if show_advanced else argparse.SUPPRESS
         )
 
@@ -918,6 +918,7 @@ def main(args: list = None) -> None:
     Project.prepare_directory_structure(__location__)
     myUtil.print_header("\n 1. Preparing space for the results")
     Project.prepare_result_space(options)
+    os.system(f"mv {log_file} {options.result_files_directory}")
     log_file = os.path.join(options.result_files_directory, "execution_logfile.txt")    
     myUtil.setup_logging(getattr(options, 'verbose', 0), log_file)    
 #2    

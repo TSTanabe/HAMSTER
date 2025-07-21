@@ -105,7 +105,7 @@ def csb_proteins_datasets(options: Any, sglr_dict: Dict) -> Dict[Tuple[str, str]
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
 
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
-    
+
     myUtil.save_cache(options, "csb_protein_dataset.pkl", dictionary)
     
     # Remove domains that are excluded by user options
@@ -336,7 +336,8 @@ def process_keyword_domains(args: Tuple[str, str, List[str], int]) -> Dict[Tuple
     database, keyword, domains, min_seqs = args
     result = {}
     chunk_size = 900  # Sicher unter dem SQLite-Limit von 999 bleiben
-
+    logger.debug(f"Selecting proteinIDs for {keyword} {domains}")
+    
     with sqlite3.connect(database, timeout=120.0) as con:
         cur = con.cursor()
         
