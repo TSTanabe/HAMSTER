@@ -242,9 +242,13 @@ def parse_arguments(arguments: list):
             help="Maximum Jaccard dissimilarity allowed for csb clustering." if show_advanced else argparse.SUPPRESS
         )
         csb.add_argument(
-            '-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float, default=0.7, metavar='<float>',
+            '-exclude_csb_score', dest='low_hitscore_csb_cutoff', type=float, default=0.8, metavar='<float>',
             help="Exclude csb with all hits below this BLAST score ratio." if show_advanced else argparse.SUPPRESS
         )
+        csb.add_argument(
+            '-exclude_csb_protein', dest='exclude_csb_proteins', nargs='+', default=[], metavar='<list>',
+            help="Suppress csb with hits for these proteins." if show_advanced else argparse.SUPPRESS
+        ) #does not remove user defined patterns with these proteins!
 
         pam_search = parser.add_argument_group("Presence/absence matrix (pam) parameters (advanced)")
         pam_search.add_argument(

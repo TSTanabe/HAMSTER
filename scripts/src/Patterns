@@ -32,6 +32,7 @@ oxApr	oxAprA	oxAprB
 Dox	DoxD	DoxA	Tth
 Dox2	DoxD	DoxA
 Tus	TusB	TusC	TusD
+Shy	ShyA	ShyB	ShyC	ShyD
 redDsr1	redDsrA	redDsrB	redDsrD	redDsrN
 redDsr2	redDsrA	redDsrB	redDsrD
 redDsr3	redDsrA	redDsrB	redDsrN
@@ -52,3 +53,34 @@ Hmc	HmcA	HmcB	HmcC	HmcD	HmcE	HmcF
 Tmc	TmcA	TmcB	TmcC	TmcD
 DTR	DsrE2	TusA	Rhd
 Rpo	RpoB	RpoC
+HpsGH1	HpsG	HpsH
+HpsGH2	DhpA	HpsG	HpsH
+HpsGH3	DhpA	HpsG	HpsH	HpsL	Sladh	SqoL	SqoM
+HpsGH9	HpfD	HpsG	HpsH	SqoL	SqoM
+HpfGH11	HpfG	HpfH	HpfD
+DhpsDeg1	HpfD	HpfG	HpfH	HpfX	SqwD
+DhpsDeg2	HpfD	HpfH	HpfX	HpfX	HpsG
+DhpsDeg3	HpfD	HpfH	HpfX	HpsG
+DhpsDeg4	HpfD	HpfH	HpfX	HpsG	SqwD
+DhpsDeg5	HpfD	HpfX	HpfX	HpsG	HpsH
+DhpsDeg6	HpfX	HpfY	HpfZ
+Isl1	IslA	IslB
+SulfoEMP1		YihQ	YihO	YihS	YihV	YihT	YhiU	YihP
+SulfoEMP2		SqgA	YihO	YihS	YihV	YihT	YhiU	YihP
+SulfoTk1	YihQ	SqwG	SqwH	SqwI	SqwF	SftI
+SulfoTk2	SqgA	SqwG	SqwH	SqwI	SqwF	SftI
+SulfoAsmo1	YihQ	SmoA	SmoB	SmoC	SmoD
+SulfoAsmo2	SqgA	SmoA	SmoB	SmoC	SmoD
+SulfoAsdo1	YihQ	SqoD	SmoB
+SulfoAsdo2	SqgA	SqoD	SmoB
+SulfoAsdo	YihQ	SqoD
+SulfoAdso4	SqgA	SqoD
+SulfoED1	YihQ	Sqdh	Sqald	Sgdh	Sql
+SulfoED2	SqgA	Sqdh	Sqald	Sgdh	Sql
+SulfoSft1		YihQ	SftI	SftT	SftA
+SulfoSft2		SqgA	SftI	SftT	SftA
+Bmc	BmcsA	BmcsB	BmcsC
+Slc	SlcC	SlcH	SlcF	SlcG	SlcD
+Ssu	SsuA	SsuB	SsuC	SsuD	SsuE
+Suy	SuyA	SuyB
+Sau	SauS	SauT	SauU

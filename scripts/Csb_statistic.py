@@ -63,9 +63,14 @@ def group_gene_cluster_statistic(options: Any) -> Tuple[Dict, Dict, Dict, Dict]:
             stats_dict,
             query_score_dict,
             options.low_hitscore_csb_cutoff,
-            min(10, options.min_seqs)
+            min(10, options.min_seqs),
+            options.csb_name_prefix
         )
         
+        # Step 4: Remove csb clusters with these proteins from the csb statistics
+        logger.info(f"Filtering out CSBs where a hit is on the exclusion list {options.exclude_csb_proteins}")
+        filtered_stats_dict = filter_out_csb_with_protein_types(filtered_stats_dict, options.exclude_csb_proteins, options.csb_name_prefix)
+
         myUtil.save_cache(options, "stat_filtered_stats.pkl", filtered_stats_dict)
     
     # Step 4: Save hit scores for later use
@@ -95,6 +100,7 @@ def group_gene_cluster_statistic(options: Any) -> Tuple[Dict, Dict, Dict, Dict]:
         domain_score_limits = compute_score_limits(filtered_stats_dict, grouped_keywords)
         myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
 
+    # from step 7, 4, 5 and 6
     return domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
 
 
@@ -331,7 +337,8 @@ def filter_out_low_quality_csb(
     stats_dict: Dict[str, Dict[str, Dict[str, float]]],
     query_score_dict: Dict[str, float],
     threshold: float = 0.2,
-    min_occurrences: int = 10
+    min_occurrences: int = 10,
+    csb_name_prefix: str = "csb-"
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
     Filters out CSBs where all domains have a median score less than the given threshold of the query reference.
@@ -365,12 +372,41 @@ def filter_out_low_quality_csb(
                     csb_should_be_removed = False
                     break  # No need to check other domains for this CSB
 
-        if not csb_should_be_removed:
+        if not (csb_should_be_removed and keyword.startswith(csb_name_prefix)):
             filtered_csb[keyword] = domain_dict  # Keep CSB if at least one domain passed
 
     return filtered_csb
 
 
+def filter_out_csb_with_protein_types(stats_dict, exclude_types: list, csb_name_prefix: str) -> dict:
+    """
+    Removes all CSBs (keywords) from stats_dict that contain any domain listed in exclude_types.
+
+    Args:
+        stats_dict (dict): {keyword: {domain: {...}}}
+        exclude_types (list): List of domains/types to exclude.
+
+    Returns:
+        dict: Filtered stats_dict.
+    """
+    filtered = {}
+    exclude_set = set(exclude_types)
+    for csb_keyword, domain_dict in stats_dict.items():
+        domains_in_csb = set(domain_dict.keys())
+        intersection = domains_in_csb & exclude_set
+        
+        # intersection means excluded proteins were found
+        if intersection and csb_keyword.startswith(csb_name_prefix):
+            logger.debug(f"Removed csb {csb_keyword} due a hit for {intersection}")
+        elif intersection and not csb_keyword.startswith(csb_name_prefix):
+            logger.debug(f"Kept pattern file defined csb {csb_keyword} with hit for {intersection}")
+            filtered[csb_keyword] = domain_dict
+        else:
+            filtered[csb_keyword] = domain_dict
+            
+    return filtered
+    
+    
 def group_keywords_by_domain_extended(
     stats_dict: Dict[str, Dict[str, Dict[str, float]]],
     query_score_dict: Dict[str, float],

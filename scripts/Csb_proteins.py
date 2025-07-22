@@ -49,7 +49,7 @@ def prepare_csb_grouped_training_proteins(options: Any) -> Tuple[Dict[str, Dict[
     grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
     
     logger.info("Collecting sequences for training datasets with similar csb")
-    csb_proteins_dict = csb_proteins_datasets(options, clustered_excluded_keywords_dict)
+    csb_proteins_dict = csb_proteins_datasets(options, grouped_keywords_dict)
 
     logger.info("Processing highly similar homologs with specific genomic context")
 
@@ -65,24 +65,19 @@ def prepare_csb_grouped_training_proteins(options: Any) -> Tuple[Dict[str, Dict[
     
     
     
-def csb_proteins_datasets(options: Any, sglr_dict: Dict) -> Dict[Tuple[str, str], Set[str]]:
+def csb_proteins_datasets(options: Any, grouped_keywords_dict: Dict) -> Dict[Tuple[str, str], Set[str]]:
     """
     Fetches all proteinIDs for every (keyword, domain) from the csb clusters.
+    First get all csb from the CSB output file
 
     Args:
         options (Namespace): Configuration.
-        sglr_dict (dict): CSB-to-domain mappings.
+        grouped_keywords_dict (dict): dict: { domain: [[grouped_keywords]] }
 
     Returns:
         dict: {(keyword, domain): set(proteinIDs)}. Example: {("ClusterA", "ABC_trans"): {"prot1", "prot2"}}
     """
-      
-    # Get the domain types as set per csb and predefined pattern
-    csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) # dictionary with cbs_name => csb items
-    pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
-    csb_dictionary = {**csb_dictionary, **pattern_dictionary}
-    options.csb_dictionary = csb_dictionary # save the patterns for later use
-
+ 
     # Load existing data
     dictionary = myUtil.load_cache(options, "csb_protein_dataset.pkl")
     
@@ -90,27 +85,39 @@ def csb_proteins_datasets(options: Any, sglr_dict: Dict) -> Dict[Tuple[str, str]
         logger.debug("Loaded existing reference protein sequence dataset from cache: csb_protein_dataset.pkl")
         dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
         dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
-        return dictionary    
+        return dictionary  
+        
+    ## If not precomputed then compute the csb to select and fetch die proteinIDs from the dataset         
+    # 1. Get the domain types as set by the selection statistic module for the csb finder algorithm
+    csb_dictionary = parse_csb_file_to_dict(options.csb_output_file) # dictionary with cbs_name => csb items
+
+    # Determine the csb that shall be kept.
+    csbs_to_keep = set()
+    for domain, group_lists in grouped_keywords_dict.items():
+        for group in group_lists:
+            csbs_to_keep.update(group)
+
+    # Now, filter the dictionary to keep only the wanted CSBs
+    csb_dictionary = {csb: val for csb, val in csb_dictionary.items() if csb in csbs_to_keep}
+
+    
+    # 2. add the static csb from the pattern file
+    pattern_dictionary = parse_csb_file_to_dict(options.patterns_file)  # Fetch the ones that are in the pattern file
+    csb_dictionary = {**csb_dictionary, **pattern_dictionary}
+    options.csb_dictionary = csb_dictionary # save the patterns for later use
 
     #Fetch for each csb id all the domains in the csb that are query domains
     #dictionary is: dict[(keyword, domain)] => set(proteinIDs)
-    
-    csbs_to_remove = {csb for csb_list in sglr_dict.values() for sublist in csb_list for csb in sublist}
-    csb_dictionary = {csb: domains for csb, domains in csb_dictionary.items() if csb not in csbs_to_remove}
-    
     myUtil.save_cache(options, "csb_selected_csb_to_domain_dataset.pkl", csb_dictionary)
 
     logger.info("Fetching the protein sequence identifiers from local database")
-
     dictionary = fetch_proteinIDs_dict_multiprocessing(options.database_directory,csb_dictionary,options.min_seqs,options.cores)
-
     dictionary = remove_non_query_clusters(options.database_directory, dictionary) #delete all that are not in accordance with query
 
     myUtil.save_cache(options, "csb_protein_dataset.pkl", dictionary)
     
     # Remove domains that are excluded by user options
     dictionary = filter_dictionary_by_inclusion_domains(dictionary, options.include_list)
-    
     dictionary = filter_dictionary_by_excluding_domains(dictionary, options.exclude_list)
 
     return dictionary
