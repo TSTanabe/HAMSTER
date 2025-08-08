@@ -46,7 +46,7 @@ def prepare_csb_grouped_training_proteins(options: Any) -> Tuple[Dict[str, Dict[
         return grp_score_limit_dict, grouped
         
     # Step 2: Compute score limits and keyword clusters
-    grp_score_limit_dict, _, grouped_keywords_dict, clustered_excluded_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
+    grp_score_limit_dict, _, grouped_keywords_dict = Csb_statistic.group_gene_cluster_statistic(options)
     
     logger.info("Collecting sequences for training datasets with similar csb")
     csb_proteins_dict = csb_proteins_datasets(options, grouped_keywords_dict)
