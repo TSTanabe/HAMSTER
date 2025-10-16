@@ -630,7 +630,7 @@ def group_keywords_by_domain_passers(
         return {}
 
     # Precompute: domain-spezifische Schwellen (z. B. 70% des Query-Scores bei acceptable_deviation=0.30)
-    thresholds = {d: s * (1 - acceptable_deviation) for d, s in query_score_dict.items()}
+    thresholds = {d: s * acceptable_deviation for d, s in query_score_dict.items()}
     if not thresholds:
         return {}
 
