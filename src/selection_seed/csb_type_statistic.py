@@ -26,6 +26,7 @@ def group_gene_cluster_statistic(options: Any):
         (2) apply_cluster_selection()
     """
     filtered_stats_dict, query_score_dict = compute_cluster_stats(options)
+
     domain_score_limits, grouped_keywords = apply_cluster_selection(
         options, filtered_stats_dict, query_score_dict
     )
@@ -64,6 +65,7 @@ def compute_cluster_stats(options: Any) -> Tuple[Dict, Dict]:
         logger.info(
             f"Filtering out CSBs where all hits are below exclude_csb_hitscore {options.low_hitscore_csb_cutoff}"
         )
+
         filtered_stats_dict = filter_out_low_quality_csb(
             stats_dict,
             query_score_dict,
@@ -84,7 +86,7 @@ def compute_cluster_stats(options: Any) -> Tuple[Dict, Dict]:
             )
 
         logger.info(
-            f"Filtering out CSBs where a hit is on the exclusion list {options.exclude_csb_proteins}"
+            f"Filtering hits and csb on the exclusion list {options.exclude_csb_proteins}"
         )
         filtered_stats_dict = filter_out_csb_with_protein_types(
             filtered_stats_dict, options.exclude_csb_proteins, options.csb_name_prefix
@@ -190,6 +192,11 @@ def apply_cluster_selection(
         grouped_keywords = group_keywords_by_domain_passers(
             filtered_stats_dict, query_score_dict, options.low_hitscore_csb_cutoff
         )
+
+        if not grouped_keywords:
+            logger.warning(
+                f"No gene cluster encoded hits with at a bitscore of at least {options.low_hitscore_csb_cutoff} of the query. Consider reducing the threshold with the -exclude_csb_score option."
+            )
         # The following routine includes all domains from a csb were a single domain passes
         # grouped_keywords = group_keywords_by_domain_extended(
         #    filtered_stats_dict,
@@ -674,6 +681,9 @@ def group_keywords_by_domain_passers(
                 continue
             if val >= thr:
                 eligible_domains.append(domain)
+                logger.debug(
+                    f"For gene cluster pattern {gene_cluster} added {domain}: {val} >= {thr}"
+                )
 
         # Trage das Keyword NUR bei den passierenden Domains ein
         if not eligible_domains:

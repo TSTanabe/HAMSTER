@@ -268,7 +268,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "-min_csb_size",
         dest="min_csb_size",
         type=int,
-        default=4,
+        default=3,
         metavar="<int>",
         help=maybe("Minimum number of genes in a csb."),
     )
@@ -369,7 +369,9 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=auto_float,
         default="auto",
         metavar="<float>",
-        help=maybe("Required fraction of all reference sequences found in a cluster (0.0-1.0)."),
+        help=maybe(
+            "Required fraction of all reference sequences found in a cluster (0.0-1.0)."
+        ),
     )
 
     alignment = parser.add_argument_group("Alignment parameters (advanced)")
@@ -377,7 +379,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "-min_seqs",
         dest="min_seqs",
         type=int,
-        default=5,
+        default=3,
         metavar="<int>",
         help=maybe("Minimum number of sequences required for alignment."),
     )

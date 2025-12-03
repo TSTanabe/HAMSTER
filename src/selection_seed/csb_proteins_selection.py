@@ -2,6 +2,7 @@
 import sqlite3
 import os
 import multiprocessing
+import sys
 import time
 import threading
 from multiprocessing import Pool
@@ -52,7 +53,7 @@ def prepare_csb_grouped_training_proteins(
         csb_type_statistic.group_gene_cluster_statistic(options)
     )
 
-    logger.info("Collecting sequences for training datasets with similar csb")
+    logger.info(f"Collecting sequences for training datasets with similar csb for {len(grouped_keywords_dict)} proteins")
     csb_proteins_dict: dict[tuple[str, str], set[str]] = csb_proteins_datasets(
         options, grouped_keywords_dict
     )

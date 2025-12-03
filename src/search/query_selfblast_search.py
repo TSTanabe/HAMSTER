@@ -216,12 +216,12 @@ def self_blast_query(options: Any) -> tuple[Dict[str, float], Dict[str, float]]:
     protein_dict = parse_reports.parse_bulk_blastreport_consecutive(
         genome_id="QUERY", filepath=report
     )
-    print(protein_dict)
+
     parse_reports.get_protein_sequence(query_fasta, protein_dict)
     protein_dict = parse_reports.clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
     database.insert_database_genome_ids(
         options.database_directory, genome_ids={"QUERY"}
     )
-    print(protein_dict)
+
     database.insert_database_proteins(options.database_directory, protein_dict)
     return selfblast_scores_dict, query_length_dict

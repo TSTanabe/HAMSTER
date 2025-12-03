@@ -5,7 +5,6 @@ from src.db import database
 from src.core import myUtil
 from src.selection_seed import (
     csb_proteins_selection,
-    singleton_finder,
     singleton_finder2,
 )
 from src.core.logging import get_logger
@@ -57,8 +56,12 @@ def basis_sequence_fasta(options) -> None:
     )
 
     # Merge groups and limits from csb and sng
-    merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
-    merged_grouped = {**grouped, **sng_ref_seqs_dict}
+    if grouped or sng_ref_seqs_dict:
+        merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
+        merged_grouped = {**grouped, **sng_ref_seqs_dict}
+    else:
+        logger.error("There were no proteins selected for basic training. Consider increasing the input data or lowering selection thresholds - stopping execution")
+        sys.exit()
 
     # Print the grp0 csb and singletons to fasta
     csb_proteins_selection.fetch_training_data_to_fasta(options, merged_grouped, "grp0")

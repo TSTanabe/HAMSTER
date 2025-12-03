@@ -233,7 +233,7 @@ def select_singleton_refs_by_domain_pattern(
 def singleton_reference_finder(
     options: Any,
 ) -> (
-    tuple[object | None, object | None]
+    tuple[object , object]
     | tuple[dict[str, dict[str, float]], dict[str, set[str]]]
 ):
     """
@@ -259,13 +259,13 @@ def singleton_reference_finder(
         identity_cutoff=high_identity_cutoff,
     )
 
-    logger.info(f"Found {len(context_free_domains_dict)} context-free domains in ")
+    logger.info(f"Found {len(context_free_domains_dict)} context-free hits with {high_identity_cutoff} percent identity")
 
     if not context_free_domains_dict:
         logger.warning(
-            "No context-free high-identity hits found – aborting singleton selection."
+            "No context-free high-identity hits found – stopping singleton selection."
         )
-        return None, None
+        return {}, {}
 
     # 2) For these genomes, fetch all hits with identity >= pattern_identity_cutoff
     domain_presence_intersection_pattern = _fetch_high_identity_domain_intersection(
@@ -276,9 +276,9 @@ def singleton_reference_finder(
 
     if not domain_presence_intersection_pattern:
         logger.warning(
-            "No presence/absence pattern detected – aborting singleton selection."
+            f"No presence/absence pattern detected for hits with {high_identity_cutoff} percent identity – stopping singleton selection."
         )
-        return None, None
+        return {}, {}
 
     # 3) Select co-occurrence-based singleton candidates
     domain_score_limits, singleton_reference_seqs_dict = (
