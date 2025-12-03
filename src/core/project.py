@@ -82,7 +82,7 @@ def prepare_result_space(options, project: str = "project") -> None:
         # Make a new project in default directory
         if not os.path.isdir(default_dir):
             try:
-                os.mkdir(default_dir, exist_ok=True)
+                os.makedirs(default_dir, exist_ok=True)
                 logger.info(f"Created results directory: {default_dir}")
             except Exception as e:
                 logger.error(f"No writing rights in default results directory. {e}")
@@ -95,7 +95,7 @@ def prepare_result_space(options, project: str = "project") -> None:
     elif fasta_and_query_provided:
         if os.path.isdir(options.result_files_directory):
             try:
-                os.mkdir(options.result_files_directory, exist_ok=True)
+                os.makedirs(options.result_files_directory, exist_ok=True)
                 logger.info(
                     f"Created results directory: {options.result_files_directory}"
                 )
