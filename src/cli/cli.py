@@ -112,38 +112,38 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Path to existing HAMSTER SQLite database."),
     )
     resources.add_argument(
-        "-cv_off",
-        dest="cross_validation_deactivated",
+        "--activate-cross-validation",
+        dest="cross_validation_activated",
         action="store_true",
         help=maybe(
-            "Disable cross-validation (recommended for faster validation only)."
+            "Activate cross-validation"
         ),
     )
 
     resources2 = parser.add_argument_group("GlobDB file parameters (advanced)")
     resources2.add_argument(
-        "-glob_faa",
+        "--glob-faa",
         dest="glob_faa",
         metavar="<filepath>",
         default=None,
         help=maybe("Concatenated FASTA file with all input assemblies for speedup."),
     )
     resources2.add_argument(
-        "-glob_gff",
-        dest="glob_gff",
+        "--glob-gff",
+        dest="--glob-gff",
         metavar="<filepath>",
         default=None,
         help=maybe("Concatenated GFF annotation file for all assemblies."),
     )
     resources2.add_argument(
-        "-glob_blast_table",
+        "--glob-blast-table",
         dest="glob_table",
         metavar="<filepath>",
         default=None,
         help=maybe("Precomputed multi-assembly BLAST tabular result file."),
     )
     resources2.add_argument(
-        "-glob_chunks",
+        "--glob-chunks",
         dest="glob_chunks",
         type=int,
         default=3000,
@@ -151,7 +151,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Chunk size for batch parsing of large files."),
     )
     resources2.add_argument(
-        "-glob_off",
+        "-glob-off",
         dest="glob_search",
         action="store_false",
         help=maybe(
@@ -161,7 +161,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
 
     search = parser.add_argument_group("DIAMOND blastp search parameters (advanced)")
     search.add_argument(
-        "-evalue",
+        "--evalue",
         dest="evalue",
         type=float,
         default=1e-5,
@@ -169,7 +169,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Maximum allowed E-value for BLASTp matches."),
     )
     search.add_argument(
-        "-thrs_score",
+        "--thrs-score",
         dest="thrs_score",
         type=int,
         default=100,
@@ -177,15 +177,15 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum required BLASTp alignment score."),
     )
     search.add_argument(
-        "-min_seq_id",
+        "--min-seq-id",
         dest="minseqid",
         type=float,
         default=25,
         metavar="<float>",
-        help=maybe("Minimum percentage sequence identity [%%] for BLASTp results."),
+        help=maybe("Minimum percentage sequence identity [%%] for initial BLASTp results."),
     )
     search.add_argument(
-        "-search_coverage",
+        "--search-coverage",
         dest="searchcoverage",
         type=float,
         default=0.6,
@@ -193,7 +193,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum fraction of query/target aligned (0.0–1.0)."),
     )
     search.add_argument(
-        "-alignment_mode",
+        "--alignment-mode",
         dest="alignment_mode",
         type=int,
         default=2,
@@ -202,7 +202,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("DIAMOND BLASTp alignment mode."),
     )
     search.add_argument(
-        "-blast_score_ratio",
+        "--blast-score-ratio",
         dest="thrs_bsr",
         type=float,
         default=0.0,
@@ -210,13 +210,13 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum BLAST score ratio threshold for hit inclusion."),
     )
     search.add_argument(
-        "-allow_multidomain",
+        "--allow-multidomain",
         dest="multidomain_allowed",
         action="store_true",
         help=maybe("Permit hits to multiple query domains per sequence."),
     )
     search.add_argument(
-        "-reports_hit",
+        "--reports-hit",
         dest="diamond_report_hits_limit",
         type=int,
         default=0,
@@ -228,7 +228,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Gene cluster prediction parameters (advanced)"
     )
     genecluster.add_argument(
-        "-distance",
+        "--distance",
         dest="nucleotide_range",
         type=int,
         default=3500,
@@ -249,7 +249,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Collinear syntenic block (csb) parameters (advanced)"
     )
     csb.add_argument(
-        "-insertions",
+        "--insertions",
         dest="insertions",
         type=int,
         default=2,
@@ -257,7 +257,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Maximum insertions allowed between genes in a csb."),
     )
     csb.add_argument(
-        "-occurence",
+        "--occurence",
         dest="occurence",
         type=int,
         default=1,
@@ -265,7 +265,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum number of csb occurrences to be recognized."),
     )
     csb.add_argument(
-        "-min_csb_size",
+        "--min-csb-size",
         dest="min_csb_size",
         type=int,
         default=3,
@@ -273,7 +273,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum number of genes in a csb."),
     )
     csb.add_argument(
-        "-max_csb_size",
+        "--max-csb-size",
         dest="max_csb_size",
         type=int,
         default=40,
@@ -281,7 +281,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Maximum number of genes in a csb."),
     )
     csb.add_argument(
-        "-max_gene_repeats",
+        "--max-gene-repeats",
         dest="max_domain_repeats",
         type=int,
         default=2,
@@ -289,7 +289,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Maximum number of repeated genes in a csb."),
     )
     csb.add_argument(
-        "-jaccard",
+        "--jaccard",
         dest="jaccard",
         type=float,
         default=0.0,
@@ -301,7 +301,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Base training data csb and protein selection parameters (advanced)"
     )
     csb_selection.add_argument(
-        "-exclude_csb_score",
+        "--exclude-csb-score",
         dest="low_hitscore_csb_cutoff",
         type=float,
         default=0.8,
@@ -309,7 +309,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Exclude csb with all hits below this BLAST score ratio."),
     )
     csb_selection.add_argument(
-        "-exclude_csb_protein",
+        "-exclude-csb-protein",
         dest="exclude_csb_proteins",
         nargs="+",
         default=[],
@@ -317,7 +317,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Suppress csb with hits for these proteins."),
     )
     csb_selection.add_argument(
-        "-redo_base_selection",
+        "--redo-base-selection",
         dest="redo_base_selection",
         action="store_true",
         default=False,
@@ -328,7 +328,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Presence/absence matrix (pam) parameters (advanced)"
     )
     pam_search.add_argument(
-        "-mx_thrs",
+        "--mx-thrs",
         dest="pam_threshold",
         type=float,
         default=0.3,
@@ -336,7 +336,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Significance threshold for presence/absence matrix co-occurrence."),
     )
     pam_search.add_argument(
-        "-mx_bsr",
+        "--mx-bsr",
         dest="pam_bsr_threshold",
         type=float,
         default=0.6,
@@ -348,7 +348,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Protein sequence clustering parameters (advanced)"
     )
     mcl_search.add_argument(
-        "-mcl_min_seq_id",
+        "--mcl-min-seq-id",
         dest="mcl_min_seq_id",
         type=float,
         default=0.4,
@@ -356,7 +356,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimal sequence identity for clustering (0.0–1.0)."),
     )
     mcl_search.add_argument(
-        "-mcl_density_thrs",
+        "--mcl-density-thrs",
         dest="mcl_density_thrs",
         type=auto_float,
         default="auto",
@@ -364,7 +364,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Required fraction of reference sequences in a cluster (0.0-1.0)."),
     )
     mcl_search.add_argument(
-        "-mcl_reference_thrs",
+        "--mcl-reference-thrs",
         dest="mcl_reference_thrs",
         type=auto_float,
         default="auto",
@@ -376,7 +376,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
 
     alignment = parser.add_argument_group("Alignment parameters (advanced)")
     alignment.add_argument(
-        "-min_seqs",
+        "--min-seqs",
         dest="min_seqs",
         type=int,
         default=3,
@@ -384,7 +384,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Minimum number of sequences required for alignment."),
     )
     alignment.add_argument(
-        "-max_seqs",
+        "--max-seqs",
         dest="max_seqs",
         type=int,
         default=100000,
@@ -392,7 +392,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Maximum number of sequences to align."),
     )
     alignment.add_argument(
-        "-gap_col_remove",
+        "--gap-col-remove",
         dest="gap_remove_threshold",
         type=float,
         default=0.05,
@@ -402,7 +402,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         ),
     )
     alignment.add_argument(
-        "-include_domains",
+        "--include-domains",
         dest="include_list",
         nargs="+",
         default=[],
@@ -410,7 +410,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         help=maybe("Domains to specifically include (space-separated)."),
     )
     alignment.add_argument(
-        "-exclude_domains",
+        "--exclude-domains",
         dest="exclude_list",
         nargs="+",
         default=[],

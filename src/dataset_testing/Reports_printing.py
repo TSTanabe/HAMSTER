@@ -4,6 +4,7 @@
 import os
 import csv
 import glob
+import shutil
 from typing import Dict, List, Any, Optional
 
 import pandas as pd
@@ -51,12 +52,14 @@ def process_initial_validations(
     )
 
     # Save the performance and cutoffs in the report directory
-    save_cutoffs_table(
+    cutoff_file = save_cutoffs_table(
         cutoff_collection["cutoffs"], output_dir, filename="all_cutoffs.txt"
     )
-    save_performance_table(
+    performance_file = save_performance_table(
         cutoff_collection["performance"], output_dir, filename="all_performance.txt"
     )
+    shutil.copy2(cutoff_file, options.Hidden_markov_model_directory)
+    shutil.copy2(performance_file, options.Hidden_markov_model_directory)
 
     write_pkl_tsv_reports(options, db_path, cutoff_collection, output_dir, pkl_files)
 
@@ -725,6 +728,7 @@ def save_cutoffs_table(
             )
 
     logger.info(f"Saved HMM score cutoffs table to {out_path}")
+    return out_path
 
 
 def save_performance_table(
@@ -773,3 +777,4 @@ def save_performance_table(
             )
 
     logger.info(f"Saved HMM validation performance table to {out_path}")
+    return out_path

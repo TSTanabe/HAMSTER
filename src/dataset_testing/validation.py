@@ -54,7 +54,7 @@ def initial_self_recognition_validation(options: Any) -> None:
     # Initial validation of full HMMs and assigning cutoffs
     with Pool(processes=options.cores) as pool:
         results = pool.starmap(initial_training_data_performance, args_list)
-
+    return
     results_sorted = sorted(
         [res for res in results if res is not None], key=lambda x: x[0]
     )

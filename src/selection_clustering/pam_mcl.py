@@ -64,7 +64,7 @@ def select_hits_by_pam_csb_mcl(
         grouped_3_dict = {}
         logger.info("Selecting sequences from mcl clusters with truncated csb pattern")
         for i, (domain, mcl_file) in enumerate(mcl_clustering_results_dict.items(), 1):
-            print(f"[{i}/{total}] Processing: {domain} in file {mcl_file}", end="\r")
+            logger.debug(f"[{i}/{total}] Processing: {domain} in file {mcl_file}")
 
             # Get reference sequences for the domain (if exists in processed reference dict)
             reference_sequences = processed_reference_dict.get(domain, set())

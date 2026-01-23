@@ -17,7 +17,7 @@ from src.csb import csb_prediction_stage
 from src.selection_clustering import clustering_selection_stage
 from src.selection_seed import basis_selection_stage, csb_proteins_selection
 
-from src.dataset_testing import validation, alignment, Reports_printing, Reports
+from src.dataset_testing import validation, alignment, Reports_printing, Reports, Reports_plotting
 
 from src.selection_defragmentation import (
     presence_absence_defragmentation_stage,
@@ -107,9 +107,8 @@ def cross_validation(options) -> None:
 
     validation.initial_self_recognition_validation(options)
 
-    if options.cross_validation_deactivated:
-        return
-    validation.parallel_cross_validation(options)
+    if options.cross_validation_activated:
+        validation.parallel_cross_validation(options)
 
     return
 
@@ -156,7 +155,7 @@ def report_cv_performance(options) -> None:
     # External R scripts
     try:
         logger.info("Plotting with external R-scripts")
-        # Reports_plotting.process_initial_plotting(options) TODO fix this routine
+        Reports_plotting.process_initial_plotting(options) #TODO fix this routine
     except Exception as e:
         logger.error("An error occurred during the R plotting: %s", str(e))
     # cross validation
