@@ -154,8 +154,8 @@ def report_cv_performance(options) -> None:
 
     # External R scripts
     try:
-        logger.info("Plotting with external R-scripts")
-        Reports_plotting.process_initial_plotting(options) #TODO fix this routine
+        logger.info("Plotting confusion matrices per genomic context")
+        Reports_plotting.process_initial_plotting(options)
     except Exception as e:
         logger.error("An error occurred during the R plotting: %s", str(e))
     # cross validation

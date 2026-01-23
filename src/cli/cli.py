@@ -130,7 +130,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
     )
     resources2.add_argument(
         "--glob-gff",
-        dest="--glob-gff",
+        dest="glob_gff",
         metavar="<filepath>",
         default=None,
         help=maybe("Concatenated GFF annotation file for all assemblies."),
