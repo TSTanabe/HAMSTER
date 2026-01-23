@@ -10,8 +10,8 @@ from pathlib import Path
 
 from typing import Tuple, Set
 
-from hmsss.core.logging import get_logger
-from hmsss.utils import myUtil
+from src.core.logging import get_logger
+from src.core import myUtil
 
 logger = get_logger(__name__)
 
