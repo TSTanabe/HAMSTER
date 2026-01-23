@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 
-from src.fasta_preparation.translation import (
-    parallel_translation,
-    parallel_transcription,
-)
+from src.fasta_preparation import translation
+from src.fasta_preparation import pyrodigal_translation
 from src.core.queue import queue_fna_inputs, queue_faa_without_gff
 
 from src.core.logging import get_logger
@@ -35,9 +33,9 @@ def fasta_preparation(config) -> None:
     # print_header("FASTA preparation (gene calling / translation)", logger=logger)
 
     fna_files: dict[str, str] = queue_fna_inputs(config)
-    parallel_translation(fna_files, config.cores)
+    pyrodigal_translation.parallel_pyrodigal_translation(fna_files, config.cores)
 
     faa_files_without_gff: dict[str, str] = queue_faa_without_gff(config)
-    parallel_transcription(faa_files_without_gff, config.cores)
+    translation.parallel_transcription(faa_files_without_gff, config.cores)
 
     return
