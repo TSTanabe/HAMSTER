@@ -32,8 +32,8 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Iterator, Optional, Tuple
 
-from hmsss.core.logging import get_logger
-from hmsss.fasta_preparation import materialize
+from src.core.logging import get_logger
+from src.fasta_preparation import materialize
 
 logger = get_logger(__name__)
 
