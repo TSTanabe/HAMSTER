@@ -10,132 +10,12 @@ from typing import List, Set, Dict, Any, Tuple
 from src.core.logging import get_logger
 from src.parse_reports import csb_finder, parse_reports
 from src.db import database
-from src.search import query_selfblast_search
+from src.parse_reports.parse_reports import Protein
+from src.search import query_selfblast_search, blastp_n_filter
+from src.fasta_preparation.materialize import materialize_pair_gz_next_to_input
 from src.search import diamond_search
 
 logger = get_logger(__name__)
-
-
-def unpackgz(path: str) -> str:
-    """
-    Decompresses a .gz file if not already extracted.
-
-    Args:
-        path (str): Path to .gz file.
-
-    Returns:
-        str: Path to decompressed file.
-    """
-    if not path.endswith(".gz"):
-        return path
-    file = path[:-3]
-    if os.path.exists(file):
-        return file
-    with gzip.open(path, "rb") as f_in:
-        with open(file, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    return file
-
-
-def filter_blast_table(
-    output_file: str,
-    blast_file: str,
-    evalue_cutoff: float,
-    score_cutoff: float,
-    coverage_cutoff: float,
-    identity_cutoff: float,
-    bsr_cutoff: float,
-    sequence_lengths: Dict[str, float],
-    selfblast_scores: Dict[str, float],
-    buffer_size: int = 10000,
-) -> str:
-    """
-    Filters a BLASTP table by e-value, score, coverage, identity, and BSR.
-
-    Args:
-        output_file: Path for output
-        blast_file: Path to input
-        evalue_cutoff: Max e-value
-        score_cutoff: Min bitscore
-        coverage_cutoff: Min coverage (0-1)
-        identity_cutoff: Min identity (0-1)
-        bsr_cutoff: Min Blast Score Ratio
-        sequence_lengths: dict of qseqid -> seq len
-        selfblast_scores: dict of qseqid -> self-hit bitscore
-        buffer_size: Write buffer
-
-    Returns:
-        str: Output file path
-
-    Output Example:
-        "results/filtered_glob.faa.diamond.tab"
-    """
-
-    # Determine the output file path
-    if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
-        logger.info(
-            f"Filtered hit results file already exists and is non-empty: {output_file}"
-        )
-        return output_file
-
-    # Open input and output files using CSV reader/writer
-    with open(blast_file, "r") as infile, open(output_file, "w", newline="") as outfile:
-        reader = csv.reader(infile, delimiter="\t")
-        writer = csv.writer(outfile, delimiter="\t")
-
-        buffer = []  # Buffer to store valid rows
-
-        # Process each row efficiently
-        for row in reader:
-            try:
-                sseqid, qseqid, evalue, bitscore, sstart, send, pident = row[:7]
-
-                # Convert necessary values only when needed
-                evalue = float(evalue)
-                bitscore = float(bitscore)
-                pident = float(pident)
-                sstart, send = int(sstart), int(send)
-
-                # Fetch precomputed query length and self-blast score
-                query_length = sequence_lengths.get(qseqid)
-                selfblast_score = selfblast_scores.get(qseqid)
-
-                # Pre-filter based on missing values
-                if not query_length or not selfblast_score:
-                    buffer.append(row)
-                else:
-                    # Compute alignment length and coverage
-                    alignment_length = abs(send - sstart) + 1
-                    coverage = alignment_length / query_length
-
-                    # Compute Blast Score Ratio (BSR)
-                    bsr = bitscore / selfblast_score
-
-                    # Apply all filtering criteria
-                    if (
-                        evalue <= evalue_cutoff
-                        and bitscore >= score_cutoff
-                        and coverage >= coverage_cutoff
-                        and pident >= identity_cutoff
-                        and bsr >= bsr_cutoff
-                    ):
-                        row.append(f"{bsr:.3f}")
-                        buffer.append(row)
-
-                # **Write buffer to disk when it reaches buffer_size**
-                if len(buffer) >= buffer_size:
-                    writer.writerows(buffer)
-                    buffer.clear()  # Reset buffer
-
-            except ValueError as ve:
-                logger.warning(f"Skipping malformed row: {row} (ValueError: {ve})")
-                continue  # Skip invalid rows gracefully
-
-        # Final flush: Write any remaining data in the buffer
-        if buffer:
-            writer.writerows(buffer)
-
-    return output_file
 
 
 def collect_genome_ids(report_path: str, div: str = "___") -> Set[str]:
@@ -268,229 +148,39 @@ def fix_sseqid_prefix_suffix_uniqueness(filtered_file: str, options) -> str:
     return filtered_file
 
 
-def split_genome_ids_into_batches(
-    genome_ids_set: List[str], num_batches: int
-) -> List[List[str]]:
-    """
-    Splits a list of genomeIDs into nearly equal-sized batches.
-
-    Args:
-        genome_ids_set (list): The list of genomeIDs to split.
-        num_batches (int): Number of batches.
-
-    Returns:
-        list of lists: Each a batch of genomeIDs
-
-    Example Output:
-        [["GCF1", "GCF2"], ["GCF3", "GCF4"], ...]
-    """
-
-    # Calculate the approximate size of each batch
-    batch_size = len(genome_ids_set) // num_batches
-    remainder = len(genome_ids_set) % num_batches
-
-    # Create the batches, distributing the remainder across the first few batches
-    batches = []
-    start = 0
-    for i in range(num_batches):
-        # Distribute the remainder across the first 'remainder' batches
-        end = start + batch_size + (1 if i < remainder else 0)
-        batches.append(genome_ids_set[start:end])
-        start = end
-
-    return batches
-
-
 def init_worker(
-    diamond_blast_results_table: str,
-    score_threshold_diction: dict,
-    csb_patterns_diction: dict,
-    csb_pattern_names: list,
-) -> None:
-    """
-    Sets up global variables for each worker of the parsing process.
-    """
+    blast_results_table,
+    score_threshold_diction,
+    csb_patterns_diction,
+    csb_pattern_names,
+    faa_files,
+    gff_files,
+    multidomain_allowed,
+    glob_gff,
+    nucleotide_range,
+    thrs_score,
+):
     global global_diamond_blast_results_table
     global global_score_threshold_diction
     global global_csb_patterns_diction
     global global_csb_pattern_names
+    global global_faa_files
+    global global_gff_files
+    global global_multidomain_allowed
+    global global_glob_gff
+    global global_nucleotide_range
+    global global_thrs_score
 
-    # Assign the arguments to the global variables in worker processes
-    global_diamond_blast_results_table = diamond_blast_results_table
+    global_thrs_score = thrs_score
+    global_diamond_blast_results_table = blast_results_table
     global_score_threshold_diction = score_threshold_diction
     global_csb_patterns_diction = csb_patterns_diction
     global_csb_pattern_names = csb_pattern_names
-
-
-def process_writer(queue: Any, options: Any, counter: Any) -> None:
-    """
-    Handles output of search and writes to database.
-
-    Args:
-        queue: Multiprocessing queue with parsed results
-        options: Options object
-        counter: Shared counter
-
-    Output Example:
-        Writes proteins, clusters, genomeIDs to database and updates files.
-    """
-    genome_id_batch = set()
-    protein_batch = {}
-    cluster_batch = {}
-    batch_size = options.glob_chunks
-    batch_counter = 0
-
-    while True:
-        tup = queue.get()
-        if tup is None:
-            # Process any remaining data in the batch
-            if protein_batch and cluster_batch:
-                submit_batches(protein_batch, cluster_batch, genome_id_batch, options)
-            break
-
-        else:
-            counter.value += 1
-            print(f"[INFO] Processed {counter.value} genomes ", end="\r")  #
-
-        genome_id, protein_dict, cluster_dict = tup
-
-        # Concatenate the data
-        genome_id_batch.add(genome_id)
-        protein_batch.update(protein_dict)
-        cluster_batch.update(cluster_dict)
-        batch_counter += 1
-
-        # If batch size is reached, process the batch
-        if batch_counter >= batch_size:
-            submit_batches(protein_batch, cluster_batch, genome_id_batch, options)
-            protein_batch = {}
-            cluster_batch = {}
-            batch_counter = 0
-
-    return
-
-
-def submit_batches(
-    protein_batch: Dict, cluster_batch: Dict, genome_id_set: Set[str], options: Any
-) -> None:
-    """
-    Submits batch results to the database and writes files.
-
-    Args:
-        protein_batch: All proteins to write (dict)
-        cluster_batch: All clusters to write (dict)
-        genome_id_set: All genome IDs in batch (set)
-        options: Options object
-    """
-
-    # Insert into the database
-    database.insert_database_genome_ids(options.database_directory, genome_id_set)
-    database.insert_database_proteins(options.database_directory, protein_batch)
-    database.insert_database_clusters(options.database_directory, cluster_batch)
-
-    # Append to the gene clusters file
-    with open(options.gene_clusters_file, "a") as file:
-        for clusterID, cluster in cluster_batch.items():
-            domains = cluster.types
-            file.write(clusterID + "\t" + "\t".join(domains) + "\n")
-
-
-def process_parallel_bulk_parse_batch(args: Tuple[Any, Any, Any, Any]) -> None:
-    """
-    Processes a batch of genomeIDs in parallel (bulk parsing).
-
-    Args:
-        args: (data_queue, genomeID_batch, options, counter)
-
-    Input Example:
-        genomeID_batch = ["GCF1", "GCF2"]
-    """
-    data_queue, genomeID_batch, options, counter = args
-
-    # Get global variables for read only
-    diamond_blast_results_table = global_diamond_blast_results_table
-    score_threshold_diction = global_score_threshold_diction
-    csb_patterns_diction = global_csb_patterns_diction
-    csb_pattern_names = global_csb_pattern_names
-
-    # Process each genomeID in the batch
-    for genomeID in genomeID_batch:
-        process_single_genome(
-            data_queue,
-            genomeID,
-            options,
-            diamond_blast_results_table,
-            score_threshold_diction,
-            csb_patterns_diction,
-            csb_pattern_names,
-            counter,
-        )
-
-
-def process_single_genome(
-    data_queue: Any,
-    genomeID: str,
-    options: Any,
-    report: str,
-    score_threshold_diction: Dict,
-    csb_patterns_diction: Dict,
-    csb_pattern_names: List,
-    counter: Any,
-) -> None:
-    """
-    Processes a single genomeID, extracts hits, filters, stores the results.
-
-    Args:
-        data_queue: Multiprocessing queue for results
-        genomeID (str): Genome ID to process
-        options: Options object
-        report (str): Path to BLAST result table
-        score_threshold_diction (dict): Score thresholds
-        csb_patterns_diction (dict): CSB patterns
-        csb_pattern_names (list): CSB names
-        counter: Shared multiprocessing.Value counter
-    """
-
-    faa_file = ""
-
-    try:
-        # Unpack required files if necessary
-        faa_file = unpackgz(options.faa_files[genomeID])
-        gff_file = unpackgz(options.gff_files[genomeID])
-
-        # Parse BLAST report for protein hits
-        protein_dict = parse_reports.parse_bulk_blastreport_genomize(
-            genomeID, report, score_threshold_diction, options.thrs_score
-        )
-
-        # Remove multidomain proteins if they are not allowed
-        if not options.multidomain_allowed:
-            protein_dict = remove_multi_domain_proteins(protein_dict)
-
-        # if options sagt, dass es einzelgenome sind, dann die genomID aus den keys und den protein identifiern entfernen
-        if not options.glob_gff:
-            protein_dict = parse_reports.clean_dict_keys_and_protein_ids(
-                protein_dict, genomeID
-            )
-
-        # Complete the hit information
-        parse_reports.parse_gff_file(gff_file, protein_dict)
-        parse_reports.get_protein_sequence(faa_file, protein_dict)
-
-        # Find the syntenic regions and insert to database
-        cluster_dict = csb_finder.find_syntenic_blocks(
-            genomeID, protein_dict, options.nucleotide_range
-        )
-
-        # Store parsed data in multiprocessing queue
-        data_queue.put((genomeID, protein_dict, cluster_dict))
-
-    except Exception as e:
-        logger.warning(f"Skipped {faa_file} due to an error - {e}")
-        logger.debug(traceback.format_exc())
-        return
-
-    return
+    global_faa_files = faa_files
+    global_gff_files = gff_files
+    global_multidomain_allowed = multidomain_allowed
+    global_glob_gff = glob_gff
+    global_nucleotide_range = nucleotide_range
 
 
 def remove_multi_domain_proteins(input_dict):
@@ -501,8 +191,55 @@ def remove_multi_domain_proteins(input_dict):
         if len(protein.domains.values()) <= 1
     }
 
+def process_single_genome_imap(genomeID: str):
+    """
+    Worker für pool.imap_unordered.
+    Rückgabe ist exakt das, was bisher in die Queue ging:
+      (genomeID, protein_dict, cluster_dict)
+    Bei Fehler: None (damit der Main-Prozess einfach skippen kann)
+    """
+    # Globals aus init_worker()
+    report = global_diamond_blast_results_table
+    score_threshold_diction = global_score_threshold_diction
 
-def initial_glob_search(options: Any) -> None:
+    try:
+        faa_in = global_faa_files[genomeID]
+        gff_in = global_gff_files[genomeID]
+
+        with materialize_pair_gz_next_to_input(faa_in, gff_in) as (faa_file, gff_file):
+           # Parse BLAST report for protein hits
+            protein_dict = parse_reports.parse_bulk_blastreport_genomize(
+                genomeID, report, score_threshold_diction, global_thrs_score
+            )
+
+            # Remove multidomain proteins if they are not allowed
+            if not global_multidomain_allowed:
+                protein_dict = remove_multi_domain_proteins(protein_dict)
+
+            # Einzelgenom-Modus: genomeID aus Keys/ProteinIDs entfernen
+            if not global_glob_gff:
+                protein_dict = parse_reports.clean_dict_keys_and_protein_ids(
+                    protein_dict, genomeID
+                )
+
+            # Complete hit information
+            parse_reports.parse_gff_file(gff_file, protein_dict)
+            parse_reports.get_protein_sequence(faa_file, protein_dict)
+
+            # Syntenie/Cluster
+            cluster_dict = csb_finder.find_syntenic_blocks(
+                genomeID, protein_dict, global_nucleotide_range
+            )
+
+            return genomeID, protein_dict, cluster_dict
+
+    except Exception as e:
+        logger.warning(f"Skipped {faa_file} due to an error - {e}")
+        logger.debug(traceback.format_exc())
+        return None
+
+
+def initial_glob_search(config: Any) -> None:
     """
     This function initializes and performs a DIAMOND BLASTp search,
     filters the results, processes genome hits in parallel, and writes parsed data.
@@ -530,47 +267,15 @@ def initial_glob_search(options: Any) -> None:
     # Step 1: Perform self BLAST query to establish reference scores for blast score ratio
     logger.info("Initilize DIAMOND BLASTp self-blast against query")
     selfblast_scores_dict, query_length_dict = query_selfblast_search.self_blast_query(
-        options
+        config
     )
 
-    # Step 2: Run DIAMOND BLASTp if no precomputed BLAST table is provided or exists
-    blast_results_table = options.glob_table
-    if not blast_results_table:
-        logger.info("Initilize DIAMOND BLASTp against target")
-        blast_results_table = diamond_search.diamond_search(
-            options.glob_faa,
-            options.query_file,
-            options.cores,
-            options.evalue,
-            options.searchcoverage,
-            options.minseqid,
-            options.diamond_report_hits_limit,
-            options.alignment_mode,
-        )
-    else:
-        logger.info(f"Using DIAMOND BLASTp result table {blast_results_table}")
-
-        # Step 3: Filter BLAST results based on e-value, sequence identity, and score thresholds
-    logger.info(
-        "Filtering raw DIAMOND BLASTp results by score, e-value, identity and blast score ratio parameters"
+    # Step 2+3: Run DIAMOND BLASTp if no precomputed BLAST table is provided or exists
+    blast_results_table = blastp_n_filter.run_and_filter_diamond_blastp(
+        config,
+        query_length_dict=query_length_dict,
+        selfblast_scores_dict=selfblast_scores_dict,
     )
-
-    # Get baseline BLAST scores
-
-    blast_results_table = filter_blast_table(
-        output_file=options.filtered_blast_table,
-        blast_file=blast_results_table,
-        evalue_cutoff=options.evalue,
-        score_cutoff=options.thrs_score,
-        coverage_cutoff=options.searchcoverage,
-        identity_cutoff=options.minseqid,
-        bsr_cutoff=options.thrs_bsr,
-        sequence_lengths=query_length_dict,
-        selfblast_scores=selfblast_scores_dict,
-    )
-
-    # Store the filtered table in the options object
-    options.glob_table = blast_results_table
 
     # Step 4: Extract and store unique genome IDs
     genome_ids_set = collect_genome_ids(
@@ -580,11 +285,11 @@ def initial_glob_search(options: Any) -> None:
 
     # Remove genomeIDs without faa and gff file. It is possible that a blast result table has more/other IDs as the provided files
     genome_ids_set = filter_genome_ids_with_existing_files(
-        genome_ids_set, options.faa_files, options.gff_files
+        genome_ids_set, config.faa_files, config.gff_files
     )
 
     database.insert_database_genome_ids(
-        options.database_directory, genome_ids_set
+        config.database_directory, genome_ids_set
     )  # Insert genomeIDs into database
 
     # Step 5 Check if the filterd fasta file has correct genomeIDs ___ proteinID combinations with unique ids
@@ -592,9 +297,21 @@ def initial_glob_search(options: Any) -> None:
 
     # Step 6: Process genome hits in parallel
     logger.info("Parsing hits from filtered results table")
-    genome_id_batches = split_genome_ids_into_batches(
-        list(genome_ids_set), options.cores - 1
-    )  # batch sets of genomeIDs for each worker
+    genome_id_list = list(genome_ids_set)
+
+    n_genomes: int = len(genome_id_list)
+    worker_processes = max(1, (config.cores - 1))
+    worker_processes = min(worker_processes, n_genomes)
+
+    # Batch buffers im Main
+    protein_batch: dict[str, Protein] = {}
+    cluster_batch: dict = {}
+    batch_size: int = config.glob_chunks
+    batch_counter = 0
+
+    # Fortschritt
+    genomes_done = 0
+    log_step = max(1, n_genomes // 100)
 
     manager = Manager()
     data_queue = manager.Queue()
@@ -607,26 +324,56 @@ def initial_glob_search(options: Any) -> None:
     score_threshold_diction = {}  # empty because all have to be parsed
 
     with Pool(
-        processes=options.cores,
+        processes=worker_processes,
         initializer=init_worker,
         initargs=(
             blast_results_table,
             score_threshold_diction,
             csb_patterns_diction,
             csb_pattern_names,
+            config.faa_files,
+            config.gff_files,
+            config.multidomain_allowed,
+            config.glob_gff,
+            config.nucleotide_range,
+            config.thrs_score,
         ),
     ) as pool:
-        p_writer = pool.apply_async(process_writer, (data_queue, options, counter))
+        it = pool.imap_unordered(process_single_genome_imap, genome_id_list, chunksize=1)
+        for genomeID, protein_dict, cluster_dict in it:
+            genomes_done += 1
+            if (genomes_done % log_step == 0) or (genomes_done == n_genomes):
+                pct = (genomes_done * 100) // max(1, n_genomes)
+                logger.info(
+                    f"[Progress] {genomes_done}/{n_genomes} ({pct}%) genomes processed"
+                )
 
-        pool.map(
-            process_parallel_bulk_parse_batch,
-            [(data_queue, batch, options, counter) for batch in genome_id_batches],
-        )
+            # Batch sammeln
+            protein_batch.update(protein_dict)
+            cluster_batch.update(cluster_dict)
+            batch_counter += 1
+            if batch_counter >= batch_size:
+                database.insert_database_proteins(
+                    config.database_directory, protein_batch
+                )
+                database.insert_database_clusters(
+                    config.database_directory, cluster_batch
+                )
+                protein_batch.clear()
+                cluster_batch.clear()
+                batch_counter = 0
+                with open(config.gene_clusters_file, "a") as file:
+                    for clusterID, cluster in cluster_batch.items():
+                        domains = cluster.types
+                        file.write(clusterID + "\t" + "\t".join(domains) + "\n")
 
-        # Signal the end of data to the process_writer
-        for _ in range(options.cores):
-            data_queue.put(None)
+        if protein_batch or cluster_batch:
+            database.insert_database_proteins(config.database_directory, protein_batch)
+            database.insert_database_clusters(config.database_directory, cluster_batch)
+            with open(config.gene_clusters_file, "a") as file:
+                for clusterID, cluster in cluster_batch.items():
+                    domains = cluster.types
+                    file.write(clusterID + "\t" + "\t".join(domains) + "\n")
 
-        p_writer.get()
     logger.info("Finished parsing BLASTp results")
     return

@@ -1,4 +1,16 @@
 import os
+import gzip
+from typing import TextIO
+
+def open_fasta_maybe_gz(path: str) -> TextIO:
+    """
+    Open a FASTA file that may be plain text or gzip-compressed.
+    Always returns a text-mode file handle.
+    """
+    if path.endswith(".gz"):
+        return gzip.open(path, "rt")  # text mode
+    else:
+        return open(path, "r")
 
 
 def create_glob_file(options) -> None:
@@ -27,7 +39,7 @@ def create_glob_file(options) -> None:
             ]  # Get the FASTA file for the current genomeID
 
             # Open each faa_file explicitly and close it after processing
-            infile = open(faa_file, "r")
+            infile = open_fasta_maybe_gz(faa_file)
             try:
                 sequence = ""
                 header = None

@@ -30,46 +30,34 @@ This module handles:
 
 
 def queue_fna_inputs(config) -> dict[str, str]:
-    """Collect FNA inputs for translation.
+    """Collect FNA inputs for translation (NO decompression).
 
-    - Decompress `.fna.gz` files only if no corresponding `.faa/.faa.gz` exists.
-    - Remove all FNA entries if a corresponding FAA already exists.
-
-    Args:
-        config: Configuration object with `.fasta_file_directory` and `.cores`.
+    Rules:
+      - If both .fna and .fna.gz exist for the same genomeID -> .fna wins
+      - If any FAA exists (.faa or .faa.gz) for the same genomeID -> remove FNA from queue
 
     Returns:
-        Mapping genome ID → `.fna` path. Also stored in `config.fna_files`.
-
-    Side Effects:
-        May decompress `.fna.gz` files in parallel.
+        Mapping genome ID → chosen FNA path (.fna preferred over .fna.gz).
+        Also stored in config.fna_files.
     """
     root = config.fasta_file_directory
 
-    # Aktuelle Lage erfassen
-    fna_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna.gz")
-    fna_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna")
-    faa_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
-    faa_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
+    # collect files (no decompression)
+    fna_plain: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna")
+    fna_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna.gz")
 
-    faa_all_genomes: Set[str] = set(faa_files) | set(faa_gz_files)
+    faa_plain: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
+    faa_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
 
-    # .fna.gz nur entpacken, wenn (noch) kein FAA vorhanden ist
-    decompress_targets: Set[str] = set()
-    for gid, gz_path in fna_gz_files.items():
-        if gid not in faa_all_genomes:
-            # Ungezippte .fna fehlt oder wir wollen sicherstellen, dass sie da ist
-            if gid not in fna_files:
-                decompress_targets.add(gz_path)
+    # genomes that already have protein FASTA -> skip FNA translation
+    faa_all_genomes: Set[str] = set(faa_plain) | set(faa_gz)
 
-    if decompress_targets:
-        logger.info(f"Planned to decompress {len(decompress_targets)} .fna file(s).")
-        _parallel_decompress(decompress_targets, getattr(config, "cores", 4))
+    # merge: gz first, then plain (plain wins)
+    fna_files: Dict[str, str] = {}
+    fna_files.update(fna_gz)
+    fna_files.update(fna_plain)
 
-    # Nach evtl. Entpacken erneut einlesen
-    fna_files = get_genome_id_files_dict(root, extension=".fna")
-
-    # ALLE FNA entfernen, wenn FAA bereits existiert
+    # drop genomes where FAA already exists
     for gid in list(fna_files.keys()):
         if gid in faa_all_genomes:
             del fna_files[gid]
@@ -80,203 +68,95 @@ def queue_fna_inputs(config) -> dict[str, str]:
 
 
 def queue_protein_annotation_inputs(config) -> None:
-    """Collect FAA/GFF/HMMREPORT inputs, independent of FNA.
+    """
+    Collect FAA/GFF inputs for annotation (gz + plain), WITHOUT decompression.
 
-    - Decompress `.faa.gz` and `.gff.gz` if uncompressed counterparts are missing.
-    - Keep only genome IDs that have both FAA and GFF.
-    - Restrict HMMREPORT files to these genome IDs.
+    Rule:
+      - If both plain and gz exist for the same genomeID → plain WINS
+      - Genome is queued only if BOTH FAA and GFF exist (gz or plain)
 
-    Args:
-        config: Object with `.fasta_file_directory` and `.cores`.
-
-    Side Effects:
-        Sets attributes on `config`:
-          - `queued_genomes` (set of genome IDs)
-          - `faa_files` (dict genome ID → FAA path)
-          - `gff_files` (dict genome ID → GFF path)
-          - `hmmreport_files` (dict genome ID → HMMREPORT path)
+    Side effects:
+      - sets config.queued_genomes
+      - sets config.faa_files
+      - sets config.gff_files
+      - sets config.hmmreport_files (legacy)
     """
     root = config.fasta_file_directory
 
-    # Aktuelle Lage erfassen
-    faa_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
-    gff_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff.gz")
+    # --- collect files ---
+    faa_plain = get_genome_id_files_dict(root, extension=".faa")
+    faa_gz = get_genome_id_files_dict(root, extension=".faa.gz")
 
-    faa_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
-    gff_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff")
+    gff_plain = get_genome_id_files_dict(root, extension=".gff")
+    gff_gz = get_genome_id_files_dict(root, extension=".gff.gz")
 
-    # Entpacken planen: .faa.gz / .gff.gz nur wenn das ungezippte Pendant fehlt
-    decompress_targets: Set[str] = set()
-    for gid, gz_path in faa_gz_files.items():
-        if gid not in faa_files:
-            decompress_targets.add(gz_path)
-    for gid, gz_path in gff_gz_files.items():
-        if gid not in gff_files:
-            decompress_targets.add(gz_path)
+    # --- merge: gz first, then plain (plain wins) ---
+    faa_files = {}
+    faa_files.update(faa_gz)
+    faa_files.update(faa_plain)
 
-    if decompress_targets:
-        logger.info(f"Planned to decompress {len(decompress_targets)} .gz file(s).")
-        _parallel_decompress(decompress_targets, getattr(config, "cores", None))
-    else:
-        logger.info(f"All files are already decompressed.")
-    # Collect the faa and gff files to the dictionary
-    faa_files = get_genome_id_files_dict(root, extension=".faa")
-    gff_files = get_genome_id_files_dict(root, extension=".gff")
-    hmmreport_files: Dict[str, str] = get_genome_id_files_dict(
-        root, extension=".hmmreport"
-    )
+    gff_files = {}
+    gff_files.update(gff_gz)
+    gff_files.update(gff_plain)
 
-    # Nur GenomeIDs behalten, die FAA UND GFF haben
-    common_ids: Set[str] = set(faa_files) & set(gff_files)
+    # legacy / optional
+    hmmreport_files = get_genome_id_files_dict(root, extension=".hmmreport")
 
-    # Dictionaries auf common_ids beschränken
-    faa_files = {gid: path for gid, path in faa_files.items() if gid in common_ids}
-    gff_files = {gid: path for gid, path in gff_files.items() if gid in common_ids}
+    # --- keep only genomeIDs that have BOTH faa and gff ---
+    common_ids = set(faa_files) & set(gff_files)
+
+    faa_files = {gid: faa_files[gid] for gid in common_ids}
+    gff_files = {gid: gff_files[gid] for gid in common_ids}
     hmmreport_files = {
         gid: path for gid, path in hmmreport_files.items() if gid in common_ids
     }
 
-    config.queued_genomes = common_ids
+    config.queued_genomes = list(common_ids)
     config.faa_files = faa_files
     config.gff_files = gff_files
     config.hmmreport_files = hmmreport_files
 
-    logger.info(f"Queued {len(common_ids)} faa/gff pairs.")
-    logger.info(f"Found {len(hmmreport_files)} existing hmmreports for faa/gff pairs.")
-
+    logger.info(f"Queued {len(common_ids)} genomes with FAA and GFF.")
 
 def queue_faa_without_gff(config) -> dict[str, str]:
-    """Collect FAA files for which no GFF exists.
+    """Collect FAA files for which no GFF exists (NO decompression).
 
-    - Includes both `.gff` and `.gff.gz` in the check.
-    - Decompress `.faa.gz` for target genomes if `.faa` is missing.
-
-    Args:
-        config: Object with `.fasta_file_directory` and `.cores`.
+    Rules:
+      - If .faa and .faa.gz both exist -> .faa wins
+      - If only .faa.gz exists -> use .faa.gz
+      - If any GFF exists (.gff or .gff.gz) -> skip genome
 
     Returns:
-        Mapping genome ID → `.faa` path for genomes without GFF.
-
-    Side Effects:
-        Sets on `options`:
-          - `missing_gff_genomes` (set of genome IDs)
-          - `faa_missing_gff` (dict genome ID → FAA path)
+        Mapping genome ID → FAA path (.faa preferred over .faa.gz)
     """
     root = config.fasta_file_directory
 
     # Ist-Zustand erfassen
-    faa_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
-    faa_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
-    gff_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff")
-    gff_gz_files: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff.gz")
+    faa_plain: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
+    faa_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
 
-    # GenomeIDs mit vorhandenen GFFs (gezipped oder ungezipped)
-    genomes_with_any_gff: Set[str] = set(gff_files) | set(gff_gz_files)
+    gff_plain: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff")
+    gff_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".gff.gz")
 
-    # Alle GenomeIDs, für die es FAA (gezipped/ungezipped) gibt
-    genomes_with_any_faa: Set[str] = set(faa_files) | set(faa_gz_files)
+    # GenomeIDs mit vorhandenen GFFs
+    genomes_with_any_gff: Set[str] = set(gff_plain) | set(gff_gz)
+
+    # GenomeIDs mit FAA (egal ob gezippt)
+    genomes_with_any_faa: Set[str] = set(faa_plain) | set(faa_gz)
 
     # Ziel: FAA ohne GFF
     missing_gff_genomes: Set[str] = genomes_with_any_faa - genomes_with_any_gff
 
-    # .faa.gz für diese Ziel-Genome entpacken, falls .faa fehlt
-    decompress_targets: Set[str] = set()
+    # Merge FAA: gz zuerst, dann plain (plain gewinnt)
+    faa_missing_gff: Dict[str, str] = {}
     for gid in missing_gff_genomes:
-        if gid not in faa_files and gid in faa_gz_files:
-            decompress_targets.add(faa_gz_files[gid])
+        if gid in faa_gz:
+            faa_missing_gff[gid] = faa_gz[gid]
+        if gid in faa_plain:
+            faa_missing_gff[gid] = faa_plain[gid]
 
-    if decompress_targets:
-        logger.info(f"Planned to decompress {len(decompress_targets)} file(s).")
-        _parallel_decompress(decompress_targets, getattr(config, "cores", None))
-
-    # Nach Entpacken FAA erneut einlesen
-    faa_files = get_genome_id_files_dict(root, extension=".faa")
-
-    # Queue-Dict: nur GenomeIDs, die (jetzt) ein ungezippetes .faa haben und weiterhin kein GFF
-    faa_missing_gff: Dict[str, str] = {
-        gid: faa_files[gid]
-        for gid in missing_gff_genomes
-        if gid in faa_files  # sicherstellen, dass ungezippte FAA existiert
-    }
-
-    logger.info(
-        f"Queued {len(faa_missing_gff)} faa files without gff for transcription."
-    )
+    logger.info(f"Queued {len(faa_missing_gff)} faa files without gff for transcription.")
     return faa_missing_gff
-
-
-def queue_read_mapping_fastq_inputs(config) -> dict[str, str]:
-    """
-    Sucht im FASTA/FASTQ-Inputverzeichnis und gibt ein Dictionary zurück:
-
-        { genome_id : full_path }
-
-    Falls genomeID sowohl in .fastq als auch in .fastq.gz vorkommt:
-        -> .fastq.gz gewinnt
-    """
-
-    root = config.fasta_file_directory
-
-    # Sammeln aller FASTQ-Dateien
-    fastq: Dict[str, str] = get_genome_id_files_dict(root, extension=".fastq")
-    fastq_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".fastq.gz")
-
-    # Merge:
-    # zuerst .fastq, dann .fastq.gz drüber -> gz überschreibt fastq bei Konflikt
-    merged: Dict[str, str] = {}
-    merged.update(fastq)
-    merged.update(fastq_gz)
-
-    # Speichern in Config
-    config.fastq_files = merged
-
-    return merged
-
-
-def queue_read_mapping_faa_inputs(config) -> dict[str, str]:
-    """
-    Search the FASTA input directory for protein sequence files and return:
-
-        { genome_id : full_path }
-
-    If both .faa and .faa.gz exist for the same genome_id:
-        -> .faa.gz wins
-    """
-
-    root = config.fasta_file_directory
-
-    faa: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa")
-    faa_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".faa.gz")
-
-    merged: Dict[str, str] = {}
-    merged.update(faa)
-    merged.update(faa_gz)
-
-    config.faa_files = merged
-    return merged
-
-
-def queue_read_mapping_fna_inputs(config) -> dict[str, str]:
-    """
-    Search the FASTA input directory for nucleotide genome files and return:
-
-        { genome_id : full_path }
-
-    If both .fna and .fna.gz exist for the same genome_id:
-        -> .fna.gz wins
-    """
-
-    root = config.fasta_file_directory
-
-    fna: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna")
-    fna_gz: Dict[str, str] = get_genome_id_files_dict(root, extension=".fna.gz")
-
-    merged: Dict[str, str] = {}
-    merged.update(fna)
-    merged.update(fna_gz)
-
-    config.fna_files = merged
-    return merged
 
 
 def get_all_files_with_extension(directory: str, extension: str) -> Set[str]:
