@@ -1,0 +1,20 @@
+name: hamster_env
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # --- Python ---
+  - python>=3.8
+
+  # --- Core scientific Python stack ---
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+
+  # --- External bioinformatics tools ---
+  - diamond
+  - pyrodigal
+  - mmseqs2
+  - mafft
+  - trimal
