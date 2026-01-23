@@ -1,7 +1,6 @@
-# Generic draft
 # HAMSTER: Homolog and Synteny Mining Pipeline
 
-HAMSTER is a modular command-line pipeline for the high-throughput identification of homologous genes with collinear syntenic blocks across multiple genome datasets. It provides an automated, reproducible workflow to sort sequences into functional equivalent groups based on genomic synteny block detection, presence propability and protein sequence clustering. It is also compatible with the globDB genome collection.
+HAMSTER is a modular command-line pipeline for the high-throughput identification of homologous genes with collinear syntenic blocks across multiple genome datasets. It provides an automated, reproducible workflow to sort sequences into functional equivalent groups based on genomic synteny block detection, presence propability and protein sequence clustering.
 
 ## Quick Start
 
@@ -77,10 +76,10 @@ HAMSTER is either available via the github directory or as a compiled binary fil
     ```bash
     git clone https://github.com/TSTanabe/HAMSTER.git
     cd HAMSTER
+    conda env create -f hamster_env.yml
+    conda activate hamster_env
     python hamster.py -f ./genomes -q queries.faa
     ```
-
-2. **(Optional) Install R and required R packages** for PDF plotting (see `plotting_Rscripts/` for details).
 
 ## Dependencies
 ### Required libraries
@@ -90,12 +89,12 @@ HAMSTER is either available via the github directory or as a compiled binary fil
   - `pandas`
   - `scikit-learn`
   - `scipy`
-- **R** (for optional plotting scripts)
+  - `matplotlib`
+  - `pyrodigal`
 
 ### Required external tools for functionality 
 
   - **DIAMOND** — for fast protein BLAST-like searches (https://github.com/bbuchfink/diamond)
-  - **Prodigal** — for gene prediction from prokaryotic genomes (https://github.com/hyattpd/Prodigal)
   - **mmseqs2** — for fast and sensitive protein sequence searching and clustering (https://github.com/soedinglab/MMseqs2)
   - **MAFFT** — for multiple sequence alignment (https://mafft.cbrc.jp/alignment/software/)
   - **trimAl** — for automated alignment trimming (http://trimal.cgenomics.org/downloads)
