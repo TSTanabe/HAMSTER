@@ -83,16 +83,19 @@ def filter_blast_table(
                     bsr = bitscore / selfblast_score
 
                     # Apply all filtering criteria
-                    if (
+                    if ( # If (bitscore or evalue) and coverage ok
                         evalue <= evalue_cutoff
                         and bitscore >= score_cutoff
                         and coverage >= coverage_cutoff
-                        and pident >= identity_cutoff
-                        and bsr >= bsr_cutoff
                     ):
                         row.append(f"{bsr:.3f}")
                         buffer.append(row)
-
+                    if ( # If identity and coverage ok
+                        coverage >= coverage_cutoff
+                        and pident >= identity_cutoff
+                    ):
+                        row.append(f"{bsr:.3f}")
+                        buffer.append(row)
                 # **Write buffer to disk when it reaches buffer_size**
                 if len(buffer) >= buffer_size:
                     writer.writerows(buffer)
