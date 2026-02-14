@@ -5,7 +5,8 @@ import os
 import csv
 import glob
 import shutil
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Sequence
+import sqlite3
 
 import pandas as pd
 import numpy as np
@@ -84,6 +85,57 @@ def process_initial_validations(
     #    )
 
 
+
+#
+# Add Taxonomy to dataframe routinen
+#
+
+TAX_COLS = ["Superkingdom", "Phylum", "Class", "Ordnung", "Family", "Genus", "Species"]
+
+def fetch_taxonomy_df_via_temp_table(db_path: str, genome_ids: Sequence[str]) -> pd.DataFrame:
+    genome_ids = sorted(set(str(x) for x in genome_ids if x is not None))
+    if not genome_ids:
+        return pd.DataFrame(columns=["genomeID", *TAX_COLS])
+
+    with sqlite3.connect(db_path) as con:
+        cur = con.cursor()
+
+        # TEMP table exists only for this connection
+        cur.execute("DROP TABLE IF EXISTS tmp_genome_ids;")
+        cur.execute("CREATE TEMP TABLE tmp_genome_ids (genomeID TEXT PRIMARY KEY);")
+
+        # Fast bulk insert (one row per genomeID)
+        cur.executemany(
+            "INSERT OR IGNORE INTO tmp_genome_ids(genomeID) VALUES (?);",
+            [(gid,) for gid in genome_ids],
+        )
+
+        sql = f"""
+            SELECT g.genomeID, {",".join(f"g.{c}" for c in TAX_COLS)}
+            FROM Genomes AS g
+            INNER JOIN tmp_genome_ids AS t
+                ON t.genomeID = g.genomeID
+        """
+        tax_df = pd.read_sql_query(sql, con)
+
+    return tax_df
+
+def add_taxonomy_to_df(df: pd.DataFrame, db_path: str, genome_col: str = "genomeID") -> pd.DataFrame:
+    out = df.copy()
+
+    # genomeID sicherstellen (falls du nur proteinID hast)
+    if genome_col not in out.columns:
+        if "proteinID" in out.columns:
+            out[genome_col] = out["proteinID"].astype(str).str.split("-", n=1).str[0]
+        else:
+            raise KeyError(f"Need '{genome_col}' or 'proteinID'")
+
+    tax_df = fetch_taxonomy_df_via_temp_table(db_path, out[genome_col].astype(str).tolist())
+
+    # LEFT JOIN: behält alle Zeilen des Reports, ergänzt Taxonomie wo verfügbar
+    out = out.merge(tax_df, how="left", on=genome_col)
+
+    return out
 ####################################
 # --- Directory & File Helpers --- #
 ####################################
@@ -165,7 +217,8 @@ def write_pkl_tsv_reports(
             return
 
         df = _add_neighborhood_info(df, protein, options, db_path)
-
+        df["genomeID"] = df.index.astype(str).str.split("-", n=1).str[0]
+        df = add_taxonomy_to_df(df, db_path=db_path, genome_col="genomeID")
         _write_enriched_table(df, report_dir, protein)
         _generate_roc_and_mcc(df, report_dir, protein, collections)
         _generate_neighborhood_confusion(df, report_dir, collections, protein)

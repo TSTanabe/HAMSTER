@@ -1,7 +1,7 @@
 #!/usr/bin/python
 import os
 import glob
-import subprocess
+import numpy as np
 import traceback
 from typing import Tuple
 
@@ -22,7 +22,7 @@ def process_initial_plotting(options):
 
     # Plotter für die presence absence matrix histogramme
     plotting_matrix_histogram(options, output_dir)
-
+    plotting_enriched_performance(options, output_dir)
     return
 
 
@@ -57,8 +57,15 @@ def plotting_matrix_histogram(options, tsv_dir: str):
         # Name analog zur bisherigen Logik (base_TRUE/ base_FALSE)
         # TRUE  => filter=TRUE (TP>0 or FN>0)
         # FALSE => filter=FALSE (no filter)
+        mode_map = {
+            "TRUE": "positives_only",
+            "FALSE": "full_matrix",
+        }
+
         for flag in ["TRUE", "FALSE"]:
-            output_pdf = f"{base}_{flag}.pdf"
+            mode_name = mode_map[flag]
+            output_pdf = f"{base}_{mode_name}.pdf"
+
             if os.path.exists(output_pdf):
                 print(f"[SKIP] '{output_pdf}' already exists")
             else:
@@ -146,6 +153,10 @@ def _plot_one_tsv_worker(
       Writes PNG pages: {output_png_base}_page<N>.png
     """
     try:
+        first_page = f"{output_png_base}_page1.png"
+        if os.path.exists(first_page):
+            return (tsv_file, flag, True, "Output already exists - skipped")
+
         matplotlib.use("Agg", force=True)
 
         # --- Load TSV ---
@@ -325,3 +336,193 @@ def _plot_one_tsv_worker(
 
     except Exception as e:
         return (tsv_file, flag, False, f"{e}\n{traceback.format_exc()}")
+
+
+
+#
+# Plot hitscore per phylogeny genome
+#
+# --- add near the top with the other imports ---
+from typing import Tuple
+
+# --- taxonomy sort order (matches your DB columns) ---
+TAX_SORT_COLS = ["Phylum", "Class", "Ordnung", "Family", "Genus", "Species"]
+
+
+def plotting_enriched_performance(options, report_dir: str) -> None:
+    """
+    For each enriched report (*_enriched.txt) under report_dir, plot:
+      y = bitscore (hit score)
+      x = taxonomy-sorted order (Phylum -> Class -> Ordnung -> Family -> Genus -> Species)
+
+    Parallelized via ProcessPoolExecutor. Skips tasks if output PNG already exists.
+    """
+
+    pattern = os.path.join(report_dir, "**", "*_enriched.txt")
+    enriched_files = glob.glob(pattern, recursive=True)
+
+    if not enriched_files:
+        print(f"No files matching '*_enriched.txt' found in {report_dir}.")
+        return
+
+    tasks = []
+    for enriched_path in sorted(enriched_files):
+        base = os.path.splitext(enriched_path)[0]
+        out_png = f"{base}_taxonomy_hmm_bitscore.png"
+        if os.path.exists(out_png):
+            print(f"[SKIP] '{out_png}' already exists")
+        else:
+            tasks.append((enriched_path, out_png))
+
+    if not tasks:
+        print("[SKIP] All enriched performance plots already exist")
+        return
+
+    max_workers = min(len(tasks), int(getattr(options, "cores", os.cpu_count() or 1)))
+    max_workers = max(1, max_workers)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_task = {
+            executor.submit(_plot_one_enriched_tax_boxstrip_worker, enriched_path, out_png): enriched_path
+            for (enriched_path, out_png) in tasks
+        }
+
+        for future in as_completed(future_to_task):
+            enriched_path = future_to_task[future]
+            try:
+                fpath, ok, msg = future.result()
+                if not ok:
+                    print(f"[ERROR] {fpath}: {msg}")
+            except Exception as exc:
+                print(f"[ERROR] During the execution of '{enriched_path}' an error occurred: {exc}")
+
+
+
+
+TAX_SORT_COLS = ["Phylum", "Class", "Ordnung", "Family", "Genus", "Species"]
+
+def _choose_collapse_level(d: pd.DataFrame, max_groups: int = 60) -> str:
+    # deepest to shallowest
+    candidates = ["Species", "Genus", "Family", "Ordnung", "Class", "Phylum"]
+    for level in candidates:
+        if d[level].nunique(dropna=False) <= max_groups:
+            return level
+    return "Phylum"
+
+def _plot_one_enriched_tax_boxstrip_worker(
+    enriched_path: str,
+    out_png: str,
+    score_col: str = "bitscore",
+    max_groups: int = 10,
+    x_jitter: float = 0.22,
+) -> Tuple[str, bool, str]:
+    """
+    X: taxonomy (collapsed to a displayable level, ordered by full taxonomy)
+    Y: bitscore
+    Shows boxplots per group + jittered scatter of individual hits.
+    """
+    try:
+        # --- skip if already exists ---
+        if os.path.exists(out_png):
+            return (enriched_path, True, "Output already exists - skipped")
+
+        matplotlib.use("Agg", force=True)
+
+        # --- Load TSV (same pattern as other workers) ---
+        df = pd.read_csv(enriched_path, sep="\t")
+
+        required = [score_col] + TAX_SORT_COLS
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            return (enriched_path, False, f"Missing columns {missing}")
+
+        if df.empty:
+            return (enriched_path, True, "Empty dataframe")
+
+        d = df.copy()
+
+        # --- normalize taxonomy strings ---
+        unknown = "Unknown"
+        for c in TAX_SORT_COLS:
+            d[c] = (
+                d[c].astype("string")
+                .fillna(unknown)
+                .str.strip()
+                .replace({"": unknown})
+            )
+
+        # full taxonomy key (defines global order)
+        d["_tax_full"] = (
+            d["Phylum"] + "|" + d["Class"] + "|" + d["Ordnung"] + "|" +
+            d["Family"] + "|" + d["Genus"] + "|" + d["Species"]
+        )
+
+        # choose collapse level
+        collapse_level = _choose_collapse_level(d, max_groups=max_groups)
+        d["_group"] = d[collapse_level].astype("string")
+
+        # sort rows by full taxonomy first (keeps your "full taxonomy" ordering)
+        d = d.sort_values(["_tax_full"], kind="mergesort").reset_index(drop=True)
+
+        # order groups by first occurrence in that full-taxonomy-sorted table
+        group_order = (
+            d.groupby("_group", sort=False)["_tax_full"]
+             .first()
+             .sort_values(kind="mergesort")
+             .index
+             .tolist()
+        )
+        g2x = {g: i for i, g in enumerate(group_order)}
+        d["_x"] = d["_group"].map(g2x).astype(float)
+
+        # numeric y
+        y = d[score_col].astype(float).values
+
+        # --- build boxplot data in the same order ---
+        box_data = [d.loc[d["_group"] == g, score_col].astype(float).values for g in group_order]
+
+        # --- plot sizing (width scales with #groups) ---
+        n_groups = len(group_order)
+        fig_w = min(30, max(12, 0.35 * n_groups))
+        fig_h = 8
+        fig = plt.figure(figsize=(fig_w, fig_h))
+        ax = fig.add_subplot(111)
+
+        # boxplots
+        bp = ax.boxplot(
+            box_data,
+            positions=list(range(n_groups)),
+            widths=0.6,
+            showfliers=False,   # outliers are visible in scatter anyway
+            manage_ticks=False
+        )
+
+        # jittered scatter over boxplots (deterministic RNG)
+        rng = np.random.default_rng(0)
+        xj = d["_x"].values + rng.uniform(-x_jitter, x_jitter, size=len(d))
+        ax.scatter(xj, y, s=6, alpha=0.30, rasterized=True)
+
+        # axes formatting
+        ax.set_xlim(-0.8, n_groups - 0.2)
+        ax.set_ylim(bottom=0)  # y always starts at 0
+
+        ax.set_xlabel(collapse_level)
+        ax.set_ylabel(score_col)
+        ax.set_title(f"HMM {score_col} by taxonomy (ordered by full taxonomy)")
+
+        ax.set_xticks(range(n_groups))
+        ax.set_xticklabels(group_order, rotation=90, fontsize=8, ha="right")
+
+        # more room for rotated labels
+        fig.subplots_adjust(bottom=0.35)
+
+        fig.savefig(out_png, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+        return (enriched_path, True, f"OK (collapsed={collapse_level}, groups={n_groups})")
+
+    except Exception as e:
+        return (enriched_path, False, f"{e}\n{traceback.format_exc()}")
+
+
+
