@@ -109,7 +109,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         dest="database_directory",
         metavar="<filepath>",
         default=None,
-        help=maybe("Path to existing HAMSTER SQLite database."),
+        help=argparse.SUPPRESS
     )
     resources.add_argument(
         "--activate-cross-validation",
@@ -154,12 +154,10 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "-glob-off",
         dest="glob_search",
         action="store_false",
-        help=maybe(
-            "Disable creation of concatenated files for the initial search step."
-        ),
+        help=argparse.SUPPRESS,
     )
 
-    search = parser.add_argument_group("DIAMOND blastp search parameters (advanced)")
+    search = parser.add_argument_group("DIAMOND blastp search parameters")
     search.add_argument(
         "--evalue",
         dest="evalue",
@@ -227,26 +225,25 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
     genecluster = parser.add_argument_group(
         "Gene cluster prediction parameters (advanced)"
     )
-    genecluster.add_argument(
-        "--distance",
-        dest="nucleotide_range",
-        type=int,
-        default=3500,
-        metavar="<int>",
-        help=maybe("Maximum nucleotide distance between syntenic genes in a cluster."),
-    )
+
     genecluster.add_argument(
         "-p",
         dest="patterns_file",
         metavar="<filepath>",
         default=os.path.join(BASE_DIR, "src", "Patterns"),
-        help=maybe(
-            "Tab-separated file with predefined syntenic gene cluster patterns."
-        ),
+        help=argparse.SUPPRESS
     )
 
     csb = parser.add_argument_group(
         "Collinear syntenic block (csb) parameters (advanced)"
+    )
+    csb.add_argument(
+        "--distance",
+        dest="nucleotide_range",
+        type=int,
+        default=3500,
+        metavar="<int>",
+        help=maybe("Maximum nucleotide distance between syntenic genes in a syntenic block."),
     )
     csb.add_argument(
         "--insertions",
@@ -407,7 +404,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         nargs="+",
         default=[],
         metavar="<list>",
-        help=maybe("Domains to specifically include (space-separated)."),
+        help=argparse.SUPPRESS
     )
     alignment.add_argument(
         "--exclude-domains",
@@ -415,7 +412,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         nargs="+",
         default=[],
         metavar="<list>",
-        help=maybe("Domains to specifically exclude (space-separated)."),
+        help=argparse.SUPPRESS
     )
 
 
