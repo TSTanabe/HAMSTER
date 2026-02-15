@@ -137,10 +137,11 @@ def run_and_filter_diamond_blastp(
     # Step 2: obtain raw DIAMOND table (either precomputed or freshly generated)
     blast_results_table = options.glob_table
     if not blast_results_table:
-        logger.info("Initialize DIAMOND BLASTp against target")
+        logger.info("Generating concatenated faa file")
         create_glob_faa.create_glob_file(
             options
         )
+        logger.info("Initialize DIAMOND BLASTp against target")
         blast_results_table = diamond_search.diamond_search(
             options.glob_faa,
             options.query_file,
