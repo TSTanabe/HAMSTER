@@ -90,7 +90,7 @@ def filter_blast_table(
                     ):
                         row.append(f"{bsr:.3f}")
                         buffer.append(row)
-                    if ( # If identity and coverage ok
+                    elif ( # If identity and coverage ok
                         coverage >= coverage_cutoff
                         and pident >= identity_cutoff
                     ):
