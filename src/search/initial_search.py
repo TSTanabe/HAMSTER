@@ -2,7 +2,9 @@
 import os
 from src.db import database
 from src.search import global_file_search, create_glob_faa, query_selfblast_search
+from src.core.logging import get_logger
 
+logger = get_logger(__name__)
 
 def initial_search(options) -> None:
     """
@@ -23,6 +25,7 @@ def initial_search(options) -> None:
 
     # Writes a database with the protein hits and their gene clusters for later use.
     if not os.path.isfile(options.database_directory):
+        logger.info("Created database")
         database.create_database(options.database_directory)
 
     options.query_file_original = options.query_file
@@ -34,11 +37,9 @@ def initial_search(options) -> None:
     )
 
     # header in glob file are genomeID___proteinID
-    create_glob_faa.create_glob_file(
-        options
-    )  # TODO make sure only single genomes can be provided
+
     global_file_search.initial_glob_search(options)
-    os.remove(options.glob_faa)
+
     # else:
     #    # Diamond blastp all files separately
     #    parallel_search.initial_genomize_search(options)

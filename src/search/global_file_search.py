@@ -1,8 +1,10 @@
 #!/usr/bin/python
 import gzip
+import logging
 import os
 import csv
 import shutil
+import sys
 import traceback
 from multiprocessing import Manager, Pool
 from typing import List, Set, Dict, Any, Tuple
@@ -68,7 +70,7 @@ def filter_genome_ids_with_existing_files(genome_ids, faa_files, gff_files):
             missing_ids.append(gid)
 
     logger.info(
-        f"Filtered genomeIDs: {len(valid_ids)} valid, {len(missing_ids)} with missing files (FAA/GFF)"
+        f"Filtered genomes: {len(valid_ids)} valid, {len(missing_ids)} with missing files (FAA/GFF)"
     )
     if missing_ids:
         logger.debug(
@@ -287,6 +289,9 @@ def initial_glob_search(config: Any) -> None:
     genome_ids_set = filter_genome_ids_with_existing_files(
         genome_ids_set, config.faa_files, config.gff_files
     )
+    if len(genome_ids_set) == 0:
+        logger.error(f"No genomes with faa and gff present. Use -f option to specify a directory with faa/gff files")
+        sys.exit()
 
     database.insert_database_genome_ids(
         config.database_directory, genome_ids_set

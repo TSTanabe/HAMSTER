@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import os
+import sys
 from typing import Dict, Any
 
 from src.search import diamond_search
@@ -21,9 +22,14 @@ def make_numbered_query_fasta(input_query: str, result_dir: str) -> str:
         >SmoC         -> >SmoC___1
         >SmoC         -> >SmoC___2
     """
-    import os
 
     output_path = os.path.join(result_dir, "query_numbered.faa")
+    if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+        return output_path
+
+    if input_query is None or os.path.getsize(input_query) == 0:
+        logger.error("Missing query file. Please use '-q' argument")
+        sys.exit()
 
     counter = 0
     with open(input_query, "r") as infile, open(output_path, "w") as outfile:

@@ -50,18 +50,19 @@ def prepare_directory_structure(directory: str) -> None:
 def prepare_result_space(options, project: str = "project") -> None:
     """
     Creates and sets up the results directory for a project, including all needed subdirectories.
-
-    Args:
-        options (Options): Has .location, .result_files_directory, etc.
-        project (str): Project name suffix (default: 'project')
-
-    Output:
-        Updates multiple attributes of options (see docstring).
-
-    Example Input:
-        options.location = '/home/user/myproject'
-        options.result_files_directory = '/home/user/myproject/results'
+    Updates multiple attributes of options.
     """
+
+    # ----------------------------
+    # 0) Normalize incoming paths early (accept trailing /)
+    # ----------------------------
+    if getattr(options, "location", None):
+        options.location = os.path.abspath(os.path.normpath(os.path.expanduser(options.location)))
+
+    if getattr(options, "result_files_directory", None):
+        options.result_files_directory = os.path.abspath(
+            os.path.normpath(os.path.expanduser(options.result_files_directory))
+        )
 
     now = datetime.now()
     timestamp = str(datetime.timestamp(now))
@@ -93,27 +94,24 @@ def prepare_result_space(options, project: str = "project") -> None:
 
     # User defined directory and -f -q are given for new project
     elif fasta_and_query_provided:
-        if os.path.isdir(options.result_files_directory):
+        # ensure base dir exists (user-defined)
+        if not os.path.isdir(options.result_files_directory):
             try:
                 os.makedirs(options.result_files_directory, exist_ok=True)
-                logger.info(
-                    f"Created results directory: {options.result_files_directory}"
-                )
+                logger.info(f"Created results directory: {options.result_files_directory}")
             except Exception as e:
-                logger.error(f"No writing rights in results a directory. {e}")
+                logger.error(f"No writing rights in results directory. {e}")
                 sys.exit(1)
 
-        options.result_files_directory = create_project(
-            options.result_files_directory, project
-        )
+        options.result_files_directory = create_project(options.result_files_directory, project)
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
-    # User-defined directory: check for existing project. def is prject folder defines paths
+    # User-defined directory: check for existing project. If not found, create
     elif not is_project_folder(options):
         if not os.path.isdir(options.result_files_directory):
             try:
-                os.mkdir(options.result_files_directory)
+                os.makedirs(options.result_files_directory, exist_ok=True)
                 logger.info(f"Created results dir: {options.result_files_directory}")
             except Exception as e:
                 logger.error(
@@ -121,43 +119,40 @@ def prepare_result_space(options, project: str = "project") -> None:
                 )
                 sys.exit(1)
 
-        options.result_files_directory = create_project(
-            options.result_files_directory, project
-        )
+        options.result_files_directory = create_project(options.result_files_directory, project)
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
-    # Project structure, applies in both cases
-    options.database_directory = options.result_files_directory + "/database.db"
-    options.fasta_initial_hit_directory = options.result_files_directory + "/Hit_list"
-    options.fasta_output_directory = options.result_files_directory + "/Sequences"
-    options.fasta_alignment_directory = (
-        options.result_files_directory + "/Initial_validation"
-    )
-    options.Hidden_markov_model_directory = (
-        options.result_files_directory + "/Hidden_markov_models"
-    )
-    options.cross_validation_directory = (
-        options.result_files_directory + "/Cross_validation"
-    )
-    options.phylogeny_directory = options.result_files_directory + "/Protein_Phylogeny"
-    options.Csb_directory = (
-        options.result_files_directory + "/Collinear_syntenic_blocks"
-    )
-    options.filtered_blast_table = (
-        options.result_files_directory + "/filtered_blast_results_table"
-    )
+    # ----------------------------
+    # 3) Canonical project paths (NO string concatenation)
+    # ----------------------------
+    res = os.path.abspath(os.path.normpath(options.result_files_directory))
 
-    options.divergent_output_file = (
-        options.result_files_directory + "/div_output_file.faa"
-    )
-    options.csb_output_file = options.Csb_directory + "/Csb_output.txt"
-    options.gene_clusters_file = options.Csb_directory + "/All_gene_clusters.txt"
-    options.data_computed_Instances_json = options.Csb_directory + "/csb_instances.json"
-    options.report_output_file = options.result_files_directory + "/Report.txt"
-    options.thresholds_output_file = options.result_files_directory + "/Thresholds.txt"
+    options.result_files_directory = res  # keep canonical
 
-    # Create required directories
+    options.database_directory = os.path.join(res, "database.db")
+
+    options.fasta_initial_hit_directory = os.path.join(res, "Hit_list")
+    options.fasta_output_directory = os.path.join(res, "Sequences")
+    options.fasta_alignment_directory = os.path.join(res, "Initial_validation")
+    options.Hidden_markov_model_directory = os.path.join(res, "Hidden_markov_models")
+    options.cross_validation_directory = os.path.join(res, "Cross_validation")
+    options.phylogeny_directory = os.path.join(res, "Protein_Phylogeny")
+    options.Csb_directory = os.path.join(res, "Collinear_syntenic_blocks")
+
+    options.filtered_blast_table = os.path.join(res, "filtered_blast_results_table")
+    options.divergent_output_file = os.path.join(res, "div_output_file.faa")
+
+    options.csb_output_file = os.path.join(options.Csb_directory, "Csb_output.txt")
+    options.gene_clusters_file = os.path.join(options.Csb_directory, "All_gene_clusters.txt")
+    options.data_computed_Instances_json = os.path.join(options.Csb_directory, "csb_instances.json")
+
+    options.report_output_file = os.path.join(res, "Report.txt")
+    options.thresholds_output_file = os.path.join(res, "Thresholds.txt")
+
+    # ----------------------------
+    # 4) Create required directories robustly
+    # ----------------------------
     for path in [
         options.fasta_initial_hit_directory,
         options.fasta_output_directory,
@@ -167,13 +162,16 @@ def prepare_result_space(options, project: str = "project") -> None:
         options.phylogeny_directory,
         options.Csb_directory,
     ]:
-        if not os.path.exists(path):
-            os.mkdir(path)
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Could not create directory {path}: {e}")
+            sys.exit(1)
 
     # 5. If using a pre-existing project, force pipeline to start at stage 3
     if not options.new_project and options.stage < 3:
-        logger.warning("Existing project directory detected. Setting start stage to 4.")
-        options.stage = 4
+        logger.warning("Existing project directory detected. Setting start stage to 3.")
+        options.stage = 3
 
 
 def create_project(directory: str, projectname: str = "project") -> str:

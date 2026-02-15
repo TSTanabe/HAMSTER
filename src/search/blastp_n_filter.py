@@ -3,7 +3,7 @@ import os
 import csv
 
 from typing import Dict
-from src.search import diamond_search
+from src.search import diamond_search, create_glob_faa
 from src.core.logging import get_logger
 logger = get_logger(__name__)
 
@@ -73,6 +73,7 @@ def filter_blast_table(
 
                 # Pre-filter based on missing values
                 if not query_length or not selfblast_score:
+                    print(f"Append without because {query_length} and {selfblast_score}")
                     buffer.append(row)
                 else:
                     # Compute alignment length and coverage
@@ -81,6 +82,7 @@ def filter_blast_table(
 
                     # Compute Blast Score Ratio (BSR)
                     bsr = bitscore / selfblast_score
+                    print(bsr)
 
                     # Apply all filtering criteria
                     if ( # If (bitscore or evalue) and coverage ok
@@ -125,11 +127,20 @@ def run_and_filter_diamond_blastp(
     Returns:
         Path to the filtered blast table.
     """
+    # Determine the output file path. Might exist if existing result directory was given
+    if os.path.isfile(options.filtered_blast_table) and os.path.getsize(options.filtered_blast_table) > 0:
+        logger.info(
+            f"Filtered hit results file already exists and is non-empty: {options.filtered_blast_table}"
+        )
+        return options.filtered_blast_table
 
     # Step 2: obtain raw DIAMOND table (either precomputed or freshly generated)
     blast_results_table = options.glob_table
     if not blast_results_table:
         logger.info("Initialize DIAMOND BLASTp against target")
+        create_glob_faa.create_glob_file(
+            options
+        )
         blast_results_table = diamond_search.diamond_search(
             options.glob_faa,
             options.query_file,
@@ -140,6 +151,7 @@ def run_and_filter_diamond_blastp(
             options.diamond_report_hits_limit,
             options.alignment_mode,
         )
+        os.remove(options.glob_faa)
     else:
         logger.info(f"Using DIAMOND BLASTp result table {blast_results_table}")
 
