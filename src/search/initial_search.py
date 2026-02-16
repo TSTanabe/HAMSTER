@@ -1,17 +1,17 @@
 #!/usr/bin/python
 import os
 from src.db import database
-from src.search import global_file_search, create_glob_faa, query_selfblast_search
+from src.search import global_file_search, create_glob_faa, query_selfblast_search, blastp_parallel
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-def initial_search(options) -> None:
+def initial_search(config) -> None:
     """
     Executes the initial protein search using DIAMOND or BLAST.
 
     Args:
-        options (Options): The main pipeline options
+        config (Options): The main pipeline options
 
     Input Example:
         options.database_directory: str = "./results/my_db.sqlite"
@@ -24,22 +24,23 @@ def initial_search(options) -> None:
     """
 
     # Writes a database with the protein hits and their gene clusters for later use.
-    if not os.path.isfile(options.database_directory):
+    if not os.path.isfile(config.database_directory):
         logger.info("Created database")
-        database.create_database(options.database_directory)
+        database.create_database(config.database_directory)
 
-    options.query_file_original = options.query_file
+    config.query_file_original = config.query_file
 
     # Durchnummerierte Query erzeugen und als aktive Query verwenden
-    options.query_file = query_selfblast_search.make_numbered_query_fasta(
-        options.query_file_original,
-        options.result_files_directory,
+    config.query_file = query_selfblast_search.make_numbered_query_fasta(
+        config.query_file_original,
+        config.result_files_directory,
     )
 
     # header in glob file are genomeID___proteinID
 
-    global_file_search.initial_glob_search(options)
+    #global_file_search.initial_glob_search(config)
 
+    blastp_parallel.run_consecutive_parallel_search(config)
     # else:
     #    # Diamond blastp all files separately
     #    parallel_search.initial_genomize_search(options)

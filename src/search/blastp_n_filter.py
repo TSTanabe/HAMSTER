@@ -82,7 +82,6 @@ def filter_blast_table(
 
                     # Compute Blast Score Ratio (BSR)
                     bsr = bitscore / selfblast_score
-                    print(bsr)
 
                     # Apply all filtering criteria
                     if ( # If (bitscore or evalue) and coverage ok

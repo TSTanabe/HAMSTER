@@ -11,9 +11,9 @@ def diamond_search(
     query_fasta: str,
     cores: int,
     evalue: float,
-    coverage: float,
-    minseqid: float,
     diamond_report_hits_limit: int,
+    coverage: float = 0.7,
+    minseqid: float = 0.0,
     alignment_mode: int = 2,
     sensitivity: str = "ultra-sensitive",
 ) -> str:
@@ -56,5 +56,6 @@ def diamond_search(
     os.system(
         f"{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid evalue bitscore sstart send pident 1>/dev/null 0>/dev/null"
     )
+    os.remove(target_db_name)
     # output format hit query evalue score identity alifrom alito
     return output_results_tab

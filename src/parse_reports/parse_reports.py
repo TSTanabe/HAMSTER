@@ -2,7 +2,7 @@
 import re
 import subprocess
 import traceback
-from typing import Dict, Set, Any
+from typing import Dict, Set, Any, Optional
 
 from src.core.logging import get_logger
 
@@ -634,6 +634,200 @@ def parse_bulk_blastreport_consecutive(
                     logger.warning(
                         f"Skipped malformed line in {filepath}: {line} "
                         f"(ValueError: {ve})"
+                    )
+
+    except Exception as e:
+        logger.error(f"Failed to parse {filepath} for genome {genome_id}: {e}")
+        logger.debug(traceback.format_exc())
+
+    return protein_dict
+
+
+
+def hit_passes_thresholds(
+    *,
+    raw_query_id: str,
+    bitscore: float,
+    evalue: float,
+    sstart: int,
+    send: int,
+    pident: float,
+    evalue_cutoff: float,
+    score_cutoff: float,
+    coverage_cutoff: float,
+    identity_cutoff: float,
+    sequence_lengths: Optional[Dict[str, float]] = None,
+) -> bool:
+    """
+    Decide whether a hit should be kept based on threshold logic:
+
+        Keep if:
+            (A) evalue <= evalue_cutoff AND bitscore >= score_cutoff AND coverage >= coverage_cutoff
+         OR (B) pident >= identity_cutoff AND coverage >= coverage_cutoff
+
+    Coverage requires `sequence_lengths`. If missing or query length unknown -> False.
+    """
+    if not sequence_lengths:
+        return False
+
+    qlen = sequence_lengths.get(raw_query_id)
+    if not qlen:
+        return False
+
+    alignment_length = abs(send - sstart) + 1
+    coverage = alignment_length / float(qlen)
+
+    cond_a = (
+        evalue <= evalue_cutoff
+        and bitscore >= score_cutoff
+        and coverage >= coverage_cutoff
+    )
+    cond_b = (
+        pident >= identity_cutoff
+        and coverage >= coverage_cutoff
+    )
+    return cond_a or cond_b
+
+
+def compute_bsr(
+    *,
+    raw_query_id: str,
+    bitscore: float,
+    selfblast_scores: Optional[Dict[str, float]] = None,
+    default: float = 1.0,
+) -> float:
+    """
+    Compute Blast Score Ratio (BSR) = bitscore / selfblast_score.
+
+    If `selfblast_scores` is None or does not contain the query id -> return `default`.
+    """
+    if not selfblast_scores:
+        return default
+
+    selfscore = selfblast_scores.get(raw_query_id)
+    if not selfscore:
+        return default
+
+    try:
+        return bitscore / float(selfscore)
+    except Exception:
+        return default
+
+
+def parse_filter_single_blastreport(
+    genome_id: str,
+    filepath: str,
+    *,
+    # threshold params for filtering:
+    evalue_cutoff: float,
+    score_cutoff: float,
+    coverage_cutoff: float,
+    identity_cutoff: float,
+    # optional dicts:
+    sequence_lengths: Optional[Dict[str, float]] = None,
+    selfblast_scores: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """
+    Parses a BLAST/DIAMOND report for a specific genomeID and extracts protein domain hits.
+
+    Expected tab columns (at least 7):
+        0 sseqid   (hit protein id)
+        1 qseqid   (query id)
+        2 evalue
+        3 bitscore
+        4 sstart
+        5 send
+        6 pident
+        7 optional precomputed BSR (ignored if selfblast_scores provided and contains query id)
+
+    Filtering:
+        A hit is only added to the Protein dict if hit_passes_thresholds(...) returns True.
+
+    Returns:
+        dict: hit_protein_id -> Protein object
+    """
+    protein_dict: Dict[str, Protein] = {}
+
+    try:
+        with open(filepath, "r") as infile:
+            for line in infile:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                columns = line.split("\t")
+                if len(columns) < 7:
+                    continue
+
+                try:
+                    hit_protein_id = columns[0]
+                    raw_query_id = columns[1]
+                    query_id = strip_query_suffix(raw_query_id)
+
+                    evalue = float(columns[2])
+                    bitscore = float(columns[3])
+                    sstart = int(columns[4])
+                    send = int(columns[5])
+                    pident = float(columns[6])
+
+                    # threshold filter (skip early)
+                    if not hit_passes_thresholds(
+                        raw_query_id=raw_query_id,
+                        bitscore=bitscore,
+                        evalue=evalue,
+                        sstart=sstart,
+                        send=send,
+                        pident=pident,
+                        evalue_cutoff=evalue_cutoff,
+                        score_cutoff=score_cutoff,
+                        coverage_cutoff=coverage_cutoff,
+                        identity_cutoff=identity_cutoff,
+                        sequence_lengths=sequence_lengths,
+                    ):
+                        continue
+
+                    # BSR computation (kept separate)
+                    bsr = compute_bsr(
+                        raw_query_id=raw_query_id,
+                        bitscore=bitscore,
+                        selfblast_scores=selfblast_scores,
+                        default=1.0,
+                    )
+
+                    # If you prefer to use an existing BSR column when selfblast_scores missing:
+                    if (not selfblast_scores) and len(columns) > 7:
+                        try:
+                            bsr = float(columns[7])
+                        except ValueError:
+                            pass
+
+                    hit_bitscore = int(bitscore)
+                    hsp_ident = int(pident)
+
+                    if hit_protein_id in protein_dict:
+                        protein_dict[hit_protein_id].add_domain(
+                            hmm=query_id,
+                            start=sstart,
+                            end=send,
+                            score=hit_bitscore,
+                            ident=hsp_ident,
+                            bsr=bsr,
+                        )
+                    else:
+                        protein_dict[hit_protein_id] = Protein(
+                            protein_id=hit_protein_id,
+                            hmm=query_id,
+                            start=sstart,
+                            end=send,
+                            score=hit_bitscore,
+                            genome_id=genome_id,
+                            ident=hsp_ident,
+                            bsr=bsr,
+                        )
+
+                except ValueError as ve:
+                    logger.warning(
+                        f"Skipped malformed line in {filepath}: {line} (ValueError: {ve})"
                     )
 
     except Exception as e:
