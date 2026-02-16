@@ -160,7 +160,7 @@ def report_cv_performance(options) -> None:
     except Exception as e:
         logger.error("An error occurred during the R plotting: %s", str(e))
     # cross validation
-    logger.info("Starting cross-validation")
+    #logger.info("Starting cross-validation")
     logger.info(
         f"Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}"
     )
