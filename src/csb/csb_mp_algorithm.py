@@ -1,7 +1,13 @@
 #!/usr/bin/python
+from __future__ import annotations
 
+from multiprocessing import Pool
+import multiprocessing as mp
+from types import MappingProxyType
 import bisect
+from src.core.logging import get_logger
 
+logger = get_logger(__name__)
 
 class InstanceList:
     # Saves the matchpoints and the keys of the gene clusters to be extended in the next round
@@ -273,7 +279,7 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
     return is a hash with tuples of csb as keys and the gene cluster identifier as values
 
     """
-
+    logger.info("Intilizing alphabet and matchpoint matrix")
     alphabet = create_alphabet(gene_clusters, redundancy_hash, q)  # alphabet is a set
 
     MatchLists = create_matchlists(gene_clusters, alphabet)
@@ -282,15 +288,18 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
 
     NextMatch = create_next_match(gene_clusters, MatchLists, bigrams)
 
-    computed_Instances_dict = dict()
 
+    dictionary = {}
+    logger.info("Starting CSB Finder algorithm")
     for key, lst in gene_clusters.items():
+        print("For key: ", key, "and lst: ", lst)
+        computed_Instances_dict = {}
         length = len(lst)
 
         for i in range(0, length):
             active_expanding_keys = set()
             InstanceListP = InstanceList()
-            pattern_tuple = 0
+
             for j in range(i + 1, length + 1):
                 pattern = lst[i:j]
                 if not pattern[-1] in alphabet:
@@ -346,13 +355,211 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
 
             # print("\n\nInstance Listing for pattern \t",InstanceListP.get_instance_hash())
 
-    dictionary = {}
-    for (
-        key,
-        it,
-    ) in (
-        computed_Instances_dict.items()
-    ):  # for the return, make the dict csb_pattern => gene cluster IDs
-        # print(key," ",it.active_keys)
-        dictionary[key] = it.active_keys
+
+        for (
+            key,
+            it,
+        ) in (
+            computed_Instances_dict.items()
+        ):  # for the return, make the dict csb_pattern => gene cluster IDs
+            # print(key," ",it.active_keys)
+            dictionary[key] = it.active_keys
     return dictionary
+
+
+
+#
+# Parallel processing for matchpoint algorithm
+#
+#
+
+# --- Worker-globals ---
+_GENE_CLUSTERS = None
+_REDUNDANCY_HASH = None
+_ALPHABET = None
+_MATCHLISTS = None
+_NEXTMATCH = None
+_K = None
+_Q = None
+
+
+def _init_csb_worker(
+    gene_clusters: dict[str, list[str]],
+    redundancy_hash: dict[str, int],
+    alphabet: set[str],
+    matchlists,
+    nextmatch,
+    k: int,
+    q: int,
+) -> None:
+    global _GENE_CLUSTERS, _REDUNDANCY_HASH, _ALPHABET, _MATCHLISTS, _NEXTMATCH, _K, _Q
+    _GENE_CLUSTERS = gene_clusters
+    _REDUNDANCY_HASH = redundancy_hash
+    _ALPHABET = alphabet
+    _MATCHLISTS = matchlists
+    _NEXTMATCH = nextmatch
+    _K = k
+    _Q = q
+
+def _csb_process_one_cluster(cluster_key: str) -> dict[tuple[str, ...], set[str]]:
+    gene_clusters = _GENE_CLUSTERS
+    redundancy_hash = _REDUNDANCY_HASH
+    alphabet = _ALPHABET
+    matchlists = _MATCHLISTS
+    nextmatch = _NEXTMATCH
+    k = _K
+    q = _Q
+
+    lst = gene_clusters[cluster_key]
+    length = len(lst)
+
+    computed: dict[tuple[str, ...], InstanceList] = {}
+
+    for i in range(length):
+        active_expanding_keys: set[str] = set()
+        InstanceListP = InstanceList()
+
+        for j in range(i + 1, length + 1):
+            pattern = lst[i:j]
+            if pattern[-1] not in alphabet:
+                break
+
+            pattern_tuple = tuple(pattern)
+
+            if pattern_tuple in computed:
+                InstanceListP = computed[pattern_tuple].copy()
+                active_expanding_keys = InstanceListP.get_active_keys()
+
+            elif len(pattern) == 1:
+                initialized = initialize_Instances(
+                    pattern,
+                    cluster_key,
+                    gene_clusters,
+                    InstanceListP,
+                    matchlists,
+                    nextmatch,
+                )
+                count = expand_redundancy(redundancy_hash, cluster_key, initialized)
+                if count >= q:
+                    active_expanding_keys = initialized
+                else:
+                    break
+            else:
+                extended = findInstances(
+                    pattern,
+                    cluster_key,
+                    gene_clusters,
+                    InstanceListP,
+                    matchlists,
+                    nextmatch,
+                    active_expanding_keys,
+                    k,
+                    q,
+                )
+                count = expand_redundancy(redundancy_hash, cluster_key, extended)
+                if count >= q:
+                    active_expanding_keys = active_expanding_keys & extended
+                else:
+                    break
+
+            InstanceListP.add_instance(cluster_key, i, j, (i, j))
+            active_expanding_keys.add(cluster_key)
+            InstanceListP.set_active_keys(active_expanding_keys)
+
+            computed[pattern_tuple] = InstanceListP.copy()
+
+    out: dict[tuple[str, ...], set[str]] = {}
+    for pattern_tuple, it in computed.items():
+        out[pattern_tuple] = it.active_keys
+    computed.clear()
+    del computed
+    del InstanceListP
+    return out
+
+def freeze(obj):
+    """Deep-freeze nested containers to prevent accidental mutation in workers."""
+    if isinstance(obj, dict):
+        return MappingProxyType({k: freeze(v) for k, v in obj.items()})
+    if isinstance(obj, list):
+        return tuple(freeze(x) for x in obj)
+    if isinstance(obj, set):
+        return frozenset(freeze(x) for x in obj)
+    if isinstance(obj, tuple):
+        return tuple(freeze(x) for x in obj)
+    return obj  # str/int/etc.
+
+
+def csb_finderS_matchpoint_algorithm_mp_pool(
+    redundancy_hash: dict[str, int],
+    gene_clusters: dict[str, list[str]],
+    k: int = 1,
+    q: int = 1,
+    worker_processes: int | None = None,
+    chunksize: int = 1,
+) -> dict[tuple[str, ...], set[str]]:
+
+    # Optional, aber auf Linux/HPC meist sinnvoll: fork sicherstellen
+    # (NICHT auf Windows; und nur einmal setzen, typischerweise im __main__)
+    mp.set_start_method("fork", force=True)
+
+    # 1) Precompute im Parent (einmal!)
+    alphabet = create_alphabet(gene_clusters, redundancy_hash, q)
+    matchlists = create_matchlists(gene_clusters, alphabet)
+    bigrams = create_bigrams(gene_clusters, alphabet)
+    nextmatch = create_next_match(gene_clusters, matchlists, bigrams)
+
+    # 2) Freeze / read-only (Mutationsschutz; hilft CoW stabil zu halten)
+    alphabet = frozenset(alphabet)
+    gene_clusters_frozen = {kk: tuple(vv) for kk, vv in gene_clusters.items()}
+
+    gene_clusters_frozen = freeze(gene_clusters_frozen)
+    matchlists = freeze(matchlists)
+    nextmatch  = freeze(nextmatch)
+    redundancy_hash_ro = freeze(redundancy_hash)
+
+    # 3) Globals setzen (wird bei fork von Workern geerbt)
+    global _GENE_CLUSTERS, _REDUNDANCY_HASH, _ALPHABET, _MATCHLISTS, _NEXTMATCH, _K, _Q
+    _GENE_CLUSTERS = gene_clusters_frozen
+    _REDUNDANCY_HASH = redundancy_hash_ro
+    _ALPHABET = alphabet
+    _MATCHLISTS = matchlists
+    _NEXTMATCH = nextmatch
+    _K = k
+    _Q = q
+
+    merged: dict[tuple[str, ...], set[str]] = {}
+
+    keys = list(gene_clusters.keys())
+    total = len(keys)
+    done = 0
+    last_pct = -1
+
+    #print(f"[CSB]   0%  done=0/{total}  remaining={total}")
+
+    # 4) Pool erst jetzt starten (nachdem alles im RAM liegt)
+    procs = (worker_processes - 1) if worker_processes else None
+
+    with Pool(processes=procs, maxtasksperchild=1) as pool:
+        for worker_dict in pool.imap_unordered(_csb_process_one_cluster, keys, chunksize=chunksize):
+            done += 1
+            pct = (done * 100) // max(1, total)
+            if pct != last_pct:
+                remaining = total - done
+                logger.info(f"[CSB-finder] {pct:3d}%  done={done}/{total}  remaining={remaining}")
+                last_pct = pct
+            #worker_dict.clear() # debugging lines to test RAM in workers
+            #del worker_dict
+            #continue
+            # Merge (ohne set-copy)
+            for pattern_tuple, active_keys in worker_dict.items():
+                existing = merged.get(pattern_tuple)
+                if existing is None:
+                    merged[pattern_tuple] = active_keys
+                else:
+                    existing.update(active_keys)
+
+            worker_dict.clear()
+            del worker_dict
+
+    return merged
+

@@ -10,6 +10,7 @@ from typing import Dict, List, Set, Tuple, Any
 from scipy.spatial import distance
 from sklearn.cluster import AgglomerativeClustering
 
+from src.core import myUtil
 from src.csb import csb_mp_algorithm
 from src.core.logging import get_logger
 
@@ -40,6 +41,17 @@ def csb_prediction(options: Any) -> None:
         options.gene_clusters_file = "gene_clusters.txt"
         options.glob_chunks = 10000
     """
+    options.computed_Instances_dict = myUtil.load_cache(
+        options, "csb_raw_computed_instances_dict.pkl"
+    )
+    options.redundancy_hash = myUtil.load_cache(options, "csb_raw_redundancy_hash.pkl")
+    options.redundant =  myUtil.load_cache(options, "csb_raw_redundant")
+    options.non_redundant = myUtil.load_cache(options, "csb_raw_non_redundant")
+
+    if options.computed_Instances_dict and options.redundancy_hash and options.redundant and options.non_redundant:
+        logger.info("Loading computed Instances dict from cache")
+        return
+
     logger.info("Detecting and sorting gene clusters for with csb finder algorithm")
 
     # Sort the all gene clusters that were detected in the search
@@ -56,7 +68,7 @@ def csb_prediction(options: Any) -> None:
         options.gene_clusters_file
     )  # returns two filepaths, dereplicates identical gene clusters
 
-    logger.debug("Initilizing hashes for the Csb match point algorithm")
+    logger.info("Initilizing hashes for the Csb match point algorithm")
     options.redundancy_hash = create_redundancy_hash(
         options.redundant
     )  # value is an integer, number of existing replicates
@@ -65,10 +77,17 @@ def csb_prediction(options: Any) -> None:
         options.non_redundant, options.redundancy_hash
     )  # for all which do not have a redundant gene cluster
     # modified CsbfinderS algorithm
-    logger.debug("Initilizing Csb match point algorithm for csb pattern recoginition")
-    computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm(
-        options.redundancy_hash, gene_clusters, options.insertions, options.occurence
-    )  # k insertions und q occurences müssen über die optionen festgelegt werden
+    logger.info("Starting Csb match point algorithm for csb pattern recoginition")
+    #computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm(
+    #    options.redundancy_hash, gene_clusters, options.insertions, options.occurence
+    #)  # k insertions und q occurences müssen über die optionen festgelegt werden
+    computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm_mp_pool(
+        redundancy_hash=options.redundancy_hash,
+        gene_clusters=gene_clusters,
+        k=options.insertions,
+        q=options.occurence,
+        worker_processes=options.cores  # optional
+    )
 
     # Combine reverse csbs
     reverse_pairs = find_reverse_pairs(computed_Instances_dict)
@@ -80,6 +99,11 @@ def csb_prediction(options: Any) -> None:
     options.computed_Instances_dict = csb_collapse_to_longest_pattern(
         computed_Instances_dict
     )
+
+    myUtil.save_cache(options, "csb_raw_computed_instances_dict.pkl", options.computed_Instances_dict)
+    myUtil.save_cache(options, "csb_raw_redundancy_hash.pkl",options.redundancy_hash)
+    myUtil.save_cache(options, "csb_raw_redundant", options.redundant)
+    myUtil.save_cache(options, "csb_raw_non_redundant", options.non_redundant)
 
 
 def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:
@@ -101,12 +125,15 @@ def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:
     )
     cluster_dict = dict()
     if len(computed_Instances_key_list) > 1:
-        matrix = calculate_similarity_matrix_jaccard(
-            computed_Instances_key_list
-        )  # matrix of similarity and the corresponding clusterID for each row and column as names
-        cluster_dict = hierachy_clustering(
-            matrix, jaccard_distance
-        )  # 0.2 means that 80 % have to be the same genes
+        if jaccard_distance == 0.0:
+            cluster_dict = cluster_identical_patterns_only(computed_Instances_key_list)
+        else:
+            matrix = calculate_similarity_matrix_jaccard(
+                computed_Instances_key_list
+            )  # matrix of similarity and the corresponding clusterID for each row and column as names
+            cluster_dict = hierachy_clustering(
+                matrix, jaccard_distance
+            )  # 0.2 means that 80 % have to be the same genes
     elif len(computed_Instances_key_list) == 1:
         cluster_dict[0] = [0]
     else:
@@ -556,6 +583,17 @@ def hierachy_clustering(
     # returns a dictionary, key is a number identifying the cluster (eine ganze zahl). value is a list with numbers. these numbers
     # are the cluster labels. this dictionary is pushed forward to the subroutine Clusters.keyword_dictionary
     return clusters
+
+
+def cluster_identical_patterns_only(computed_Instances_key_list):
+    # computed_Instances_key_list enthält deine pattern-tuples (keys)
+    groups = defaultdict(list)  # pattern -> indices
+    for idx, key in enumerate(computed_Instances_key_list):
+        groups[key].append(idx)
+
+    # cluster_dict im selben Format wie bisher (cluster_id -> [indices])
+    cluster_dict = {ci: idxs for ci, idxs in enumerate(groups.values())}
+    return cluster_dict
 
 
 def csb_index_to_gene_clusterID(
