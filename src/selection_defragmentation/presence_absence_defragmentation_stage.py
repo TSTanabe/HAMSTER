@@ -147,6 +147,7 @@ def fetch_keywords_for_proteins(
     all_keywords: Set[str] = set()
 
     with sqlite3.connect(database_path, timeout=120.0) as con:
+        logger.info(f"Fetching {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
         cur = con.cursor()
 
         # Pragmas: TEMP in memory; speed tuning
@@ -187,7 +188,7 @@ def fetch_keywords_for_proteins(
 
         all_keywords = {row[0] for row in cur.fetchall()}
 
-    logger.debug(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
+    logger.info(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
     return all_keywords
 
 
