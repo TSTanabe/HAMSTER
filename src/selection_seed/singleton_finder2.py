@@ -112,6 +112,7 @@ def _fetch_high_identity_domain_intersection(
         )
 
         for seed_domain, genomes in domain_to_genomes.items():
+            logger.info(f"Fetching data for {seed_domain} in {len(genomes)} genomes")
             genomes_list = [g for g in genomes if g and g != "QUERY"]
             if not genomes_list:
                 intersections_per_seed[seed_domain] = set()
@@ -179,6 +180,7 @@ def select_singleton_refs_by_domain_pattern(
         )
 
         for seed_domain, pattern_domains in seed_to_pattern_domains.items():
+            logger.info(f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains")
             if not pattern_domains:
                 continue
 
@@ -297,6 +299,7 @@ def singleton_reference_finder(
         return {}, {}
 
     # 3) Select co-occurrence-based singleton candidates
+    logger.info("Fetching co-occurence-based singleton candidates")
     domain_score_limits, singleton_reference_seqs_dict = (
         select_singleton_refs_by_domain_pattern(
             database_path=options.database_directory,
