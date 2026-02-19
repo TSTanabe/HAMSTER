@@ -127,64 +127,67 @@ def select_similar_csb_patterns_per_protein(
 
 
 def fetch_keywords_for_proteins(
-    database_path: str, protein_ids: Set[str], chunk_size: int = 999
+    database_path: str, protein_ids: Set[str], chunk_size: int = 50000
 ) -> Set[str]:
     """
-    Fetches all CSB keywords (cluster identifiers) for a set of protein IDs.
+    Fetches all CSB keywords for a set of protein IDs.
 
-    Args:
-        database_path (str): Path to SQLite database.
-        protein_ids (set): Protein IDs to fetch keywords for.
-        chunk_size (int): DB chunk size.
+    Speed-up:
+      - Uses a TEMP table (tmp_protein_ids) instead of IN(...) chunking
+      - Single join query with DISTINCT keywords
+      - Avoids building protein->keywords dict when only union is needed
 
-    Returns:
-        set: All unique keywords.
-
-    Example:
-        {'p1','p2'} → {'csb1', 'csb2'}
+    Notes:
+      - chunk_size here controls batch size for executemany inserts into TEMP, not SQL placeholders.
     """
-
-    protein_to_keywords = defaultdict(set)
-
     if not protein_ids:
         logger.warning("No proteinIDs provided to fetch_keywords_for_proteins.")
         return set()
 
-    conn = sqlite3.connect(database_path)
-    cur = conn.cursor()
+    all_keywords: Set[str] = set()
 
-    protein_ids = list(protein_ids)
-    total = len(protein_ids)
-    # print(f"[INFO] Fetching keywords for {total} proteins")
+    with sqlite3.connect(database_path, timeout=120.0) as con:
+        cur = con.cursor()
 
-    for start in range(0, total, chunk_size):
-        end = start + chunk_size
-        chunk = protein_ids[start:end]
+        # Pragmas: TEMP in memory; speed tuning
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
 
-        protein_placeholders = ",".join(["?"] * len(chunk))
-        query = f"""
-        SELECT Proteins.proteinID, Keywords.keyword
-        FROM Proteins
-        LEFT JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-        WHERE Proteins.proteinID IN ({protein_placeholders})
-        """
+        # TEMP table once
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_protein_ids (proteinID TEXT PRIMARY KEY);"
+        )
 
-        cur.execute(query, chunk)
-        rows = cur.fetchall()
+        # Fill TEMP table in batches (fast + low peak memory)
+        ids = list(protein_ids)
+        cur.execute("DELETE FROM tmp_protein_ids;")
 
-        for protein_id, keyword in rows:
-            if keyword:
-                protein_to_keywords[protein_id].add(keyword)
+        for start in range(0, len(ids), chunk_size):
+            batch = ids[start : start + chunk_size]
+            cur.executemany(
+                "INSERT OR IGNORE INTO tmp_protein_ids(proteinID) VALUES (?);",
+                ((pid,) for pid in batch),
+            )
 
-        # print(f"[INFO] Processed proteins {start+1} to {min(end, total)} of {total}")
+        # Protect persistent DB now (TEMP already filled)
+        cur.execute("PRAGMA query_only=TRUE;")
 
-    conn.close()
+        # One query: get unique keywords for these proteins
+        cur.execute(
+            """
+            SELECT DISTINCT k.keyword
+            FROM tmp_protein_ids t
+            JOIN Proteins p ON p.proteinID = t.proteinID
+            LEFT JOIN Keywords k ON k.clusterID = p.clusterID
+            WHERE k.keyword IS NOT NULL
+            """
+        )
 
-    logger.debug(f"Retrieved keywords for {len(protein_to_keywords)} proteins.")
+        all_keywords = {row[0] for row in cur.fetchall()}
 
-    # Union of all keywords associated with these reference sequences
-    all_keywords = set().union(*protein_to_keywords.values())
-
+    logger.debug(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
     return all_keywords
 
 
