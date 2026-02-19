@@ -195,79 +195,100 @@ def integrate_csb_variants_into_merged_grouped(
     options: Any,
     merged_grouped: Dict[str, Set[str]],
     domain_to_new_keywords_dict: Dict[str, Set[str]],
-    chunk_size: int = 999,
+    chunk_size: int = 50000,  # now used for TEMP insert batching, not SQL IN()
 ) -> Dict[str, Set[str]]:
     """
-    For each domain, integrates all proteins whose CSB keyword matches those in domain_to_new_keywords_dict.
+    For each domain, integrates all proteins whose CSB keyword matches those in
+    domain_to_new_keywords_dict, using TEMP tables for speed (no IN-chunking).
 
-    Args:
-        options: Options/config object (needs database_directory)
-        merged_grouped (dict): {domain: set(proteinIDs)} to be expanded
-        domain_to_new_keywords_dict (dict): {domain: set(keywords) to add}
-        chunk_size (int): DB chunk size.
-
-    Returns:
-        dict: Updated merged_grouped.
-
-    Example:
-        ({'ABC': {...}}, {'ABC': {'csb5'}}) → {'ABC': {..., 'p55', 'p56'}}
+    chunk_size controls batching for executemany inserts into TEMP tables.
     """
-
     logger.debug("Integration of added CSB proteins to grouped dataset")
 
-    conn = sqlite3.connect(options.database_directory)
-    cur = conn.cursor()
+    if not domain_to_new_keywords_dict:
+        return merged_grouped
 
-    total_proteins_added = 0
+    with sqlite3.connect(options.database_directory, timeout=120.0) as con:
+        cur = con.cursor()
 
-    for domain, new_keywords in domain_to_new_keywords_dict.items():
-        if not new_keywords:
-            logger.debug(f"Domain {domain}: No new keywords to integrate.")
-            continue
+        # Pragmas: TEMP in memory; read workload tuning
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
 
-        logger.debug(
-            f"Domain {domain}: Integrating sequences from {len(new_keywords)} new keywords."
+        # TEMP table once
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_keywords (keyword TEXT PRIMARY KEY);"
         )
 
-        new_keywords_list = list(new_keywords)
-        domain_proteins_before = len(merged_grouped.get(domain, set()))
-        proteins_added_this_domain = 0
+        total_proteins_added = 0
 
-        for start in range(0, len(new_keywords_list), chunk_size):
-            end = start + chunk_size
-            chunk = new_keywords_list[start:end]
+        for domain, new_keywords in domain_to_new_keywords_dict.items():
+            if not new_keywords:
+                logger.debug(f"Domain {domain}: No new keywords to integrate.")
+                continue
 
-            placeholders = ",".join(["?"] * len(chunk))
-            query = f"""
-            SELECT Proteins.proteinID
-            FROM Proteins
-            LEFT JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-            LEFT JOIN Domains ON Proteins.proteinID = Domains.proteinID
-            WHERE Domains.domain = ? AND Keywords.keyword IN ({placeholders})
-            """
+            # Ensure target set exists
+            merged_grouped.setdefault(domain, set())
 
-            params = [domain] + chunk
-            cur.execute(query, params)
-            rows = cur.fetchall()
+            logger.debug(
+                f"Domain {domain}: Integrating sequences from {len(new_keywords)} new keywords."
+            )
 
-            for (protein_id,) in rows:
+            before = len(merged_grouped[domain])
+
+            # Fill tmp_keywords for this domain (batched)
+            cur.execute("DELETE FROM tmp_keywords;")
+            kw_list = [k for k in new_keywords if k]
+            for start in range(0, len(kw_list), chunk_size):
+                batch = kw_list[start : start + chunk_size]
+                cur.executemany(
+                    "INSERT OR IGNORE INTO tmp_keywords(keyword) VALUES (?);",
+                    ((k,) for k in batch),
+                )
+
+            # Protect persistent DB after TEMP is filled (optional but safe)
+            cur.execute("PRAGMA query_only=TRUE;")
+
+            # One query: fetch proteinIDs that (a) belong to clusters annotated with these keywords
+            # and (b) have the given domain in Domains table.
+            #
+            # Note: JOIN Domains is required to enforce domain membership.
+            cur.execute(
+                """
+                SELECT DISTINCT p.proteinID
+                FROM tmp_keywords tk
+                JOIN Keywords k
+                  ON k.keyword = tk.keyword
+                JOIN Proteins p
+                  ON p.clusterID = k.clusterID
+                JOIN Domains d
+                  ON d.proteinID = p.proteinID
+                 AND d.domain    = ?
+                """,
+                (domain,),
+            )
+
+            added = 0
+            for (protein_id,) in cur:
                 if protein_id not in merged_grouped[domain]:
                     merged_grouped[domain].add(protein_id)
-                    proteins_added_this_domain += 1
+                    added += 1
 
-        domain_proteins_after = len(merged_grouped[domain])
-        logger.info(
-            f"Domain {domain}: Added {proteins_added_this_domain} new proteins with matching synteny to reference. New total: {len(merged_grouped[domain])}"
-        )
+            # allow next TEMP refill (some builds restrict TEMP writes under query_only)
+            cur.execute("PRAGMA query_only=FALSE;")
 
-        total_proteins_added += proteins_added_this_domain
-
-    conn.close()
+            after = len(merged_grouped[domain])
+            logger.info(
+                f"Domain {domain}: Added {added} new proteins with matching synteny to reference. "
+                f"New total: {after} (was {before})"
+            )
+            total_proteins_added += added
 
     logger.info(
         f"Integration completed: {total_proteins_added} proteins added across all domains."
     )
-
     return merged_grouped
 
 
