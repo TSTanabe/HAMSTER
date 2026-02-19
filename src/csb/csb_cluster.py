@@ -45,10 +45,17 @@ def csb_prediction(options: Any) -> None:
         options, "csb_raw_computed_instances_dict.pkl"
     )
     options.redundancy_hash = myUtil.load_cache(options, "csb_raw_redundancy_hash.pkl")
-    options.redundant =  myUtil.load_cache(options, "csb_raw_redundant")
-    options.non_redundant = myUtil.load_cache(options, "csb_raw_non_redundant")
+    options.redundant = os.path.join(options.Csb_directory, "redundant.txt")
+    options.non_redundant = os.path.join(options.Csb_directory, "non-redundant.txt")
+    redundant_exists = os.path.isfile(options.redundant)
+    non_redundant_exists = os.path.isfile(options.non_redundant)
 
-    if options.computed_Instances_dict and options.redundancy_hash and options.redundant and options.non_redundant:
+    if (
+            options.computed_Instances_dict
+            and options.redundancy_hash
+            and redundant_exists
+            and non_redundant_exists
+    ):
         logger.info("Loading computed Instances dict from cache")
         return
 
@@ -102,8 +109,6 @@ def csb_prediction(options: Any) -> None:
 
     myUtil.save_cache(options, "csb_raw_computed_instances_dict.pkl", options.computed_Instances_dict)
     myUtil.save_cache(options, "csb_raw_redundancy_hash.pkl",options.redundancy_hash)
-    myUtil.save_cache(options, "csb_raw_redundant", options.redundant)
-    myUtil.save_cache(options, "csb_raw_non_redundant", options.non_redundant)
 
 
 def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:
