@@ -514,8 +514,6 @@ def fetch_proteinIDs_dict_multiprocessing(
         # Now lock down the main database: no writes to persistent tables possible.
         cur.execute("PRAGMA query_only=TRUE;")
 
-        # Optional: ask SQLite to optimize based on current schema/statistics
-        cur.execute("PRAGMA optimize;")
 
         # --- Single bulk join query ---
         cur.execute(
