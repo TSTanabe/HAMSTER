@@ -29,6 +29,7 @@ identity to query. Do this for each protein.
 ########################################
 
 
+
 def _find_context_free_high_identity_hits(
     database_path: str,
     identity_cutoff: float = 80.0,
@@ -38,30 +39,46 @@ def _find_context_free_high_identity_hits(
     AND clusterID IS NULL
     AND genomeID is not QUERY.
 
-    Returns:
-        dict:
-            {
-                domain: {genomeID1, genomeID2, ...},
-                ...
-            }
+    Uses TEMP table to avoid repeated Python-side bookkeeping and can be extended
+    later to reuse tmp_cf across subsequent steps.
     """
     context_free: dict[str, set[str]] = defaultdict(set)
 
-    query = """
-        SELECT DISTINCT d.domain, p.genomeID
-        FROM Domains d
-        JOIN Proteins p ON p.proteinID = d.proteinID
-        WHERE d.identity >= ?
-          AND p.clusterID IS NULL
-          AND p.genomeID != 'QUERY'
-    """
-
-    with sqlite3.connect(database_path) as con:
+    with sqlite3.connect(database_path, timeout=120.0) as con:
         cur = con.cursor()
-        for domain, genome_id in cur.execute(query, (identity_cutoff,)):
+
+        # TEMP is a write -> allow it, then lock down persistent DB afterwards if you want
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")   # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;") # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
+
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_cf (domain TEXT, genomeID TEXT);")
+        cur.execute("DELETE FROM tmp_cf;")
+
+        # Fill TEMP table
+        cur.execute(
+            """
+            INSERT INTO tmp_cf(domain, genomeID)
+            SELECT DISTINCT d.domain, p.genomeID
+            FROM Domains d
+            JOIN Proteins p ON p.proteinID = d.proteinID
+            WHERE d.identity >= ?
+              AND p.clusterID IS NULL
+              AND p.genomeID != 'QUERY'
+            """,
+            (identity_cutoff,),
+        )
+
+        # Now (optional) protect persistent schema (TEMP already populated)
+        cur.execute("PRAGMA query_only=TRUE;")
+
+        # Read back
+        for domain, genome_id in cur.execute("SELECT domain, genomeID FROM tmp_cf;"):
             context_free[domain].add(genome_id)
 
     return context_free
+
 
 
 def _fetch_high_identity_domain_intersection(
@@ -70,75 +87,74 @@ def _fetch_high_identity_domain_intersection(
     min_identity_cutoff: float = 70.0,
 ) -> Dict[str, Set[str]]:
     """
-    Für jede gegebene Domain und deren zugehörige Genome:
-      - hole alle Domaintypen mit identity >= min_identity_cutoff in diesen Genomen
-      - berechne die Schnittmenge der Domain-Sets über die Genome dieser Domain
+    For each seed_domain and its genomes:
+      - compute the intersection of domains with identity >= cutoff across those genomes
+    using TEMP tables and a single GROUP BY/HAVING query per seed_domain.
 
-    Args:
-        database_path: Pfad zur SQLite-Datenbank.
-        domain_to_genomes: dict {seed_domain: set(genomeIDs)},
-                           z.B. Ausgabe von _find_context_free_high_identity_hits().
-        min_identity_cutoff: minimale Identity in Prozent.
-
-    Returns:
-        dict:
-            {
-                seed_domain: {domain1, domain2, ...},  # Domains, die in ALLEN zugehörigen Genomen
-                                                     # mit identity >= cutoff vorkommen
-                ...
-            }
+    This replaces the chunked IN() queries and Python-side set intersection.
     """
-
-    # Ergebnis: für jede Seed-Domain die Schnittmenge der Co-Occurrence-Domains
     intersections_per_seed: Dict[str, Set[str]] = {}
-
     if not domain_to_genomes:
         return intersections_per_seed
 
-    with sqlite3.connect(database_path) as con:
+    with sqlite3.connect(database_path, timeout=120.0) as con:
         cur = con.cursor()
-        chunk_size = 900  # wegen SQLite-Placeholder-Limit
+
+        # TEMP allowed; then lock down main schema after filling temp each iteration if desired
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")   # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;") # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
+
+        # Create TEMP table once
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_seed_genomes (genomeID TEXT PRIMARY KEY);"
+        )
 
         for seed_domain, genomes in domain_to_genomes.items():
-            genomes_list = [g for g in genomes if g]
+            genomes_list = [g for g in genomes if g and g != "QUERY"]
             if not genomes_list:
                 intersections_per_seed[seed_domain] = set()
                 continue
 
-            # pro Genom: welche Domains erfüllen den Identity-Cutoff?
-            domains_per_genome: Dict[str, Set[str]] = defaultdict(set)
+            # Fill tmp_seed_genomes for this seed
+            cur.execute("DELETE FROM tmp_seed_genomes;")
+            cur.executemany(
+                "INSERT OR IGNORE INTO tmp_seed_genomes(genomeID) VALUES (?);",
+                ((g,) for g in genomes_list),
+            )
 
-            # DB in Chunks abfragen
-            for i in range(0, len(genomes_list), chunk_size):
-                chunk = genomes_list[i : i + chunk_size]
-                placeholders = ",".join(["?"] * len(chunk))
+            # Optional: lock down persistent db after TEMP is ready
+            cur.execute("PRAGMA query_only=TRUE;")
 
-                query = f"""
-                    SELECT DISTINCT d.domain, p.genomeID
-                    FROM Domains d
-                    JOIN Proteins p ON p.proteinID = d.proteinID
-                    WHERE d.identity >= ?
-                      AND p.genomeID IN ({placeholders})
-                      AND p.genomeID != 'QUERY'
+            # N genomes in the current seed set
+            cur.execute("SELECT COUNT(*) FROM tmp_seed_genomes;")
+            n_genomes = cur.fetchone()[0]
+            if n_genomes == 0:
+                intersections_per_seed[seed_domain] = set()
+                cur.execute("PRAGMA query_only=FALSE;")
+                continue
+
+            # Intersection: domains that appear in ALL genomes (identity cutoff)
+            # Key trick: GROUP BY domain + HAVING COUNT(DISTINCT genomeID) = n_genomes
+            cur.execute(
                 """
-                cur.execute(query, (min_identity_cutoff, *chunk))
-                for domain, genome_id in cur.fetchall():
-                    domains_per_genome[genome_id].add(domain)
+                SELECT d.domain
+                FROM Domains d
+                JOIN Proteins p ON p.proteinID = d.proteinID
+                JOIN tmp_seed_genomes g ON g.genomeID = p.genomeID
+                WHERE d.identity >= ?
+                  AND p.genomeID != 'QUERY'
+                GROUP BY d.domain
+                HAVING COUNT(DISTINCT p.genomeID) = ?
+                """,
+                (min_identity_cutoff, n_genomes),
+            )
 
-            # Schnittmenge über alle Genome dieser Seed-Domain bilden
-            intersection: Set[str] | None = None
-            for genome_id in genomes_list:
-                doms = domains_per_genome.get(genome_id, set())
-                if intersection is None:
-                    intersection = set(doms)
-                else:
-                    intersection &= doms
+            intersections_per_seed[seed_domain] = {row[0] for row in cur.fetchall()}
 
-                # Early exit: wenn leer, kann nichts mehr dazu kommen
-                if not intersection:
-                    break
-
-            intersections_per_seed[seed_domain] = intersection or set()
+            # Allow next TEMP refill (some SQLite builds block TEMP writes under query_only)
+            cur.execute("PRAGMA query_only=FALSE;")
 
     return intersections_per_seed
 

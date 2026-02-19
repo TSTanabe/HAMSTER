@@ -504,9 +504,8 @@ def fetch_proteinIDs_dict_multiprocessing(
         cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
         cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
-        # (do NOT set query_only yet, otherwise some builds may block TEMP writes)
 
-        # --- Build + fill TEMP tasks table (this is the write that failed in ro mode) ---
+        # Build + fill TEMP tasks table
         n_tasks = _prepare_keyword_domain_tasks_temp(cur, csb_dictionary)
         if n_tasks == 0:
             return out
