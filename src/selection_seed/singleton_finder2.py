@@ -165,34 +165,44 @@ def select_singleton_refs_by_domain_pattern(
     seed_to_pattern_domains: Dict[str, Set[str]],
     min_identity_cutoff: float = 70.0,
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
+
     limits_dict: Dict[str, Dict[str, float]] = {}
     sng_reference_seq_dict: Dict[str, Set[str]] = defaultdict(set)
 
     if not seed_to_pattern_domains:
         return limits_dict, sng_reference_seq_dict
 
-    with sqlite3.connect(database_path) as con:
+    with sqlite3.connect(database_path, timeout=120.0) as con:
         cur = con.cursor()
 
-        # TEMP table once
-        cur.execute(
-            "CREATE TEMP TABLE IF NOT EXISTS tmp_pattern_domains (domain TEXT PRIMARY KEY)"
-        )
+        # Pragmas (TEMP muss erlaubt sein)
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
+
+        # TEMP tables einmalig
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_pattern_domains (domain TEXT PRIMARY KEY);")
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_genomes (genomeID TEXT PRIMARY KEY);")
 
         for seed_domain, pattern_domains in seed_to_pattern_domains.items():
-            logger.info(f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains")
             if not pattern_domains:
                 continue
 
-            # fill temp table
-            cur.execute("DELETE FROM tmp_pattern_domains")
+            logger.info(f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains")
+
+            # --- tmp_pattern_domains füllen ---
+            cur.execute("DELETE FROM tmp_pattern_domains;")
             cur.executemany(
                 "INSERT OR IGNORE INTO tmp_pattern_domains(domain) VALUES (?);",
-                ((d,) for d in pattern_domains),
+                ((d,) for d in pattern_domains if d),
             )
 
-            # 1) Genome that have ALL pattern domains
-            query_genomes = """
+            # --- passende Genomes direkt in tmp_genomes materialisieren ---
+            cur.execute("DELETE FROM tmp_genomes;")
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO tmp_genomes(genomeID)
                 SELECT p.genomeID
                 FROM Domains d
                 JOIN Proteins p ON p.proteinID = d.proteinID
@@ -201,48 +211,54 @@ def select_singleton_refs_by_domain_pattern(
                   AND p.genomeID != 'QUERY'
                 GROUP BY p.genomeID
                 HAVING COUNT(DISTINCT d.domain) = (SELECT COUNT(*) FROM tmp_pattern_domains)
-            """
+                """,
+                (min_identity_cutoff,),
+            )
 
-            cur.execute(query_genomes, (min_identity_cutoff,))
-            genomes = [row[0] for row in cur.fetchall()]
-
-            if not genomes:
+            # Schnell abbrechen, wenn keine Genomes
+            cur.execute("SELECT COUNT(*) FROM tmp_genomes;")
+            n_genomes = cur.fetchone()[0]
+            if n_genomes == 0:
                 continue
 
-            # 2) fetch ALL seed_domain hits in these genomes
-            all_proteinIDs = set()
-            all_bitscores = []
-
-            chunk_size = 900
-            for i in range(0, len(genomes), chunk_size):
-                chunk = genomes[i : i + chunk_size]
-                placeholders = ",".join(["?"] * len(chunk))
-
-                query_hits = f"""
-                    SELECT d.proteinID, d.score
-                    FROM Domains d
-                    JOIN Proteins p ON p.proteinID = d.proteinID
-                    WHERE d.domain = ?
-                      AND d.identity >= ?
-                      AND p.genomeID IN ({placeholders})
-                      AND p.genomeID != 'QUERY'
+            # --- Seed-domain Hits in diesen Genomes: 1 Query, kein IN-chunking ---
+            # 1) Limits (MIN/MAX) direkt in SQL (kein Python-List-Aufbau)
+            cur.execute(
                 """
-                cur.execute(query_hits, (seed_domain, min_identity_cutoff, *chunk))
-                for protein_id, score in cur.fetchall():
-                    all_proteinIDs.add(protein_id)
-                    try:
-                        all_bitscores.append(float(score))
-                    except:
-                        pass
+                SELECT MIN(d.score), MAX(d.score)
+                FROM Domains d
+                JOIN Proteins p ON p.proteinID = d.proteinID
+                JOIN tmp_genomes g ON g.genomeID = p.genomeID
+                WHERE d.domain = ?
+                  AND d.identity >= ?
+                  AND p.genomeID != 'QUERY'
+                """,
+                (seed_domain, min_identity_cutoff),
+            )
+            row = cur.fetchone()
+            if not row or row[0] is None or row[1] is None:
+                continue
+            lower, upper = float(row[0]), float(row[1])
 
-            if not all_proteinIDs or not all_bitscores:
+            # 2) ProteinIDs holen (DISTINCT)
+            cur.execute(
+                """
+                SELECT DISTINCT d.proteinID
+                FROM Domains d
+                JOIN Proteins p ON p.proteinID = d.proteinID
+                JOIN tmp_genomes g ON g.genomeID = p.genomeID
+                WHERE d.domain = ?
+                  AND d.identity >= ?
+                  AND p.genomeID != 'QUERY'
+                """,
+                (seed_domain, min_identity_cutoff),
+            )
+            protein_ids = {r[0] for r in cur.fetchall()}
+            if not protein_ids:
                 continue
 
-            sng_reference_seq_dict[seed_domain] = all_proteinIDs
-            limits_dict[seed_domain] = {
-                "lower_limit": min(all_bitscores),
-                "upper_limit": max(all_bitscores),
-            }
+            sng_reference_seq_dict[seed_domain] = protein_ids
+            limits_dict[seed_domain] = {"lower_limit": lower, "upper_limit": upper}
 
     return limits_dict, sng_reference_seq_dict
 
