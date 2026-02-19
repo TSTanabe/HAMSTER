@@ -440,49 +440,116 @@ def process_keyword_domains(
 
     return result
 
+def _prepare_keyword_domain_tasks_temp(
+    cur: sqlite3.Cursor, csb_dictionary: Dict[str, List[str]]
+) -> int:
+    """
+    TEMP table tmp_tasks(keyword TEXT, domain TEXT) befüllen.
+    Analog zu db_fetch_protein.py: TEMP table + executemany, damit keine 999-Variable-Limits.
+    Returns: number of inserted task pairs.
+    """
+    cur.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS tmp_tasks (keyword TEXT, domain TEXT);"
+    )
+    cur.execute("DELETE FROM tmp_tasks;")
+
+    pairs = []
+    for keyword, domains in csb_dictionary.items():
+        if keyword == "default":
+            continue
+        if not domains:
+            continue
+        for d in domains:
+            if d:
+                pairs.append((keyword, d))
+
+    if not pairs:
+        return 0
+
+    # Optional: entdoppeln (kann DB auch selber, aber spart Insertarbeit)
+    pairs = list(dict.fromkeys(pairs))
+
+    cur.executemany(
+        "INSERT INTO tmp_tasks(keyword, domain) VALUES (?, ?);",
+        pairs,
+    )
+    return len(pairs)
+
 
 def fetch_proteinIDs_dict_multiprocessing(
-    database_path: str, csb_dictionary: Dict[str, List[str]], min_seqs: int, cores: int
+    database_path: str,
+    csb_dictionary: Dict[str, List[str]],
+    min_seqs: int,
+    cores: int,  # bleibt im Signature, wird aber nicht genutzt
 ) -> Dict[Tuple[str, str], Set[str]]:
     """
-    Multiprocessing wrapper for process_keyword_domains.
+    FAST bulk-fetch: holt alle ProteinIDs für (keyword, domain) mit einem TEMP-table Join.
 
-    Args:
-        database_path (str): SQLite DB path.
-        csb_dictionary (dict): {keyword: [domains]}
-        min_seqs (int): Minimum sequence count to keep.
-        cores (int): Number of parallel processes.
+    Ersetzt den alten multiprocessing+chunked-IN Ansatz komplett.
+    cores ist absichtlich ungenutzt: SQLite profitiert hier i.d.R. mehr von 1 Bulk-Query
+    als von vielen parallelen Readern.
 
     Returns:
-        dict: {(keyword, domain): set(proteinIDs)}
-
-    Example Output:
-        {('A','DEF'): {'prot1', ...}}
+        {(keyword, domain): set(proteinIDs)}
     """
-    # Prepare the arguments for the worker function
-    tasks = [
-        (database_path, keyword, domains, min_seqs)
-        for keyword, domains in csb_dictionary.items()
-        if keyword != "default"
-    ]
+    out: Dict[Tuple[str, str], Set[str]] = {}
 
-    total_tasks = len(tasks)
+    # Normal connection (no mode=ro), because TEMP TABLE needs write capability.
+    # We will protect the main DB with PRAGMA query_only=TRUE after TEMP setup.
+    with sqlite3.connect(database_path, timeout=120.0) as con:
+        cur = con.cursor()
 
-    # Use multiprocessing to process the items in parallel
-    with Pool(processes=cores) as pool:
-        results = []
-        for i, result in enumerate(pool.imap(process_keyword_domains, tasks), start=1):
-            results.append(result)
+        # --- Performance pragmas (safe) ---
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA automatic_index=ON;")
+        # (do NOT set query_only yet, otherwise some builds may block TEMP writes)
 
-    # Combine results from all workers
-    combined_dict = {}
-    for result in results:
-        for key, value in result.items():
-            if key not in combined_dict:
-                combined_dict[key] = set()
-            combined_dict[key].update(value)
+        # --- Build + fill TEMP tasks table (this is the write that failed in ro mode) ---
+        n_tasks = _prepare_keyword_domain_tasks_temp(cur, csb_dictionary)
+        if n_tasks == 0:
+            return out
 
-    return combined_dict
+        # Now lock down the main database: no writes to persistent tables possible.
+        cur.execute("PRAGMA query_only=TRUE;")
+
+        # Optional: ask SQLite to optimize based on current schema/statistics
+        cur.execute("PRAGMA optimize;")
+
+        # --- Single bulk join query ---
+        cur.execute(
+            """
+            SELECT
+                t.keyword   AS keyword,
+                t.domain    AS domain,
+                p.proteinID AS proteinID
+            FROM tmp_tasks t
+            JOIN Keywords k
+              ON k.keyword = t.keyword
+            JOIN Proteins p
+              ON p.clusterID = k.clusterID
+            JOIN Domains d
+              ON d.proteinID = p.proteinID
+             AND d.domain    = t.domain
+            """
+        )
+
+        for keyword, domain, proteinID in cur:
+            key = (keyword, domain)
+            s = out.get(key)
+            if s is None:
+                out[key] = {proteinID}
+            else:
+                s.add(proteinID)
+
+    # Apply min_seqs filter (keep only (keyword,domain) with enough proteins)
+    if min_seqs and min_seqs > 1:
+        out = {k: v for k, v in out.items() if len(v) >= min_seqs}
+
+    return out
+
+
 
 
 ######################################################################################################
