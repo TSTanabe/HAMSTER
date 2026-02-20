@@ -107,9 +107,28 @@ def select_similar_csb_patterns_per_protein(
         # Compare against all CSB patterns and collect similar ones
         similar_csb_keywords = set()
 
+        domain_pattern_union_len = len(domain_pattern_union)
+
         for csb_key, csb_pattern in csb_dictionary.items():
-            intersection = len(domain_pattern_union & csb_pattern)
-            union = len(domain_pattern_union | csb_pattern)
+
+            csb_pattern_len = len(csb_pattern)
+
+            # Upper bound pruning (sehr effektiv)
+            max_possible = min(domain_pattern_union_len, csb_pattern_len) / max(domain_pattern_union_len, csb_pattern_len) if max(domain_pattern_union_len, csb_pattern_len) > 0 else 0.0
+            if max_possible < jaccard_threshold:
+                continue
+
+            # Intersection ohne temporäres Set
+            if domain_pattern_union_len < csb_pattern_len:
+                intersection = sum(1 for x in domain_pattern_union if x in csb_pattern)
+            else:
+                intersection = sum(1 for x in csb_pattern if x in domain_pattern_union)
+
+            if intersection == 0:
+                if jaccard_threshold > 0.0:
+                    continue
+
+            union = domain_pattern_union_len + csb_pattern_len - intersection
             similarity = intersection / union if union > 0 else 0.0
 
             if similarity >= jaccard_threshold:
@@ -147,7 +166,7 @@ def fetch_keywords_for_proteins(
     all_keywords: Set[str] = set()
 
     with sqlite3.connect(database_path, timeout=120.0) as con:
-        logger.info(f"Fetching {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
+        #logger.info(f"Fetching {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
         cur = con.cursor()
 
         # Pragmas: TEMP in memory; speed tuning
@@ -188,7 +207,7 @@ def fetch_keywords_for_proteins(
 
         all_keywords = {row[0] for row in cur.fetchall()}
 
-    logger.info(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
+    logger.debug(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
     return all_keywords
 
 
@@ -204,7 +223,7 @@ def integrate_csb_variants_into_merged_grouped(
 
     chunk_size controls batching for executemany inserts into TEMP tables.
     """
-    logger.debug("Integration of added CSB proteins to grouped dataset")
+    logger.info("Integration of added CSB proteins to grouped dataset")
 
     if not domain_to_new_keywords_dict:
         return merged_grouped

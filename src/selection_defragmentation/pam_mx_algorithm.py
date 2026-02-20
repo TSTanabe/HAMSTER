@@ -55,16 +55,21 @@ def train_logistic_from_pam_with_scores(
     for genome in genomes:
         binary_row = {}
         score_row = {}
+        get_score = hit_scores.get
+
         for domain in domains:
-            proteins = pam[genome].get(domain, [])
+            proteins = pam[genome].get(domain, ())
             binary_row[domain + "_presence"] = int(bool(proteins))
 
-            # Compute average hit score of proteins, or 0 if none valid
-            valid_scores = [hit_scores[p] for p in proteins if p in hit_scores]
-            score_row[domain + "_score"] = (
-                sum(valid_scores) / len(valid_scores) if valid_scores else 0.0
-            )
+            s = 0.0
+            n = 0
+            for p in proteins:
+                v = get_score(p)
+                if v is not None:
+                    s += v
+                    n += 1
 
+            score_row[domain + "_score"] = (s / n) if n else 0.0
         binary_data.append(binary_row)
         score_data.append(score_row)
 
@@ -165,7 +170,7 @@ def build_presence_score_matrix(
         if not protein_str or not isinstance(protein_str, str):
             return 0.0
         pids = protein_str.split(",")
-        return max([hit_scores.get(pid, 0.0) for pid in pids if pid])
+        return max((hit_scores.get(pid, 0.0) for pid in pids if pid), default=0.0)
 
     for domain in df.columns:
         binary_matrix[domain + "_presence"] = df[domain].apply(
@@ -209,7 +214,7 @@ def create_presence_absence_matrix(
     all_protein_ids = {pid for pids in proteinID_sets.values() for pid in pids}
 
     if not all_protein_ids:
-        return
+        return {}
 
     # Step 1: Map proteinID → genomeID
     chunk_args = [
@@ -308,8 +313,9 @@ def chunked(iterable: List[Any], size: int) -> Iterator[List[Any]]:
     Example:
         list(chunked([1,2,3,4,5], 2)) → [[1,2],[3,4],[5]]
     """
-    for i in range(0, len(iterable), size):
-        yield list(iterable)[i : i + size]
+    seq = list(iterable)
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
 
 
 #############################################################################
@@ -404,7 +410,7 @@ def process_domain_hits_pool(
 
     # Aggregate result
     proteinIDs = set()
-    bitscores = []
+    #bitscores = []
     for genome_id, (bsr, proteinID, score) in best_hits.items():
         proteinIDs.add(proteinID)
 

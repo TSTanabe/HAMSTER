@@ -4,6 +4,7 @@
 import copy
 from typing import Dict, Set, Any
 import pandas as pd
+import numpy as np
 
 from src.selection_defragmentation import pam_mx_algorithm
 from src.core import myUtil
@@ -113,18 +114,42 @@ def predict_reference_seqs_for_each_domain(
         # 4.2 DataFrame
         genomes = sorted(test_pam.keys())
         features = sorted({d for doms in test_pam.values() for d in doms})
-        df = pd.DataFrame(index=genomes, columns=features)
 
-        for genome_id in genomes:
-            for feat in features:
-                df.at[genome_id, feat] = (
-                    ",".join(test_pam[genome_id].get(feat, []))
-                    if feat in test_pam[genome_id]
-                    else ""
-                )
+        feat_to_idx = {f: i for i, f in enumerate(features)}
+        nG = len(genomes)
+        nF = len(features)
 
-        # 4.3 Matrix
-        x = pam_mx_algorithm.build_presence_score_matrix(df, bsr_hit_scores)
+        presence = np.zeros((nG, nF), dtype=np.uint8)
+        scores = np.zeros((nG, nF), dtype=np.float32)
+
+        get_score = bsr_hit_scores.get
+
+        for gi, gid in enumerate(genomes):
+            dommap = test_pam[gid]  # {feat: [proteinIDs]}
+            for feat, proteins in dommap.items():
+                j = feat_to_idx.get(feat)
+                if j is None or not proteins:
+                    continue
+
+                presence[gi, j] = 1
+
+                # build_presence_score_matrix() nutzt "max score" (nicht Mittelwert)
+                m = 0.0
+                for p in proteins:
+                    v = get_score(p)
+                    if v is not None and v > m:
+                        m = v
+                scores[gi, j] = m
+
+        # exakt gleiche Spaltennamen wie build_presence_score_matrix()
+        presence_df = pd.DataFrame(
+            presence, index=genomes, columns=[f + "_presence" for f in features]
+        )
+        score_df = pd.DataFrame(
+            scores, index=genomes, columns=[f + "_score" for f in features]
+        )
+
+        x = pd.concat([presence_df, score_df], axis=1)
 
         # 4.4 Spalten angleichen
         x = x.reindex(columns=model.feature_names_in_, fill_value=0)
