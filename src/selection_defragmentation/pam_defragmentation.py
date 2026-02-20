@@ -88,11 +88,13 @@ def predict_reference_seqs_for_each_domain(
     )
 
     # 2. BSR-Scores laden
+    logger.info("Loading blast-score ratio")
     bsr_hit_scores = pam_mx_algorithm.fetch_bsr_scores(
         database_path, grouped, chunk_size=chunk_size
     )
 
     # 3. Modelle trainieren
+    logger.info("Calculating logistic regression")
     models, _ = pam_mx_algorithm.train_logistic_from_pam_with_scores(
         global_pam, bsr_hit_scores, cores=cores
     )
