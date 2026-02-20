@@ -27,10 +27,7 @@ import multiprocessing as mp
 import sqlite3
 from typing import Any, Dict, Set, Tuple, Optional
 
-# Your project imports (adjust the import paths if needed)
-# - csb_proteins_selection.parse_csb_file_to_dict
-# - fetch_keywords_for_proteins (we reimplement the same logic worker-side to reuse a connection)
-import csb_proteins_selection  # type: ignore
+from src.selection_seed import csb_proteins_selection
 
 logger = logging.getLogger(__name__)
 
