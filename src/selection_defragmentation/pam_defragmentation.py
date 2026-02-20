@@ -29,6 +29,9 @@ def pam_genome_defragmentation_hit_finder(
     Returns:
         dict: {domain: set(proteinIDs)}, merged set.
     """
+    grp1_merged_dict = myUtil.load_cache(options, "grp1_pam_defragmented_dict.pkl")
+    if grp1_merged_dict:
+        return grp1_merged_dict
 
     # returns dict: {domain: prediction_series (genomeID → score), only new genomes}
     predicted_genomes = predict_reference_seqs_for_each_domain(
@@ -54,6 +57,7 @@ def pam_genome_defragmentation_hit_finder(
         grp1_merged_dict, pam_added_reference_seq_dict, basis_grouped
     )  # print in terminal the number of added sequences
 
+    myUtil.save_cache(options, "grp1_pam_defragmented_dict.pkl", grp1_merged_dict)
     return grp1_merged_dict
 
 

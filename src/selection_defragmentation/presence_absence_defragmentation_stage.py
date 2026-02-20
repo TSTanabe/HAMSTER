@@ -7,7 +7,7 @@ from src.core import myUtil
 from src.selection_defragmentation import (
     seq_clustering,
     protein_mcl,
-    pam_defragmentation,
+    pam_defragmentation, parallel_keyword_clustering,
 )
 from src.selection_seed import (
     csb_proteins_selection,
@@ -43,15 +43,21 @@ def extend_merged_grouped_by_csb_similarity(
     """
     # Main routine for proteins from highly similar csb to the basic csb
 
-    # Find keywords that are in jaccard distance to the csb of reference sequences in grouped
-    protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein(
-        options, grouped, options.jaccard
-    )
+    # Find keywords that are in jaccard distance to the csb of reference sequences in grouped. Load if possible
+    protein_to_new_keywords_dict = myUtil.load_cache(options, "grp1_protein_to_key.pkl")
+    if not protein_to_new_keywords_dict:
+        protein_to_new_keywords_dict = parallel_keyword_clustering.select_similar_csb_patterns_per_protein( # can be loaded from here as a single thread version
+            options, grouped, options.jaccard
+        )
+        myUtil.save_cache(options, "grp1_protein_to_key.pkl", protein_to_new_keywords_dict)
 
-    # Integrate proteins with the new keywords into merged_grouped dataset
-    extended_grouped = integrate_csb_variants_into_merged_grouped(
-        options, grouped, protein_to_new_keywords_dict, options.sqlite_chunks
-    )
+    # Integrate proteins with the new keywords into merged_grouped dataset. Load if possible
+    extended_grouped = myUtil.load_cache(options, "grp1_extended_grouped.pkl")
+    if not extended_grouped:
+        extended_grouped = integrate_csb_variants_into_merged_grouped(
+            options, grouped, protein_to_new_keywords_dict, options.sqlite_chunks
+        )
+        myUtil.save_cache(options, "grp1_extended_grouped.pkl", extended_grouped)
 
     return extended_grouped
 
