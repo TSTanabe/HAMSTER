@@ -7,7 +7,7 @@ from src.core import myUtil
 from src.selection_defragmentation import (
     seq_clustering,
     protein_mcl,
-    pam_defragmentation, parallel_keyword_clustering,
+    pam_defragmentation
 )
 from src.selection_seed import (
     csb_proteins_selection,
@@ -46,7 +46,7 @@ def extend_merged_grouped_by_csb_similarity(
     # Find keywords that are in jaccard distance to the csb of reference sequences in grouped. Load if possible
     protein_to_new_keywords_dict = myUtil.load_cache(options, "grp1_protein_to_key.pkl")
     if not protein_to_new_keywords_dict:
-        protein_to_new_keywords_dict = parallel_keyword_clustering.select_similar_csb_patterns_per_protein( # can be loaded from here as a single thread version
+        protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein( # can be loaded from here as a single thread version
             options, grouped, options.jaccard
         )
         myUtil.save_cache(options, "grp1_protein_to_key.pkl", protein_to_new_keywords_dict)
