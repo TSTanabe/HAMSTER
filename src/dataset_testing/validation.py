@@ -347,6 +347,7 @@ def create_hmms_from_msas(
 
         # Skip if the HMM file already exists in the target directory
         if os.path.isfile(hmm_file):
+            logger.debug(f"{msa_path}")
             logger.debug(f"HMM {hmm_file} already exists - skipping")
             continue
 
@@ -354,7 +355,7 @@ def create_hmms_from_msas(
         hmmbuild_cmd = f"hmmbuild --amino --cpu {cores} {hmm_file} {msa_path}"
 
         # Run the hmmbuild command
-        logger.debug(f"Running hmmbuild for {msa_file} -> {hmm_file}")
+        logger.debug(f"Running hmmbuild for {msa_path} -> {hmm_file}")
         subprocess.run(
             hmmbuild_cmd,
             shell=True,
