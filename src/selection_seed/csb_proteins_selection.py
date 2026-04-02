@@ -1,4 +1,5 @@
 #!/usr/bin/python
+import random
 import sqlite3
 import os
 import multiprocessing
@@ -679,10 +680,11 @@ def fetch_seqs_to_fasta_parallel(
             continue  # Skip this domain
 
         if num_sequences > (max_seq + hardcap):
-            logger.warn(
-                f"'{domain}' was skipped due to too many sequences {num_sequences} > {max_seq + hardcap})"
+            logger.warning(
+                f"'{domain}' has too many sequences ({num_sequences}), "
+                f"randomly subsampling to {hardcap}"
             )
-            continue  # Skip this domain
+            protein_ids = random.sample(protein_ids, hardcap)
 
         if os.path.exists(output_file):
             logger.debug(
@@ -695,7 +697,7 @@ def fetch_seqs_to_fasta_parallel(
 
     if not tasks:
         return  # Exit if no tasks remain
-
+    logger.info("Fetching amino acid sequences from local database. Might take some minutes ...")
     # Use multiprocessing to run fetch_seq_to_fasta in parallel
     with multiprocessing.Pool(processes=cores) as pool:
         pool.starmap(fetch_seq_to_fasta, tasks)
@@ -818,7 +820,7 @@ def fetch_protein_ids_for_domain(
 
     if tie_count > 0:
         logger.warning(
-            f"max_count {max_count} reached for {domain}, but {tie_count} more proteins with same score ({last_score}) included."
+            f"max_count {max_count} reached for {domain}, but {tie_count} more proteins with same bitscore ({last_score}) included."
         )
 
     return domain, protein_ids

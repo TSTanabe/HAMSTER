@@ -43,7 +43,7 @@ def pam_genome_defragmentation_hit_finder(
             min_feature_genomes=2,
         )
         #myUtil.save_cache(options, support_models_name, support_models)
-        print(support_models)
+
 
     plausible_hits = (
         pam_mx_calculate_plausability.collect_plausible_domain_hits_from_support_models(

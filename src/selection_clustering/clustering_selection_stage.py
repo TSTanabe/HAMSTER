@@ -100,11 +100,6 @@ def mcl_select_grp2_clusters(options) -> dict:
         if hasattr(options, "grouped")
         else myUtil.load_cache(options, "grp1_merged_grouped.pkl")
     )
-    score_limit_dict = (
-        options.score_limit_dict
-        if hasattr(options, "score_limit_dict")
-        else myUtil.load_cache(options, "grp1_merged_score_limits.pkl")
-    )
 
     # Load and validate clustering results
     mcl_clustering_results_dict = myUtil.load_cache(

@@ -355,15 +355,19 @@ def collect_plausible_domain_hits_from_support_models(
         return {}
 
     plausible_hits: DefaultDict[str, Set[str]] = defaultdict(set)
-
+    last_logged_pct = -5
     for start in range(0, total, chunk_size):
         end = min(start + chunk_size, total)
         genome_chunk = all_genomes[start:end]
 
-        logger.info(
-            f"Scoring genomes chunk {start + 1}-{end} / {total} "
-            f"({(end / total) * 100:.1f}%)"
-        )
+        current_pct = int((end / total) * 100)
+        step_pct = (current_pct // 5) * 5
+
+        if step_pct >= last_logged_pct + 5:
+            logger.info(
+                f"Scoring genomes {step_pct}% ({end} / {total})"
+            )
+            last_logged_pct = step_pct
 
         # genome -> domain -> (best_proteinID, best_score)
         best_hits_by_genome = _fetch_best_domain_hits_for_genome_chunk(
