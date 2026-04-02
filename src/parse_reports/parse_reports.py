@@ -643,7 +643,6 @@ def parse_bulk_blastreport_consecutive(
     return protein_dict
 
 
-
 def hit_passes_thresholds(
     *,
     raw_query_id: str,
@@ -682,10 +681,7 @@ def hit_passes_thresholds(
         and bitscore >= score_cutoff
         and coverage >= coverage_cutoff
     )
-    cond_b = (
-        pident >= identity_cutoff
-        and coverage >= coverage_cutoff
-    )
+    cond_b = pident >= identity_cutoff and coverage >= coverage_cutoff
     return cond_a or cond_b
 
 

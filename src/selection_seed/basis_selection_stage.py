@@ -40,6 +40,7 @@ def basis_sequence_fasta(options) -> None:
         options.grouped: dict[str, set[str]] = {'domainA': {'seq1', 'seq2', ...}, ...}
         options.score_limit_dict: dict[str, dict[str, float]] = {'domainA': {'lower_limit': 10.0, 'upper_limit': 200.0}}
     """
+    logger.debug("Indexing local database")
     database.index_database(options.database_directory)
 
     ### Collect the sequences from csb where at least one query is encoded
@@ -60,7 +61,9 @@ def basis_sequence_fasta(options) -> None:
         merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
         merged_grouped = {**grouped, **sng_ref_seqs_dict}
     else:
-        logger.error("There were no proteins selected for basic training. Consider increasing the input data or lowering selection thresholds - stopping execution")
+        logger.error(
+            "There were no proteins selected for basic training. Consider increasing the input data or lowering selection thresholds - stopping execution"
+        )
         sys.exit()
 
     # Print the grp0 csb and singletons to fasta

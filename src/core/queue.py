@@ -118,6 +118,7 @@ def queue_protein_annotation_inputs(config) -> None:
 
     logger.info(f"Queued {len(common_ids)} genomes with FAA and GFF.")
 
+
 def queue_faa_without_gff(config) -> dict[str, str]:
     """Collect FAA files for which no GFF exists (NO decompression).
 
@@ -155,7 +156,9 @@ def queue_faa_without_gff(config) -> dict[str, str]:
         if gid in faa_plain:
             faa_missing_gff[gid] = faa_plain[gid]
 
-    logger.info(f"Queued {len(faa_missing_gff)} faa files without gff for transcription.")
+    logger.info(
+        f"Queued {len(faa_missing_gff)} faa files without gff for transcription."
+    )
     return faa_missing_gff
 
 

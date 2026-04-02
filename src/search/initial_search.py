@@ -1,10 +1,16 @@
 #!/usr/bin/python
 import os
 from src.db import database
-from src.search import global_file_search, create_glob_faa, query_selfblast_search, blastp_parallel
+from src.search import (
+    global_file_search,
+    create_glob_faa,
+    query_selfblast_search,
+    blastp_parallel,
+)
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
 
 def initial_search(config) -> None:
     """
@@ -38,7 +44,7 @@ def initial_search(config) -> None:
 
     # header in glob file are genomeID___proteinID
 
-    #global_file_search.initial_glob_search(config)
+    # global_file_search.initial_glob_search(config)
 
     blastp_parallel.run_consecutive_parallel_search(config)
     # else:

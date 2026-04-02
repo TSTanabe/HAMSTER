@@ -81,7 +81,10 @@ def plotting_matrix_histogram(options, tsv_dir: str):
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(_plot_one_tsv_worker, tsv_file, flag, output_pdf, max_x): (tsv_file, flag)
+            executor.submit(_plot_one_tsv_worker, tsv_file, flag, output_pdf, max_x): (
+                tsv_file,
+                flag,
+            )
             for (tsv_file, flag, output_pdf, max_x) in tasks
         }
 
@@ -90,9 +93,14 @@ def plotting_matrix_histogram(options, tsv_dir: str):
             try:
                 tsv_file, flag, ok, msg = future.result()
             except Exception as exc:
-                print(f"[ERROR] During the execution of '{tsv_file}' (filter={flag}) an error occurred: {exc}")
+                print(
+                    f"[ERROR] During the execution of '{tsv_file}' (filter={flag}) an error occurred: {exc}"
+                )
 
-def _adjust_left_margin_for_yticklabels(fig, ax, min_left_mm=10, right_mm=10, top_bottom_in=0.5, pad_in=0.15):
+
+def _adjust_left_margin_for_yticklabels(
+    fig, ax, min_left_mm=10, right_mm=10, top_bottom_in=0.5, pad_in=0.15
+):
     """
     Ensures y tick labels are fully inside the figure by increasing left margin dynamically.
     min_left_mm: minimum left margin in mm (keeps your baseline).
@@ -103,7 +111,11 @@ def _adjust_left_margin_for_yticklabels(fig, ax, min_left_mm=10, right_mm=10, to
     renderer = fig.canvas.get_renderer()
 
     # Union bbox of all y tick labels
-    bboxes = [lab.get_window_extent(renderer=renderer) for lab in ax.get_yticklabels() if lab.get_text()]
+    bboxes = [
+        lab.get_window_extent(renderer=renderer)
+        for lab in ax.get_yticklabels()
+        if lab.get_text()
+    ]
     if not bboxes:
         return
 
@@ -122,7 +134,9 @@ def _adjust_left_margin_for_yticklabels(fig, ax, min_left_mm=10, right_mm=10, to
     # Current margins (in figure fraction)
     cur = fig.subplotpars
     # Increase left margin by overflow + pad, but keep at least min_left_in
-    new_left_in = max(min_left_in, (cur.left * fig.get_size_inches()[0]) + overflow_in + pad_in)
+    new_left_in = max(
+        min_left_in, (cur.left * fig.get_size_inches()[0]) + overflow_in + pad_in
+    )
 
     # Convert inches to fraction
     new_left = new_left_in / fig.get_size_inches()[0]
@@ -133,8 +147,6 @@ def _adjust_left_margin_for_yticklabels(fig, ax, min_left_mm=10, right_mm=10, to
     # Clamp (avoid squeezing to zero)
     new_left = min(new_left, 0.65)
     fig.subplots_adjust(left=new_left, right=new_right, bottom=new_bottom, top=new_top)
-
-
 
 
 def _plot_one_tsv_worker(
@@ -255,7 +267,9 @@ def _plot_one_tsv_worker(
                 left=(LEFT_MM / 25.4) / A3_WIDTH_IN,
                 right=1.0 - (RIGHT_MM / 25.4) / A3_WIDTH_IN,
                 bottom=TOP_BOTTOM_IN / A3_HEIGHT_IN,
-                top=1.0 - (TOP_BOTTOM_IN / A3_HEIGHT_IN) - 0.06,  # extra headroom for legend
+                top=1.0
+                - (TOP_BOTTOM_IN / A3_HEIGHT_IN)
+                - 0.06,  # extra headroom for legend
             )
 
             # --- Stacked horizontal bars (clipped at max_x) ---
@@ -283,7 +297,8 @@ def _plot_one_tsv_worker(
             for i, tot in enumerate(d["Total"].astype(float)):
                 x = min(tot, max_x) + offset
                 ax.text(
-                    x, y[i],
+                    x,
+                    y[i],
                     f"{int(tot) if float(tot).is_integer() else tot}",
                     va="center",
                     ha="left",
@@ -314,7 +329,7 @@ def _plot_one_tsv_worker(
                 leg = ax.legend(
                     loc="lower center",
                     bbox_to_anchor=(0.5, 1.02),  # just above axes
-                    ncol=2,                      # 2 columns fits longer labels better
+                    ncol=2,  # 2 columns fits longer labels better
                     frameon=False,
                     borderaxespad=0.0,
                     fontsize=12,
@@ -324,7 +339,9 @@ def _plot_one_tsv_worker(
                 bb = leg.get_window_extent(fig.canvas.get_renderer())
                 leg_height_in = bb.height / fig.dpi
                 # add a small buffer
-                needed_top = (TOP_BOTTOM_IN + leg_height_in + 0.15) / fig.get_size_inches()[1]
+                needed_top = (
+                    TOP_BOTTOM_IN + leg_height_in + 0.15
+                ) / fig.get_size_inches()[1]
                 # Convert to top fraction: 1 - needed_top
                 fig.subplots_adjust(top=1.0 - needed_top)
 
@@ -336,7 +353,6 @@ def _plot_one_tsv_worker(
 
     except Exception as e:
         return (tsv_file, flag, False, f"{e}\n{traceback.format_exc()}")
-
 
 
 #
@@ -383,7 +399,9 @@ def plotting_enriched_performance(options, report_dir: str) -> None:
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(_plot_one_enriched_tax_boxstrip_worker, enriched_path, out_png): enriched_path
+            executor.submit(
+                _plot_one_enriched_tax_boxstrip_worker, enriched_path, out_png
+            ): enriched_path
             for (enriched_path, out_png) in tasks
         }
 
@@ -394,12 +412,13 @@ def plotting_enriched_performance(options, report_dir: str) -> None:
                 if not ok:
                     print(f"[ERROR] {fpath}: {msg}")
             except Exception as exc:
-                print(f"[ERROR] During the execution of '{enriched_path}' an error occurred: {exc}")
-
-
+                print(
+                    f"[ERROR] During the execution of '{enriched_path}' an error occurred: {exc}"
+                )
 
 
 TAX_SORT_COLS = ["Phylum", "Class", "Ordnung", "Family", "Genus", "Species"]
+
 
 def _choose_collapse_level(d: pd.DataFrame, max_groups: int = 60) -> str:
     # deepest to shallowest
@@ -408,6 +427,7 @@ def _choose_collapse_level(d: pd.DataFrame, max_groups: int = 60) -> str:
         if d[level].nunique(dropna=False) <= max_groups:
             return level
     return "Phylum"
+
 
 def _plot_one_enriched_tax_boxstrip_worker(
     enriched_path: str,
@@ -445,16 +465,22 @@ def _plot_one_enriched_tax_boxstrip_worker(
         unknown = "Unknown"
         for c in TAX_SORT_COLS:
             d[c] = (
-                d[c].astype("string")
-                .fillna(unknown)
-                .str.strip()
-                .replace({"": unknown})
+                d[c].astype("string").fillna(unknown).str.strip().replace({"": unknown})
             )
 
         # full taxonomy key (defines global order)
         d["_tax_full"] = (
-            d["Phylum"] + "|" + d["Class"] + "|" + d["Ordnung"] + "|" +
-            d["Family"] + "|" + d["Genus"] + "|" + d["Species"]
+            d["Phylum"]
+            + "|"
+            + d["Class"]
+            + "|"
+            + d["Ordnung"]
+            + "|"
+            + d["Family"]
+            + "|"
+            + d["Genus"]
+            + "|"
+            + d["Species"]
         )
 
         # choose collapse level
@@ -467,10 +493,9 @@ def _plot_one_enriched_tax_boxstrip_worker(
         # order groups by first occurrence in that full-taxonomy-sorted table
         group_order = (
             d.groupby("_group", sort=False)["_tax_full"]
-             .first()
-             .sort_values(kind="mergesort")
-             .index
-             .tolist()
+            .first()
+            .sort_values(kind="mergesort")
+            .index.tolist()
         )
         g2x = {g: i for i, g in enumerate(group_order)}
         d["_x"] = d["_group"].map(g2x).astype(float)
@@ -479,7 +504,9 @@ def _plot_one_enriched_tax_boxstrip_worker(
         y = d[score_col].astype(float).values
 
         # --- build boxplot data in the same order ---
-        box_data = [d.loc[d["_group"] == g, score_col].astype(float).values for g in group_order]
+        box_data = [
+            d.loc[d["_group"] == g, score_col].astype(float).values for g in group_order
+        ]
 
         # --- plot sizing (width scales with #groups) ---
         n_groups = len(group_order)
@@ -493,8 +520,8 @@ def _plot_one_enriched_tax_boxstrip_worker(
             box_data,
             positions=list(range(n_groups)),
             widths=0.6,
-            showfliers=False,   # outliers are visible in scatter anyway
-            manage_ticks=False
+            showfliers=False,  # outliers are visible in scatter anyway
+            manage_ticks=False,
         )
 
         # jittered scatter over boxplots (deterministic RNG)
@@ -519,10 +546,11 @@ def _plot_one_enriched_tax_boxstrip_worker(
         fig.savefig(out_png, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
-        return (enriched_path, True, f"OK (collapsed={collapse_level}, groups={n_groups})")
+        return (
+            enriched_path,
+            True,
+            f"OK (collapsed={collapse_level}, groups={n_groups})",
+        )
 
     except Exception as e:
         return (enriched_path, False, f"{e}\n{traceback.format_exc()}")
-
-
-

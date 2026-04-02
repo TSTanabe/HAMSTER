@@ -18,7 +18,13 @@ from src.csb import csb_prediction_stage
 from src.selection_clustering import clustering_selection_stage
 from src.selection_seed import basis_selection_stage, csb_proteins_selection
 
-from src.dataset_testing import validation, alignment, Reports_printing, Reports, Reports_plotting
+from src.dataset_testing import (
+    validation,
+    alignment,
+    Reports_printing,
+    Reports,
+    Reports_plotting,
+)
 
 from src.selection_defragmentation import (
     presence_absence_defragmentation_stage,
@@ -156,11 +162,11 @@ def report_cv_performance(options) -> None:
     # External R scripts
     try:
         logger.info("Plotting confusion matrices per genomic context")
-        #Reports_plotting.process_initial_plotting(options)
+        # Reports_plotting.process_initial_plotting(options)
     except Exception as e:
         logger.error("An error occurred during the R plotting: %s", str(e))
     # cross validation
-    #logger.info("Starting cross-validation")
+    # logger.info("Starting cross-validation")
     logger.info(
         f"Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}"
     )

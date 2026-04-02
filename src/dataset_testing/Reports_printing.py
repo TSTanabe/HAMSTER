@@ -85,14 +85,16 @@ def process_initial_validations(
     #    )
 
 
-
 #
 # Add Taxonomy to dataframe routinen
 #
 
 TAX_COLS = ["Superkingdom", "Phylum", "Class", "Ordnung", "Family", "Genus", "Species"]
 
-def fetch_taxonomy_df_via_temp_table(db_path: str, genome_ids: Sequence[str]) -> pd.DataFrame:
+
+def fetch_taxonomy_df_via_temp_table(
+    db_path: str, genome_ids: Sequence[str]
+) -> pd.DataFrame:
     genome_ids = sorted(set(str(x) for x in genome_ids if x is not None))
     if not genome_ids:
         return pd.DataFrame(columns=["genomeID", *TAX_COLS])
@@ -120,7 +122,10 @@ def fetch_taxonomy_df_via_temp_table(db_path: str, genome_ids: Sequence[str]) ->
 
     return tax_df
 
-def add_taxonomy_to_df(df: pd.DataFrame, db_path: str, genome_col: str = "genomeID") -> pd.DataFrame:
+
+def add_taxonomy_to_df(
+    df: pd.DataFrame, db_path: str, genome_col: str = "genomeID"
+) -> pd.DataFrame:
     out = df.copy()
 
     # genomeID sicherstellen (falls du nur proteinID hast)
@@ -130,12 +135,16 @@ def add_taxonomy_to_df(df: pd.DataFrame, db_path: str, genome_col: str = "genome
         else:
             raise KeyError(f"Need '{genome_col}' or 'proteinID'")
 
-    tax_df = fetch_taxonomy_df_via_temp_table(db_path, out[genome_col].astype(str).tolist())
+    tax_df = fetch_taxonomy_df_via_temp_table(
+        db_path, out[genome_col].astype(str).tolist()
+    )
 
     # LEFT JOIN: behält alle Zeilen des Reports, ergänzt Taxonomie wo verfügbar
     out = out.merge(tax_df, how="left", on=genome_col)
 
     return out
+
+
 ####################################
 # --- Directory & File Helpers --- #
 ####################################

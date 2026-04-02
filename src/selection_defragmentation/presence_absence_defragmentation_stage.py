@@ -7,7 +7,7 @@ from src.core import myUtil
 from src.selection_defragmentation import (
     seq_clustering,
     protein_mcl,
-    pam_defragmentation
+    pam_defragmentation,
 )
 from src.selection_seed import (
     csb_proteins_selection,
@@ -46,10 +46,12 @@ def extend_merged_grouped_by_csb_similarity(
     # Find keywords that are in jaccard distance to the csb of reference sequences in grouped. Load if possible
     protein_to_new_keywords_dict = myUtil.load_cache(options, "grp1_protein_to_key.pkl")
     if not protein_to_new_keywords_dict:
-        protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein( # can be loaded from here as a single thread version
+        protein_to_new_keywords_dict = select_similar_csb_patterns_per_protein(  # can be loaded from here as a single thread version
             options, grouped, options.jaccard
         )
-        myUtil.save_cache(options, "grp1_protein_to_key.pkl", protein_to_new_keywords_dict)
+        myUtil.save_cache(
+            options, "grp1_protein_to_key.pkl", protein_to_new_keywords_dict
+        )
 
     # Integrate proteins with the new keywords into merged_grouped dataset. Load if possible
     extended_grouped = myUtil.load_cache(options, "grp1_extended_grouped.pkl")
@@ -116,11 +118,15 @@ def select_similar_csb_patterns_per_protein(
         domain_pattern_union_len = len(domain_pattern_union)
 
         for csb_key, csb_pattern in csb_dictionary.items():
-
             csb_pattern_len = len(csb_pattern)
 
             # Upper bound pruning (sehr effektiv)
-            max_possible = min(domain_pattern_union_len, csb_pattern_len) / max(domain_pattern_union_len, csb_pattern_len) if max(domain_pattern_union_len, csb_pattern_len) > 0 else 0.0
+            max_possible = (
+                min(domain_pattern_union_len, csb_pattern_len)
+                / max(domain_pattern_union_len, csb_pattern_len)
+                if max(domain_pattern_union_len, csb_pattern_len) > 0
+                else 0.0
+            )
             if max_possible < jaccard_threshold:
                 continue
 
@@ -172,13 +178,13 @@ def fetch_keywords_for_proteins(
     all_keywords: Set[str] = set()
 
     with sqlite3.connect(database_path, timeout=120.0) as con:
-        #logger.info(f"Fetching {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
+        # logger.info(f"Fetching {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
         cur = con.cursor()
 
         # Pragmas: TEMP in memory; speed tuning
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
         # TEMP table once
@@ -213,7 +219,9 @@ def fetch_keywords_for_proteins(
 
         all_keywords = {row[0] for row in cur.fetchall()}
 
-    logger.debug(f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins.")
+    logger.debug(
+        f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins."
+    )
     return all_keywords
 
 
@@ -239,8 +247,8 @@ def integrate_csb_variants_into_merged_grouped(
 
         # Pragmas: TEMP in memory; read workload tuning
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
         # TEMP table once
@@ -323,8 +331,9 @@ def pam_defragmentation_stage(options) -> object | None:
     Find additional plausible hits based on presence absence patterns. This should include hits
     from fragmented assemblies or split csb
 
-    Prepare the presence absence matrix for grp0 and train logistic regression on the matrix
-    With the trained matrix exclude each column and predict presence.
+    Prepare the presence absence matrix for grp0 and plausibility model on selected matrices
+    Then iterate all genomes and for each protein define if presence is expected and add if above expectation
+    threshold
     For predicted presences select from the genome the best hit
 
     Also add csb that are below jaccard distance threshold from the grp0 csb
@@ -365,15 +374,15 @@ def pam_defragmentation_stage(options) -> object | None:
     )
 
     # Adds potential hits by presence absence matrix
-    added_pam_propability_proteins = (
+    added_pam_probability_proteins = (
         pam_defragmentation.pam_genome_defragmentation_hit_finder(
-            options, basis_grouped, basis_score_limit_dict
+            options=options, basis_grouped=basis_grouped, plausability_cutoff=0.8, support_models_name="grp1_support_models.pkl"
         )
     )
 
     # Merge the added proteins, for same key in both sets sum up the sets
     merged_grouped = csb_proteins_selection.merge_grouped_protein_ids(
-        added_similar_csb_proteins, added_pam_propability_proteins
+        added_similar_csb_proteins, added_pam_probability_proteins
     )
 
     # Calculate the score limits for the reference sequences
@@ -413,5 +422,5 @@ def pam_defragmentation_stage(options) -> object | None:
 """
 grp1 has the 90 % identity sequences to basic set
 proteins with same synteny but not collinearity
-similar presence absence pattern
+similar presence absence pattern with 0.8 plausability score
 """

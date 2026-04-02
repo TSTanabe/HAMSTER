@@ -33,7 +33,6 @@ global_gff_files = None
 global_nucleotide_range: Optional[int] = None
 
 
-
 def init_worker(
     query_file: str,
     evalue_cutoff: float,
@@ -67,7 +66,6 @@ def init_worker(
     global_nucleotide_range = nucleotide_range
 
 
-
 def process_single_genome(genomeID: str):
     """
     Worker: for one genomeID
@@ -87,7 +85,6 @@ def process_single_genome(genomeID: str):
 
         # dein bestehender Contextmanager (entpackt / materialisiert bei Bedarf)
         with materialize_pair_gz_next_to_input(faa_in, gff_in) as (faa_file, gff_file):
-
             # 1) DIAMOND blastp
             # Ideal: diamond_search.diamond_search kann DB-Pfad akzeptieren.
             # Falls nicht, musst du diamond_search minimal erweitern.
@@ -166,6 +163,7 @@ def _flush_batches_to_db_and_csb(
     protein_batch.clear()
     cluster_batch.clear()
 
+
 def run_consecutive_parallel_search(
     config,
 ):
@@ -188,7 +186,9 @@ def run_consecutive_parallel_search(
         raise ValueError("No genomes to process: faa_files ∩ gff_files is empty.")
 
     # -------- worker outdir (per-genome tmp outputs) --------
-    outdir = os.path.join(os.path.dirname(config.filtered_blast_table), "diamond_per_genome")
+    outdir = os.path.join(
+        os.path.dirname(config.filtered_blast_table), "diamond_per_genome"
+    )
     os.makedirs(outdir, exist_ok=True)
 
     # -------- reset CSB file (optional; keep if you want fresh run) --------
@@ -196,7 +196,9 @@ def run_consecutive_parallel_search(
         os.remove(config.gene_clusters_file)
 
     # -------- batching --------
-    batch_size = getattr(config, "glob_chunks", 50)  # interpreted as "hit genomes per flush"
+    batch_size = getattr(
+        config, "glob_chunks", 50
+    )  # interpreted as "hit genomes per flush"
     protein_batch: dict = {}
     cluster_batch: dict = {}
 
@@ -211,9 +213,13 @@ def run_consecutive_parallel_search(
     # -------- pool size --------
     worker_processes = max(1, min(getattr(config, "cores", 1), total))
     if worker_processes > 1:
-        worker_processes = max(1, min(worker_processes - 1, total))  # keep 1 core for main/DB I/O
+        worker_processes = max(
+            1, min(worker_processes - 1, total)
+        )  # keep 1 core for main/DB I/O
 
-    logger.info(f"Starting consecutive parallel search: {total} genomes, workers={worker_processes}")
+    logger.info(
+        f"Starting consecutive parallel search: {total} genomes, workers={worker_processes}"
+    )
 
     # -------- Pool init args (EXPLICIT MAPPING) --------
     # init_worker signature (as previously defined):
@@ -244,7 +250,6 @@ def run_consecutive_parallel_search(
         initializer=init_worker,
         initargs=initargs,
     ) as pool:
-
         for res in pool.imap_unordered(process_single_genome, genome_ids, chunksize=1):
             done += 1
             if done >= next_step or done == total:
@@ -286,5 +291,3 @@ def run_consecutive_parallel_search(
         f"Processed total={total}, successfully={len(genome_ids)}, "
         f"failed={len(genome_id_batch)}"
     )
-
-

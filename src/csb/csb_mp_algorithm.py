@@ -9,6 +9,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 class InstanceList:
     # Saves the matchpoints and the keys of the gene clusters to be extended in the next round
 
@@ -288,7 +289,6 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
 
     NextMatch = create_next_match(gene_clusters, MatchLists, bigrams)
 
-
     dictionary = {}
     logger.info("Starting CSB Finder algorithm")
     for key, lst in gene_clusters.items():
@@ -355,7 +355,6 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
 
             # print("\n\nInstance Listing for pattern \t",InstanceListP.get_instance_hash())
 
-
         for (
             key,
             it,
@@ -365,7 +364,6 @@ def csb_finderS_matchpoint_algorithm(redundancy_hash, gene_clusters, k=1, q=1):
             # print(key," ",it.active_keys)
             dictionary[key] = it.active_keys
     return dictionary
-
 
 
 #
@@ -400,6 +398,7 @@ def _init_csb_worker(
     _NEXTMATCH = nextmatch
     _K = k
     _Q = q
+
 
 def _csb_process_one_cluster(cluster_key: str) -> dict[tuple[str, ...], set[str]]:
     gene_clusters = _GENE_CLUSTERS
@@ -476,6 +475,7 @@ def _csb_process_one_cluster(cluster_key: str) -> dict[tuple[str, ...], set[str]
     del InstanceListP
     return out
 
+
 def freeze(obj):
     """Deep-freeze nested containers to prevent accidental mutation in workers."""
     if isinstance(obj, dict):
@@ -497,7 +497,6 @@ def csb_finderS_matchpoint_algorithm_mp_pool(
     worker_processes: int | None = None,
     chunksize: int = 1,
 ) -> dict[tuple[str, ...], set[str]]:
-
     # Optional, aber auf Linux/HPC meist sinnvoll: fork sicherstellen
     # (NICHT auf Windows; und nur einmal setzen, typischerweise im __main__)
     mp.set_start_method("fork", force=True)
@@ -514,7 +513,7 @@ def csb_finderS_matchpoint_algorithm_mp_pool(
 
     gene_clusters_frozen = freeze(gene_clusters_frozen)
     matchlists = freeze(matchlists)
-    nextmatch  = freeze(nextmatch)
+    nextmatch = freeze(nextmatch)
     redundancy_hash_ro = freeze(redundancy_hash)
 
     # 3) Globals setzen (wird bei fork von Workern geerbt)
@@ -534,22 +533,26 @@ def csb_finderS_matchpoint_algorithm_mp_pool(
     done = 0
     last_pct = -1
 
-    #print(f"[CSB]   0%  done=0/{total}  remaining={total}")
+    # print(f"[CSB]   0%  done=0/{total}  remaining={total}")
 
     # 4) Pool erst jetzt starten (nachdem alles im RAM liegt)
     procs = (worker_processes - 1) if worker_processes else None
 
     with Pool(processes=procs, maxtasksperchild=1) as pool:
-        for worker_dict in pool.imap_unordered(_csb_process_one_cluster, keys, chunksize=chunksize):
+        for worker_dict in pool.imap_unordered(
+            _csb_process_one_cluster, keys, chunksize=chunksize
+        ):
             done += 1
             pct = (done * 100) // max(1, total)
             if pct != last_pct:
                 remaining = total - done
-                logger.info(f"[CSB-finder] {pct:3d}%  done={done}/{total}  remaining={remaining}")
+                logger.info(
+                    f"[CSB-finder] {pct:3d}%  done={done}/{total}  remaining={remaining}"
+                )
                 last_pct = pct
-            #worker_dict.clear() # debugging lines to test RAM in workers
-            #del worker_dict
-            #continue
+            # worker_dict.clear() # debugging lines to test RAM in workers
+            # del worker_dict
+            # continue
             # Merge (ohne set-copy)
             for pattern_tuple, active_keys in worker_dict.items():
                 existing = merged.get(pattern_tuple)
@@ -562,4 +565,3 @@ def csb_finderS_matchpoint_algorithm_mp_pool(
             del worker_dict
 
     return merged
-

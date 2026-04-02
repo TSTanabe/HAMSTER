@@ -5,6 +5,7 @@ import csv
 from typing import Dict
 from src.search import diamond_search, create_glob_faa
 from src.core.logging import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -73,7 +74,9 @@ def filter_blast_table(
 
                 # Pre-filter based on missing values
                 if not query_length or not selfblast_score:
-                    print(f"Append without because {query_length} and {selfblast_score}")
+                    print(
+                        f"Append without because {query_length} and {selfblast_score}"
+                    )
                     buffer.append(row)
                 else:
                     # Compute alignment length and coverage
@@ -84,16 +87,15 @@ def filter_blast_table(
                     bsr = bitscore / selfblast_score
 
                     # Apply all filtering criteria
-                    if ( # If (bitscore or evalue) and coverage ok
+                    if (  # If (bitscore or evalue) and coverage ok
                         evalue <= evalue_cutoff
                         and bitscore >= score_cutoff
                         and coverage >= coverage_cutoff
                     ):
                         row.append(f"{bsr:.3f}")
                         buffer.append(row)
-                    elif ( # If identity and coverage ok
-                        coverage >= coverage_cutoff
-                        and pident >= identity_cutoff
+                    elif (  # If identity and coverage ok
+                        coverage >= coverage_cutoff and pident >= identity_cutoff
                     ):
                         row.append(f"{bsr:.3f}")
                         buffer.append(row)
@@ -127,7 +129,10 @@ def run_and_filter_diamond_blastp(
         Path to the filtered blast table.
     """
     # Determine the output file path. Might exist if existing result directory was given
-    if os.path.isfile(options.filtered_blast_table) and os.path.getsize(options.filtered_blast_table) > 0:
+    if (
+        os.path.isfile(options.filtered_blast_table)
+        and os.path.getsize(options.filtered_blast_table) > 0
+    ):
         logger.info(
             f"Filtered hit results file already exists and is non-empty: {options.filtered_blast_table}"
         )
@@ -137,9 +142,7 @@ def run_and_filter_diamond_blastp(
     blast_results_table = options.glob_table
     if not blast_results_table:
         logger.info("Generating concatenated faa file")
-        create_glob_faa.create_glob_file(
-            options
-        )
+        create_glob_faa.create_glob_file(options)
         logger.info("Initialize DIAMOND BLASTp against target")
         blast_results_table = diamond_search.diamond_search(
             options.glob_faa,

@@ -2,6 +2,7 @@ import os
 import gzip
 from typing import TextIO
 
+
 def open_fasta_maybe_gz(path: str) -> TextIO:
     """
     Open a FASTA file that may be plain text or gzip-compressed.

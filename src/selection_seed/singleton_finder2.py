@@ -29,7 +29,6 @@ identity to query. Do this for each protein.
 ########################################
 
 
-
 def _find_context_free_high_identity_hits(
     database_path: str,
     identity_cutoff: float = 80.0,
@@ -49,11 +48,13 @@ def _find_context_free_high_identity_hits(
 
         # TEMP is a write -> allow it, then lock down persistent DB afterwards if you want
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")   # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;") # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
-        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_cf (domain TEXT, genomeID TEXT);")
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_cf (domain TEXT, genomeID TEXT);"
+        )
         cur.execute("DELETE FROM tmp_cf;")
 
         # Fill TEMP table
@@ -80,7 +81,6 @@ def _find_context_free_high_identity_hits(
     return context_free
 
 
-
 def _fetch_high_identity_domain_intersection(
     database_path: str,
     domain_to_genomes: Dict[str, Set[str]],
@@ -102,8 +102,8 @@ def _fetch_high_identity_domain_intersection(
 
         # TEMP allowed; then lock down main schema after filling temp each iteration if desired
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")   # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;") # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
         # Create TEMP table once
@@ -165,7 +165,6 @@ def select_singleton_refs_by_domain_pattern(
     seed_to_pattern_domains: Dict[str, Set[str]],
     min_identity_cutoff: float = 70.0,
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
-
     limits_dict: Dict[str, Dict[str, float]] = {}
     sng_reference_seq_dict: Dict[str, Set[str]] = defaultdict(set)
 
@@ -177,19 +176,25 @@ def select_singleton_refs_by_domain_pattern(
 
         # Pragmas (TEMP muss erlaubt sein)
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
         # TEMP tables einmalig
-        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_pattern_domains (domain TEXT PRIMARY KEY);")
-        cur.execute("CREATE TEMP TABLE IF NOT EXISTS tmp_genomes (genomeID TEXT PRIMARY KEY);")
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_pattern_domains (domain TEXT PRIMARY KEY);"
+        )
+        cur.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS tmp_genomes (genomeID TEXT PRIMARY KEY);"
+        )
 
         for seed_domain, pattern_domains in seed_to_pattern_domains.items():
             if not pattern_domains:
                 continue
 
-            logger.info(f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains")
+            logger.info(
+                f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains"
+            )
 
             # --- tmp_pattern_domains füllen ---
             cur.execute("DELETE FROM tmp_pattern_domains;")
@@ -266,10 +271,7 @@ def select_singleton_refs_by_domain_pattern(
 #### Main routine of this module
 def singleton_reference_finder(
     options: Any,
-) -> (
-    tuple[object , object]
-    | tuple[dict[str, dict[str, float]], dict[str, set[str]]]
-):
+) -> tuple[object, object] | tuple[dict[str, dict[str, float]], dict[str, set[str]]]:
     """
     Main routine: finds and predicts reference singletons for each protein/domain.
 
@@ -293,7 +295,9 @@ def singleton_reference_finder(
         identity_cutoff=high_identity_cutoff,
     )
 
-    logger.info(f"Found {len(context_free_domains_dict)} context-free hits with {high_identity_cutoff} percent identity")
+    logger.info(
+        f"Found {len(context_free_domains_dict)} context-free hits with {high_identity_cutoff} percent identity"
+    )
 
     if not context_free_domains_dict:
         logger.warning(

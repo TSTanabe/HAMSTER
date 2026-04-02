@@ -117,21 +117,34 @@ def index_database(database: str) -> None:
         # -----------------------------
         # Existing basic (single column)
         # -----------------------------
-        ("tab_dom_pid_index",
-         "CREATE INDEX IF NOT EXISTS tab_dom_pid_index ON Domains(proteinID)"),
-        ("tab_dom_did_index",
-         "CREATE INDEX IF NOT EXISTS tab_dom_did_index ON Domains(domain)"),
-        ("tab_prot_gid_index",
-         "CREATE INDEX IF NOT EXISTS tab_prot_gid_index ON Proteins(genomeID)"),
-        ("tab_prot_cid_index",
-         "CREATE INDEX IF NOT EXISTS tab_prot_cid_index ON Proteins(clusterID)"),
-        ("tab_key_cid_index",
-         "CREATE INDEX IF NOT EXISTS tab_key_cid_index ON Keywords(clusterID)"),
-        ("tab_key_kid_index",
-         "CREATE INDEX IF NOT EXISTS tab_key_kid_index ON Keywords(keyword)"),
-        ("tab_clus_gid_index",
-         "CREATE INDEX IF NOT EXISTS tab_clus_gid_index ON Clusters(genomeID)"),
-
+        (
+            "tab_dom_pid_index",
+            "CREATE INDEX IF NOT EXISTS tab_dom_pid_index ON Domains(proteinID)",
+        ),
+        (
+            "tab_dom_did_index",
+            "CREATE INDEX IF NOT EXISTS tab_dom_did_index ON Domains(domain)",
+        ),
+        (
+            "tab_prot_gid_index",
+            "CREATE INDEX IF NOT EXISTS tab_prot_gid_index ON Proteins(genomeID)",
+        ),
+        (
+            "tab_prot_cid_index",
+            "CREATE INDEX IF NOT EXISTS tab_prot_cid_index ON Proteins(clusterID)",
+        ),
+        (
+            "tab_key_cid_index",
+            "CREATE INDEX IF NOT EXISTS tab_key_cid_index ON Keywords(clusterID)",
+        ),
+        (
+            "tab_key_kid_index",
+            "CREATE INDEX IF NOT EXISTS tab_key_kid_index ON Keywords(keyword)",
+        ),
+        (
+            "tab_clus_gid_index",
+            "CREATE INDEX IF NOT EXISTS tab_clus_gid_index ON Clusters(genomeID)",
+        ),
         # -----------------------------
         # TMP-table protein selection bulk join accelerators
         # -----------------------------
@@ -140,27 +153,30 @@ def index_database(database: str) -> None:
         #   then JOIN Proteins p ON p.clusterID = k.clusterID
         #
         # Helps: find clusterIDs for a given keyword fast, then emit clusterIDs in index order.
-        ("idx_keywords_keyword_cluster",
-         "CREATE INDEX IF NOT EXISTS idx_keywords_keyword_cluster "
-         "ON Keywords(keyword, clusterID)"),
-
+        (
+            "idx_keywords_keyword_cluster",
+            "CREATE INDEX IF NOT EXISTS idx_keywords_keyword_cluster "
+            "ON Keywords(keyword, clusterID)",
+        ),
         # Proteins join pattern:
         #   JOIN Proteins p ON p.clusterID = k.clusterID
         #   then JOIN Domains d ON d.proteinID = p.proteinID AND d.domain = t.domain
         #
         # Helps: enumerate proteinIDs for a clusterID efficiently.
-        ("idx_proteins_cluster_protein",
-         "CREATE INDEX IF NOT EXISTS idx_proteins_cluster_protein "
-         "ON Proteins(clusterID, proteinID)"),
-
+        (
+            "idx_proteins_cluster_protein",
+            "CREATE INDEX IF NOT EXISTS idx_proteins_cluster_protein "
+            "ON Proteins(clusterID, proteinID)",
+        ),
         # Domains join pattern:
         #   d.domain = t.domain AND d.proteinID = p.proteinID
         #
         # Helps: filter by domain first (often selective) then match proteinID.
-        ("idx_domains_domain_protein",
-         "CREATE INDEX IF NOT EXISTS idx_domains_domain_protein "
-         "ON Domains(domain, proteinID)"),
-
+        (
+            "idx_domains_domain_protein",
+            "CREATE INDEX IF NOT EXISTS idx_domains_domain_protein "
+            "ON Domains(domain, proteinID)",
+        ),
         # -----------------------------
         # High-identity + genome intersection accelerators
         # -----------------------------
@@ -169,32 +185,37 @@ def index_database(database: str) -> None:
         #   JOIN Proteins via proteinID
         #
         # Enables range scan on identity and fast access to proteinID for joins.
-        ("idx_domains_identity_protein",
-         "CREATE INDEX IF NOT EXISTS idx_domains_identity_protein "
-         "ON Domains(identity, proteinID)"),
-
+        (
+            "idx_domains_identity_protein",
+            "CREATE INDEX IF NOT EXISTS idx_domains_identity_protein "
+            "ON Domains(identity, proteinID)",
+        ),
         # Used in intersection queries:
         #   JOIN tmp_seed_genomes g ON g.genomeID = p.genomeID
         #   JOIN Domains d ON d.proteinID = p.proteinID
         #
         # Helps: for a genomeID, get proteinIDs quickly (and is a good covering pattern).
-        ("idx_proteins_genome_protein",
-         "CREATE INDEX IF NOT EXISTS idx_proteins_genome_protein "
-         "ON Proteins(genomeID, proteinID)"),
-
+        (
+            "idx_proteins_genome_protein",
+            "CREATE INDEX IF NOT EXISTS idx_proteins_genome_protein "
+            "ON Proteins(genomeID, proteinID)",
+        ),
         # Optional but often helpful when you do:
         #   WHERE p.clusterID IS NULL AND p.genomeID != 'QUERY'
         # This allows filtering by clusterID (including NULL) and then genomeID.
-        ("idx_proteins_cluster_genome",
-         "CREATE INDEX IF NOT EXISTS idx_proteins_cluster_genome "
-         "ON Proteins(clusterID, genomeID)"),
-
+        (
+            "idx_proteins_cluster_genome",
+            "CREATE INDEX IF NOT EXISTS idx_proteins_cluster_genome "
+            "ON Proteins(clusterID, genomeID)",
+        ),
         # Optional combined index if you frequently do:
         #   WHERE d.identity >= ? AND d.domain = ?
         # Some workloads benefit, others not; safe to include if DB isn't tiny.
-        ("idx_domains_domain_identity_protein",
-         "CREATE INDEX IF NOT EXISTS idx_domains_domain_identity_protein "
-         "ON Domains(domain, identity, proteinID)"),
+        (
+            "idx_domains_domain_identity_protein",
+            "CREATE INDEX IF NOT EXISTS idx_domains_domain_identity_protein "
+            "ON Domains(domain, identity, proteinID)",
+        ),
     ]
 
     try:

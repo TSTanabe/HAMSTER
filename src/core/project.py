@@ -57,7 +57,9 @@ def prepare_result_space(options, project: str = "project") -> None:
     # 0) Normalize incoming paths early (accept trailing /)
     # ----------------------------
     if getattr(options, "location", None):
-        options.location = os.path.abspath(os.path.normpath(os.path.expanduser(options.location)))
+        options.location = os.path.abspath(
+            os.path.normpath(os.path.expanduser(options.location))
+        )
 
     if getattr(options, "result_files_directory", None):
         options.result_files_directory = os.path.abspath(
@@ -98,12 +100,16 @@ def prepare_result_space(options, project: str = "project") -> None:
         if not os.path.isdir(options.result_files_directory):
             try:
                 os.makedirs(options.result_files_directory, exist_ok=True)
-                logger.info(f"Created results directory: {options.result_files_directory}")
+                logger.info(
+                    f"Created results directory: {options.result_files_directory}"
+                )
             except Exception as e:
                 logger.error(f"No writing rights in results directory. {e}")
                 sys.exit(1)
 
-        options.result_files_directory = create_project(options.result_files_directory, project)
+        options.result_files_directory = create_project(
+            options.result_files_directory, project
+        )
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
@@ -119,7 +125,9 @@ def prepare_result_space(options, project: str = "project") -> None:
                 )
                 sys.exit(1)
 
-        options.result_files_directory = create_project(options.result_files_directory, project)
+        options.result_files_directory = create_project(
+            options.result_files_directory, project
+        )
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
@@ -144,8 +152,12 @@ def prepare_result_space(options, project: str = "project") -> None:
     options.divergent_output_file = os.path.join(res, "div_output_file.faa")
 
     options.csb_output_file = os.path.join(options.Csb_directory, "Csb_output.txt")
-    options.gene_clusters_file = os.path.join(options.Csb_directory, "All_gene_clusters.txt")
-    options.data_computed_Instances_json = os.path.join(options.Csb_directory, "csb_instances.json")
+    options.gene_clusters_file = os.path.join(
+        options.Csb_directory, "All_gene_clusters.txt"
+    )
+    options.data_computed_Instances_json = os.path.join(
+        options.Csb_directory, "csb_instances.json"
+    )
 
     options.report_output_file = os.path.join(res, "Report.txt")
     options.thresholds_output_file = os.path.join(res, "Thresholds.txt")

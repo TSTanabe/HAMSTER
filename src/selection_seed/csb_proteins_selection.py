@@ -53,7 +53,9 @@ def prepare_csb_grouped_training_proteins(
         csb_type_statistic.group_gene_cluster_statistic(options)
     )
 
-    logger.info(f"Collecting sequences for training datasets with similar csb for {len(grouped_keywords_dict)} proteins")
+    logger.info(
+        f"Collecting sequences for training datasets with similar csb for {len(grouped_keywords_dict)} proteins"
+    )
     csb_proteins_dict: dict[tuple[str, str], set[str]] = csb_proteins_datasets(
         options, grouped_keywords_dict
     )
@@ -440,6 +442,7 @@ def process_keyword_domains(
 
     return result
 
+
 def _prepare_keyword_domain_tasks_temp(
     cur: sqlite3.Cursor, csb_dictionary: Dict[str, List[str]]
 ) -> int:
@@ -501,8 +504,8 @@ def fetch_proteinIDs_dict_multiprocessing(
 
         # --- Performance pragmas (safe) ---
         cur.execute("PRAGMA temp_store=MEMORY;")
-        cur.execute("PRAGMA cache_size=-262144;")      # ~256 MiB
-        cur.execute("PRAGMA mmap_size=2147483648;")    # 2 GiB
+        cur.execute("PRAGMA cache_size=-262144;")  # ~256 MiB
+        cur.execute("PRAGMA mmap_size=2147483648;")  # 2 GiB
         cur.execute("PRAGMA automatic_index=ON;")
 
         # Build + fill TEMP tasks table
@@ -512,7 +515,6 @@ def fetch_proteinIDs_dict_multiprocessing(
 
         # Now lock down the main database: no writes to persistent tables possible.
         cur.execute("PRAGMA query_only=TRUE;")
-
 
         # --- Single bulk join query ---
         cur.execute(
@@ -545,8 +547,6 @@ def fetch_proteinIDs_dict_multiprocessing(
         out = {k: v for k, v in out.items() if len(v) >= min_seqs}
 
     return out
-
-
 
 
 ######################################################################################################

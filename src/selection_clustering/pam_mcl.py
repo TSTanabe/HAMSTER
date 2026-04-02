@@ -6,7 +6,7 @@ from typing import Dict, Set, Any, Tuple
 
 import pandas as pd
 
-from src.selection_defragmentation import pam_mx_algorithm
+from src.selection_defragmentation import pam_mx_algorithm, pam_defragmentation
 from src.selection_seed import csb_proteins_selection
 from src.core import myUtil
 
@@ -108,18 +108,19 @@ def select_hits_by_pam_csb_mcl(
                 options.database_directory, new_proteinID_set, common_gene_vicinity
             )
             grouped_3_dict[domain] = filtered_proteinIDs
+    myUtil.save_cache(options, "mcl_truncated_csb_hits.pkl", grouped_3_dict)
+
 
     logger.info(
-        f"Selecting sequences from mcl clusters with plausible presence in the genome"
+        f"Selecting sequences from with plausible co-occurence in the genome"
     )
     # Select the proteins with plausible PAM
+    grouped_3_dict = myUtil.merge_grouped_refseq_dicts_simple(
+        grouped_3_dict, basis_grouped
+    ) # Full representation of all sequences after the group 3 addition
     if not grouped_4_dict:
-        grouped_4_dict = select_proteins_with_plausible_pam_from_mcl(
-            options.database_directory,
-            options.pam_threshold,
-            processed_reference_dict,
-            extended_grouped,
-            options.cores,
+        grouped_4_dict = pam_defragmentation.pam_genome_defragmentation_hit_finder(
+            options=options, basis_grouped=grouped_3_dict, plausability_cutoff=options.pam_threshold, support_models_name="grp3_support_models.pkl"
         )
 
     # Print statistics on selection to the terminal
@@ -136,7 +137,7 @@ def select_hits_by_pam_csb_mcl(
         processed_reference_dict, merged_dict
     )
 
-    myUtil.save_cache(options, "mcl_truncated_csb_hits.pkl", grouped_3_dict)
+
     myUtil.save_cache(options, "mcl_PAM_plausible_hits.pkl", grouped_4_dict)
     myUtil.save_cache(options, "mcl_PAM_csb_merged_hits.pkl", merged_dict)
 
@@ -322,163 +323,6 @@ def select_gene_cluster_vicinity_domains(
 
 
 #############################################################################################################
-
-
-def select_proteins_with_plausible_pam_from_mcl(
-    database_path: str,
-    pam_threshold: float,
-    basis_grouped: Dict[str, Set[str]],
-    extended_grouped: Dict[str, Set[str]],
-    cores: int,
-    chunk_size: int = 900,
-) -> Dict[str, Set[str]]:
-    """
-    For each domain, select plausible proteins from MCL clusters via a logistic model trained on the reference set.
-
-    Args:
-        database_path (str): SQLite DB path.
-        pam_threshold (float): Probability cutoff.
-        basis_grouped (dict): Reference set {domain: set(proteinIDs)}
-        extended_grouped (dict): Candidate set {domain: set(proteinIDs)}
-        cores (int): CPUs for parallel.
-        chunk_size (int): SQL chunk size.
-
-    Returns:
-        dict: {domain: set(proteinIDs)} passing PAM threshold.
-    """
-
-    # 1. Basis PAM berechnen
-    global_pam = pam_mx_algorithm.create_presence_absence_matrix(
-        basis_grouped,
-        database_directory=database_path,
-        output="basic_pam_with_all_domains",
-        chunk_size=chunk_size,
-        cores=cores,
-    )
-
-    # 2. Extended PAM berechnen
-    extended_pam = pam_mx_algorithm.create_presence_absence_matrix(
-        extended_grouped,
-        database_directory=database_path,
-        output="extended_pam_with_all_domains",
-        chunk_size=chunk_size,
-        cores=cores,
-    )
-
-    # 3. Calculate logistic regression Models for basis PAM
-    basis_bsr_hit_scores = pam_mx_algorithm.fetch_bsr_scores(
-        database_path, basis_grouped, chunk_size=chunk_size
-    )
-
-    models, _ = pam_mx_algorithm.train_logistic_from_pam_with_scores(
-        global_pam, basis_bsr_hit_scores, cores=cores
-    )
-
-    # 4. Calculate plausibility for the extended proteinIDs from the MCL
-    extended_bsr_hit_scores = pam_mx_algorithm.fetch_bsr_scores(
-        database_path, extended_grouped, chunk_size=chunk_size
-    )
-
-    plausible_genomes_df = validate_existing_domains_with_models(
-        database_path, extended_pam, models, extended_bsr_hit_scores, pam_threshold
-    )  # cutoff muss noch festgelegt werden
-
-    # 5. Extract the proteinIDs from the PAM for each genome with a plausible hit
-    plausible_pam_proteinID_dict = extract_proteinIDs_from_plausible_predictions(
-        plausible_genomes_df, extended_pam
-    )
-
-    return plausible_pam_proteinID_dict
-
-
-def validate_existing_domains_with_models(
-    database_path: str,
-    extended_pam: Dict[str, Dict[str, list]],
-    models: Dict[str, Any],
-    bsr_hit_scores: Dict[str, float],
-    cutoff: float = 0.5,
-) -> Dict[str, pd.Series]:
-    """
-    Validates presence of domains in extended_pam using logistic models.
-    Only domains already present in extended_pam are evaluated.
-
-    Args:
-        database_path (str): SQLite DB path.
-        extended_pam (dict): {genomeID: {domain: [proteinIDs]}}
-        models (dict): {domain: model}
-        bsr_hit_scores (dict): {proteinID: score}
-        cutoff (float): Threshold
-
-    Returns:
-        dict: {domain: pd.Series(genomeID → probability)}
-    """
-
-    # Prepare dataframe from extended PAM
-    genomes = sorted(extended_pam.keys())
-    features = sorted({d for doms in extended_pam.values() for d in doms})
-    df = pd.DataFrame(index=genomes, columns=features)
-
-    for genome_id in genomes:
-        for feat in features:
-            df.at[genome_id, feat] = (
-                ",".join(extended_pam[genome_id].get(feat, []))
-                if feat in extended_pam[genome_id]
-                else ""
-            )
-
-    X_all = pam_mx_algorithm.build_presence_score_matrix(df, bsr_hit_scores)
-
-    plausible_results = {}
-
-    for domain, model in models.items():
-        if model is None:
-            continue
-
-        # Only evaluate genomes where the domain is present
-        target_genomes = [gid for gid in extended_pam if domain in extended_pam[gid]]
-        if not target_genomes:
-            continue
-
-        # Copy the PAM and remove the domain to prevent leakage
-        X = X_all.loc[target_genomes]
-        X = X.reindex(columns=model.feature_names_in_, fill_value=0)
-
-        # Predict probabilities
-        preds = pd.Series(model.predict_proba(X)[:, 1], index=X.index)
-
-        # Filter by cutoff
-        plausible_preds = preds[preds > cutoff]
-        if not plausible_preds.empty:
-            plausible_results[domain] = plausible_preds
-
-    return plausible_results
-
-
-def extract_proteinIDs_from_plausible_predictions(
-    plausible_results: Dict[str, pd.Series], extended_pam: Dict[str, Dict[str, list]]
-) -> Dict[str, Set[str]]:
-    """
-    Extracts proteinIDs for genome/domain pairs marked as plausible.
-
-    Args:
-        plausible_results (dict): {domain: pd.Series(genomeID → probability)}
-        extended_pam (dict): {genomeID: {domain: [proteinIDs]}}
-
-    Returns:
-        dict: {domain: set(proteinIDs)}
-    """
-
-    output_grouped = {}
-
-    for domain, genome_series in plausible_results.items():
-        proteins = set()
-        for genome_id in genome_series.index:
-            dom_to_prots = extended_pam.get(genome_id, {})
-            proteins.update(dom_to_prots.get(domain, []))
-        if proteins:
-            output_grouped[domain] = proteins
-
-    return output_grouped
 
 
 def log_all_mcl_cluster_statistics(

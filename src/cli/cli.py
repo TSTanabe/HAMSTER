@@ -109,15 +109,13 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         dest="database_directory",
         metavar="<filepath>",
         default=None,
-        help=argparse.SUPPRESS
+        help=argparse.SUPPRESS,
     )
     resources.add_argument(
         "--activate-cross-validation",
         dest="cross_validation_activated",
         action="store_true",
-        help=maybe(
-            "Activate cross-validation"
-        ),
+        help=maybe("Activate cross-validation"),
     )
 
     resources2 = parser.add_argument_group("GlobDB file parameters (advanced)")
@@ -126,21 +124,21 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         dest="glob_faa",
         metavar="<filepath>",
         default=None,
-        help=argparse.SUPPRESS#help=maybe("Concatenated FASTA file with all input assemblies for speedup."),
+        help=argparse.SUPPRESS,  # help=maybe("Concatenated FASTA file with all input assemblies for speedup."),
     )
     resources2.add_argument(
         "--glob-gff",
         dest="glob_gff",
         metavar="<filepath>",
         default=None,
-        help=argparse.SUPPRESS#help=maybe("Concatenated GFF annotation file for all assemblies."),
+        help=argparse.SUPPRESS,  # help=maybe("Concatenated GFF annotation file for all assemblies."),
     )
     resources2.add_argument(
         "--glob-blast-table",
         dest="glob_table",
         metavar="<filepath>",
         default=None,
-        help=argparse.SUPPRESS#help=maybe("Precomputed multi-assembly BLAST tabular result file."),
+        help=argparse.SUPPRESS,  # help=maybe("Precomputed multi-assembly BLAST tabular result file."),
     )
     resources2.add_argument(
         "--chunks",
@@ -180,7 +178,9 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=float,
         default=25,
         metavar="<float>",
-        help=maybe("Minimum percentage sequence identity [%%] for initial BLASTp results."),
+        help=maybe(
+            "Minimum percentage sequence identity [%%] for initial BLASTp results."
+        ),
     )
     search.add_argument(
         "--search-coverage",
@@ -211,7 +211,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "--allow-multidomain",
         dest="multidomain_allowed",
         action="store_true",
-        help=argparse.SUPPRESS#help=maybe("Permit hits to multiple query domains per sequence."),
+        help=argparse.SUPPRESS,  # help=maybe("Permit hits to multiple query domains per sequence."),
     )
     search.add_argument(
         "--reports-hit",
@@ -231,7 +231,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         dest="patterns_file",
         metavar="<filepath>",
         default=os.path.join(BASE_DIR, "src", "Patterns"),
-        help=argparse.SUPPRESS
+        help=argparse.SUPPRESS,
     )
 
     csb = parser.add_argument_group(
@@ -243,7 +243,9 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=int,
         default=3500,
         metavar="<int>",
-        help=maybe("Maximum nucleotide distance between syntenic genes in a syntenic block."),
+        help=maybe(
+            "Maximum nucleotide distance between syntenic genes in a syntenic block."
+        ),
     )
     csb.add_argument(
         "--insertions",
@@ -318,7 +320,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         dest="redo_base_selection",
         action="store_true",
         default=False,
-        help=argparse.SUPPRESS#help=maybe("Redo all selection steps and overwrite all caches."),
+        help=argparse.SUPPRESS,  # help=maybe("Redo all selection steps and overwrite all caches."),
     )
 
     pam_search = parser.add_argument_group(
@@ -404,7 +406,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         nargs="+",
         default=[],
         metavar="<list>",
-        help=argparse.SUPPRESS
+        help=argparse.SUPPRESS,
     )
     alignment.add_argument(
         "--exclude-domains",
@@ -412,7 +414,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         nargs="+",
         default=[],
         metavar="<list>",
-        help=argparse.SUPPRESS
+        help=argparse.SUPPRESS,
     )
 
 

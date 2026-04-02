@@ -315,7 +315,7 @@ def chunked(iterable: List[Any], size: int) -> Iterator[List[Any]]:
     """
     seq = list(iterable)
     for i in range(0, len(seq), size):
-        yield seq[i:i + size]
+        yield seq[i : i + size]
 
 
 #############################################################################
@@ -410,7 +410,7 @@ def process_domain_hits_pool(
 
     # Aggregate result
     proteinIDs = set()
-    #bitscores = []
+    # bitscores = []
     for genome_id, (bsr, proteinID, score) in best_hits.items():
         proteinIDs.add(proteinID)
 

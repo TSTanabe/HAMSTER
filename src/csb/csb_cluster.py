@@ -51,10 +51,10 @@ def csb_prediction(options: Any) -> None:
     non_redundant_exists = os.path.isfile(options.non_redundant)
 
     if (
-            options.computed_Instances_dict
-            and options.redundancy_hash
-            and redundant_exists
-            and non_redundant_exists
+        options.computed_Instances_dict
+        and options.redundancy_hash
+        and redundant_exists
+        and non_redundant_exists
     ):
         logger.info("Loading computed Instances dict from cache")
         return
@@ -85,15 +85,15 @@ def csb_prediction(options: Any) -> None:
     )  # for all which do not have a redundant gene cluster
     # modified CsbfinderS algorithm
     logger.info("Starting Csb match point algorithm for csb pattern recoginition")
-    #computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm(
+    # computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm(
     #    options.redundancy_hash, gene_clusters, options.insertions, options.occurence
-    #)  # k insertions und q occurences müssen über die optionen festgelegt werden
+    # )  # k insertions und q occurences müssen über die optionen festgelegt werden
     computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm_mp_pool(
         redundancy_hash=options.redundancy_hash,
         gene_clusters=gene_clusters,
         k=options.insertions,
         q=options.occurence,
-        worker_processes=options.cores  # optional
+        worker_processes=options.cores,  # optional
     )
 
     # Combine reverse csbs
@@ -107,8 +107,10 @@ def csb_prediction(options: Any) -> None:
         computed_Instances_dict
     )
 
-    myUtil.save_cache(options, "csb_raw_computed_instances_dict.pkl", options.computed_Instances_dict)
-    myUtil.save_cache(options, "csb_raw_redundancy_hash.pkl",options.redundancy_hash)
+    myUtil.save_cache(
+        options, "csb_raw_computed_instances_dict.pkl", options.computed_Instances_dict
+    )
+    myUtil.save_cache(options, "csb_raw_redundancy_hash.pkl", options.redundancy_hash)
 
 
 def csb_jaccard(options: Any, jaccard_distance: float) -> Dict[str, Set[str]]:

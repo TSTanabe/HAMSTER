@@ -193,6 +193,7 @@ def remove_multi_domain_proteins(input_dict):
         if len(protein.domains.values()) <= 1
     }
 
+
 def process_single_genome_imap(genomeID: str):
     """
     Worker für pool.imap_unordered.
@@ -209,7 +210,7 @@ def process_single_genome_imap(genomeID: str):
         gff_in = global_gff_files[genomeID]
 
         with materialize_pair_gz_next_to_input(faa_in, gff_in) as (faa_file, gff_file):
-           # Parse BLAST report for protein hits
+            # Parse BLAST report for protein hits
             protein_dict = parse_reports.parse_bulk_blastreport_genomize(
                 genomeID, report, score_threshold_diction, global_thrs_score
             )
@@ -290,7 +291,9 @@ def initial_glob_search(config: Any) -> None:
         genome_ids_set, config.faa_files, config.gff_files
     )
     if len(genome_ids_set) == 0:
-        logger.error(f"No genomes with faa and gff present. Use -f option to specify a directory with faa/gff files")
+        logger.error(
+            f"No genomes with faa and gff present. Use -f option to specify a directory with faa/gff files"
+        )
         sys.exit()
 
     database.insert_database_genome_ids(
@@ -344,7 +347,9 @@ def initial_glob_search(config: Any) -> None:
             config.thrs_score,
         ),
     ) as pool:
-        it = pool.imap_unordered(process_single_genome_imap, genome_id_list, chunksize=1)
+        it = pool.imap_unordered(
+            process_single_genome_imap, genome_id_list, chunksize=1
+        )
         for genomeID, protein_dict, cluster_dict in it:
             genomes_done += 1
             if (genomes_done % log_step == 0) or (genomes_done == n_genomes):
