@@ -682,9 +682,9 @@ def fetch_seqs_to_fasta_parallel(
         if num_sequences > (max_seq + hardcap):
             logger.warning(
                 f"'{domain}' has too many sequences ({num_sequences}), "
-                f"randomly subsampling to {hardcap}"
+                f"randomly subsampling to {max_seq}"
             )
-            protein_ids = set(random.sample(sorted(protein_ids), hardcap))
+            protein_ids = set(random.sample(sorted(protein_ids), max_seq))
 
         if os.path.exists(output_file):
             logger.debug(
