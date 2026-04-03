@@ -3,10 +3,10 @@ import random
 import sqlite3
 import os
 import multiprocessing
-import sys
+
 import time
 import threading
-from multiprocessing import Pool
+
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from typing import Dict, Set, Tuple, List, Any, DefaultDict
