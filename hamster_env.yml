@@ -19,3 +19,4 @@ dependencies:
   - mmseqs2
   - mafft
   - trimal
+  - hmmer
