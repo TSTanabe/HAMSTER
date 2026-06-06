@@ -97,7 +97,9 @@ def _fetch_best_domain_hits_for_genome_chunk(
         WHERE Proteins.genomeID IN ({placeholders})
           AND Proteins.genomeID IS NOT NULL
           AND Domains.domain IS NOT NULL
+          AND Domains.blast_score_ratio >= 0.3
     """
+    # Hardcoded blast score ratio cutoff of 0.3 to exclude low similarity hits
 
     cur.execute(query, genome_chunk)
 

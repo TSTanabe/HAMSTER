@@ -330,7 +330,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "--mx-thrs",
         dest="pam_threshold",
         type=float,
-        default=0.3,
+        default=0.8,
         metavar="<float>",
         help=maybe("Significance threshold for presence/absence matrix co-occurrence."),
     )
@@ -338,7 +338,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "--mx-bsr",
         dest="pam_bsr_threshold",
         type=float,
-        default=0.6,
+        default=0.3,
         metavar="<float>",
         help=maybe("Minimum BLAST score ratio for pam prediction inclusion."),
     )

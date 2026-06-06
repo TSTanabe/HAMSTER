@@ -3,6 +3,8 @@
 
 from typing import Dict, Set, Any
 
+from pyzstd import _c
+
 from src.selection_defragmentation import (
     pam_mx_selection,
     pam_mx_calculate_plausability,
@@ -28,6 +30,7 @@ def pam_genome_defragmentation_hit_finder(
 
     Returns:
         dict: {domain: set(proteinIDs)}, merged set.
+
     """
 
     support_models = myUtil.load_cache(options, support_models_name)
@@ -60,7 +63,7 @@ def pam_genome_defragmentation_hit_finder(
         plausible_hits, basis_grouped
     )
 
-    report_added_only_counts(
+    _report_added_only_counts(
         merged_dict, plausible_hits, basis_grouped
     )  # print in terminal the number of added sequences
 
@@ -68,7 +71,7 @@ def pam_genome_defragmentation_hit_finder(
     return merged_dict
 
 
-def report_added_only_counts(
+def _report_added_only_counts(
     grp1_merged_dict, grp1_added_reference_seq_dict, grp1_basis_grouped_dict
 ):
     for key in grp1_merged_dict:

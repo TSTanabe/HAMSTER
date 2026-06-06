@@ -16,7 +16,7 @@ _cur = None
 # Helper routines for fetching proteins from genomes and vice versa from database
 
 
-def chunked(iterable: List[Any], size: int) -> Iterator[List[Any]]:
+def _chunked(iterable: List[Any], size: int) -> Iterator[List[Any]]:
     """
     Yield successive chunk-sized lists from iterable.
 
@@ -277,7 +277,7 @@ def create_presence_absence_matrix_for_domain_positive_sample(
     # Step 2: Map proteinID -> genomeID using the existing helper logic
     chunk_args = [
         (database_directory, chunk)
-        for chunk in chunked(list(target_proteins), chunk_size)
+        for chunk in _chunked(list(target_proteins), chunk_size)
     ]
 
     protein_to_genome: Dict[str, str] = {}

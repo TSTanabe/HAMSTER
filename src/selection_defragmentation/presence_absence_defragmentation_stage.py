@@ -354,11 +354,6 @@ def pam_defragmentation_stage(options) -> object | None:
         if hasattr(options, "grouped")
         else myUtil.load_cache(options, "basis_merged_grouped.pkl")
     )
-    basis_score_limit_dict = (
-        options.score_limit_dict
-        if hasattr(options, "score_limit_dict")
-        else myUtil.load_cache(options, "basis_merged_score.pkl")
-    )
 
     # Load precomputed grp1 results if available
     grp1_merged_dict = myUtil.load_cache(options, "grp1_merged_grouped.pkl")
@@ -376,7 +371,7 @@ def pam_defragmentation_stage(options) -> object | None:
     # Adds potential hits by presence absence matrix
     added_pam_probability_proteins = (
         pam_defragmentation.pam_genome_defragmentation_hit_finder(
-            options=options, basis_grouped=basis_grouped, plausability_cutoff=0.8, support_models_name="grp1_support_models.pkl"
+            options=options, basis_grouped=basis_grouped, plausability_cutoff=options.pam_threshold, support_models_name="grp1_support_models.pkl"
         )
     )
 
