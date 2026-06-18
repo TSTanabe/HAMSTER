@@ -21,9 +21,9 @@ from src.selection_seed import basis_selection_stage, csb_proteins_selection
 from src.dataset_testing import (
     validation,
     alignment,
-    Reports_printing,
-    Reports,
-    Reports_plotting,
+    reports_printing,
+    reports,
+    reports_plotting,
 )
 
 from src.selection_defragmentation import (
@@ -152,7 +152,7 @@ def report_cv_performance(options) -> None:
         overwrite=True,
     )
 
-    Reports_printing.process_initial_validations(
+    reports_printing.process_initial_validations(
         options,
         options.result_files_directory,
         options.fasta_alignment_directory,
@@ -171,16 +171,16 @@ def report_cv_performance(options) -> None:
         f"Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}"
     )
 
-    options.reports = Reports.parse_matrices_to_report(
+    options.reports = reports.parse_matrices_to_report(
         options.cross_validation_directory, "_cv_matrices.txt"
     )
-    Reports.create_performance_file(
+    reports.create_performance_file(
         options,
         options.reports,
         options.Hidden_markov_model_directory,
         "/cv_cutoff_performance.txt",
     )
-    Reports.concatenate_cv_cutoff_files(
+    reports.concatenate_cv_cutoff_files(
         options.cross_validation_directory,
         "_cv_thresholds.txt",
         options.Hidden_markov_model_directory + "/cv_strict_cutoffs.txt",
@@ -219,7 +219,7 @@ def main(args: list = None) -> None:
     # 2
     if options.stage <= 2 and options.end >= 2:
         myUtil.print_header(
-            "\n 2. Prokaryotic gene recognition and translation via prodigal"
+            "\n 2. Prokaryotic gene recognition and translation via pyrodigal"
         )
         fasta_preparation_stage.fasta_preparation(options)
 

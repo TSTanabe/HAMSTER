@@ -20,7 +20,7 @@ def collect_taxonomy_information(config: Options) -> None:
         config: Pipeline configuration with `.taxonomy_file`
             and `.database_directory`.
     """
-    print_header("Collect taxonomy information", logger=log)
+    log.info("Collect taxonomy information")
 
     if config.taxonomy_file and os.path.isfile(config.taxonomy_file):
         log.info("Writing taxonomy assignments to database: %s", config.taxonomy_file)

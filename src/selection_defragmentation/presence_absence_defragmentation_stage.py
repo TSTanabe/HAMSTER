@@ -1,6 +1,5 @@
 #!/usr/bin/python
 import sqlite3
-from collections import defaultdict
 from typing import Any, Dict, Set
 
 from src.core import myUtil
@@ -11,8 +10,6 @@ from src.selection_defragmentation import (
 )
 from src.selection_seed import (
     csb_proteins_selection,
-    singleton_finder,
-    singleton_finder2,
 )
 
 from src.core.logging import get_logger

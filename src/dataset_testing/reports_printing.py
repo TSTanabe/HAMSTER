@@ -69,20 +69,7 @@ def process_initial_validations(
 
     return
 
-    # TODO MCL file writer needed
-    # Load reference and MCL data
-    # mcl_grp1_cutoff, mcl_grp2_cutoff, mcl_results = _load_mcl_cutoff_sets(options)
 
-    # Save presence-absence matrices of all reference sequences
-
-    # Process each report
-    # for pkl_file in pkl_files:
-    #    _handle_pkl_file(
-    #        options, pkl_file, init_val_dir, db_path, output_dir,
-    #        cutoff_collection, all_grp1, all_grp2,
-    #        grp1_refs, grp2_refs,
-    #        mcl_grp1_cutoff, mcl_grp2_cutoff, mcl_results
-    #    )
 
 
 #
@@ -275,7 +262,7 @@ def _add_neighborhood_info(
 def _skip_if_all_outputs_exist(
     protein: str, report_dir: str, collections: Dict
 ) -> bool:
-    enriched_path = os.path.join(report_dir, f"{protein}_enriched.txt")
+    enriched_path = os.path.join(report_dir, f"{protein}_detailed.txt")
     roc_file = os.path.join(report_dir, f"{protein}_roc.txt")
     mcc_file = os.path.join(report_dir, f"{protein}_mcc.txt")
     cut_labels = collections["cutoffs"].get(protein, {}).keys()
@@ -323,7 +310,7 @@ def _write_neighborhood_confusions(df, report_dir, cutoffs):
 
 
 def _write_enriched_table(df, report_dir, protein):
-    enriched_path = os.path.join(report_dir, f"{protein}_enriched.txt")
+    enriched_path = os.path.join(report_dir, f"{protein}_detailed.txt")
     df.to_csv(enriched_path, sep="\t")
 
 

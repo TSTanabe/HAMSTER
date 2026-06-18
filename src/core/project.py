@@ -10,6 +10,15 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+PROJECT_DIRS = {
+    "fasta_initial_hit_directory": "Sequence_Clusters70",
+    "fasta_output_directory": "Sequences",
+    "fasta_alignment_directory": "Initial_validation",
+    "Hidden_markov_model_directory": "Hidden_markov_models",
+    "cross_validation_directory": "Cross_validation",
+    "phylogeny_directory": "Sequence_Clusters40",
+    "Csb_directory": "Collinear_syntenic_blocks",
+}
 
 def prepare_directory_structure(directory: str) -> None:
     """
@@ -47,15 +56,54 @@ def prepare_directory_structure(directory: str) -> None:
             pass  # Creates an empty file
 
 
+def _set_project_paths(options, res: str) -> None:
+    """
+    Set all canonical project paths from one central directory mapping.
+    """
+
+    res = os.path.abspath(os.path.normpath(res))
+    options.result_files_directory = res
+
+    options.database_directory = os.path.join(res, "database.db")
+
+    for attr, dirname in PROJECT_DIRS.items():
+        setattr(options, attr, os.path.join(res, dirname))
+
+    options.filtered_blast_table = os.path.join(res, "filtered_blast_results_table")
+    options.divergent_output_file = os.path.join(res, "div_output_file.faa")
+
+    options.csb_output_file = os.path.join(options.Csb_directory, "Csb_output.txt")
+    options.gene_clusters_file = os.path.join(
+        options.Csb_directory, "All_gene_clusters.txt"
+    )
+    options.data_computed_Instances_json = os.path.join(
+        options.Csb_directory, "csb_instances.json"
+    )
+
+    options.report_output_file = os.path.join(res, "Report.txt")
+    options.thresholds_output_file = os.path.join(res, "Thresholds.txt")
+
+
+def _create_project_dirs(options) -> None:
+    """
+    Create all project subdirectories defined in PROJECT_DIRS.
+    """
+
+    for attr in PROJECT_DIRS:
+        path = getattr(options, attr)
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Could not create directory {path}: {e}")
+            sys.exit(1)
+
+
 def prepare_result_space(options, project: str = "project") -> None:
     """
     Creates and sets up the results directory for a project, including all needed subdirectories.
     Updates multiple attributes of options.
     """
 
-    # ----------------------------
-    # 0) Normalize incoming paths early (accept trailing /)
-    # ----------------------------
     if getattr(options, "location", None):
         options.location = os.path.abspath(
             os.path.normpath(os.path.expanduser(options.location))
@@ -66,13 +114,8 @@ def prepare_result_space(options, project: str = "project") -> None:
             os.path.normpath(os.path.expanduser(options.result_files_directory))
         )
 
-    now = datetime.now()
-    timestamp = str(datetime.timestamp(now))
-
-    # 2. Ensure the results directory
     default_dir = os.path.join(options.location, "results")
 
-    # Check if fasta and query are provided flag. If true make always a new project
     fasta_and_query_provided = (
         getattr(options, "fasta_file_directory", None)
         and getattr(options, "query_file", None)
@@ -80,9 +123,7 @@ def prepare_result_space(options, project: str = "project") -> None:
         and os.path.isfile(options.query_file)
     )
 
-    # Use standard directory if given
     if options.new_project:
-        # Make a new project in default directory
         if not os.path.isdir(default_dir):
             try:
                 os.makedirs(default_dir, exist_ok=True)
@@ -94,9 +135,7 @@ def prepare_result_space(options, project: str = "project") -> None:
         options.result_files_directory = create_project(default_dir, project)
         write_options_to_tsv(options, options.result_files_directory)
 
-    # User defined directory and -f -q are given for new project
     elif fasta_and_query_provided:
-        # ensure base dir exists (user-defined)
         if not os.path.isdir(options.result_files_directory):
             try:
                 os.makedirs(options.result_files_directory, exist_ok=True)
@@ -113,7 +152,6 @@ def prepare_result_space(options, project: str = "project") -> None:
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
-    # User-defined directory: check for existing project. If not found, create
     elif not is_project_folder(options):
         if not os.path.isdir(options.result_files_directory):
             try:
@@ -131,56 +169,9 @@ def prepare_result_space(options, project: str = "project") -> None:
         options.new_project = True
         write_options_to_tsv(options, options.result_files_directory)
 
-    # ----------------------------
-    # 3) Canonical project paths (NO string concatenation)
-    # ----------------------------
-    res = os.path.abspath(os.path.normpath(options.result_files_directory))
+    _set_project_paths(options, options.result_files_directory)
+    _create_project_dirs(options)
 
-    options.result_files_directory = res  # keep canonical
-
-    options.database_directory = os.path.join(res, "database.db")
-
-    options.fasta_initial_hit_directory = os.path.join(res, "Hit_list")
-    options.fasta_output_directory = os.path.join(res, "Sequences")
-    options.fasta_alignment_directory = os.path.join(res, "Initial_validation")
-    options.Hidden_markov_model_directory = os.path.join(res, "Hidden_markov_models")
-    options.cross_validation_directory = os.path.join(res, "Cross_validation")
-    options.phylogeny_directory = os.path.join(res, "Protein_Phylogeny")
-    options.Csb_directory = os.path.join(res, "Collinear_syntenic_blocks")
-
-    options.filtered_blast_table = os.path.join(res, "filtered_blast_results_table")
-    options.divergent_output_file = os.path.join(res, "div_output_file.faa")
-
-    options.csb_output_file = os.path.join(options.Csb_directory, "Csb_output.txt")
-    options.gene_clusters_file = os.path.join(
-        options.Csb_directory, "All_gene_clusters.txt"
-    )
-    options.data_computed_Instances_json = os.path.join(
-        options.Csb_directory, "csb_instances.json"
-    )
-
-    options.report_output_file = os.path.join(res, "Report.txt")
-    options.thresholds_output_file = os.path.join(res, "Thresholds.txt")
-
-    # ----------------------------
-    # 4) Create required directories robustly
-    # ----------------------------
-    for path in [
-        options.fasta_initial_hit_directory,
-        options.fasta_output_directory,
-        options.fasta_alignment_directory,
-        options.Hidden_markov_model_directory,
-        options.cross_validation_directory,
-        options.phylogeny_directory,
-        options.Csb_directory,
-    ]:
-        try:
-            os.makedirs(path, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Could not create directory {path}: {e}")
-            sys.exit(1)
-
-    # 5. If using a pre-existing project, force pipeline to start at stage 3
     if not options.new_project and options.stage < 3:
         logger.warning("Existing project directory detected. Setting start stage to 3.")
         options.stage = 3
@@ -215,15 +206,8 @@ def is_project_folder(options) -> bool:
     """
     Checks if a result_files_directory contains a valid project structure.
     If a database is found, adjusts options accordingly.
-
-    Args:
-        options (Options): Has .result_files_directory etc.
-
-    Returns:
-        bool: True if project folder found or created, else False.
     """
 
-    # Database may be provided, then consider this as a result directory
     if options.database_directory and os.path.isfile(options.database_directory):
         options.result_files_directory = os.path.dirname(options.database_directory)
 
@@ -235,7 +219,6 @@ def is_project_folder(options) -> bool:
                 "No database file found in expected directory. Searching recursively..."
             )
 
-            # Recursive search for database.db
             found_db = None
             for root, dirs, files in os.walk(options.result_files_directory):
                 if "database.db" in files:
@@ -251,17 +234,7 @@ def is_project_folder(options) -> bool:
                 )
                 return False
 
-        # Now ensure required directories exist
-        required_dirs = [
-            "Sequences",
-            "Initial_validation",
-            "Hit_list",
-            "Hidden_markov_models",
-            "Cross_validation",
-            "Collinear_syntenic_blocks",
-        ]
-
-        for subdir in required_dirs:
+        for subdir in PROJECT_DIRS.values():
             path = os.path.join(options.result_files_directory, subdir)
             if not os.path.isdir(path):
                 logger.info(f"Missing directory {subdir} created")
@@ -275,7 +248,6 @@ def is_project_folder(options) -> bool:
                 "No internal query file (self_blast.faa) found. Will need to create it later."
             )
 
-        # Find blast table if not already defined
         if options.glob_table is None:
             for file_name in os.listdir(options.result_files_directory):
                 if file_name.startswith("filtered_"):

@@ -146,7 +146,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=int,
         default=3000,
         metavar="<int>",
-        help=maybe("Chunk size for batch parsing of large files."),
+        help=argparse.SUPPRESS, #maybe("Chunk size for batch parsing of large files."),
     )
     resources2.add_argument(
         "--enable-glob",
@@ -297,23 +297,23 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
     )
 
     csb_selection = parser.add_argument_group(
-        "Base training data csb and protein selection parameters (advanced)"
+        "Base training data syntenic gene cluster and protein selection parameters (advanced)"
     )
     csb_selection.add_argument(
         "--exclude-csb-score",
         dest="low_hitscore_csb_cutoff",
         type=float,
-        default=0.8,
+        default=0.7,
         metavar="<float>",
-        help=maybe("Exclude csb with all hits below this BLAST score ratio."),
+        help=maybe("Required BLAST score ratio for close homologs."),
     )
     csb_selection.add_argument(
-        "-exclude-csb-protein",
+        "--exclude-csb-protein",
         dest="exclude_csb_proteins",
         nargs="+",
         default=[],
         metavar="<list>",
-        help=maybe("Suppress csb with hits for these proteins."),
+        help=maybe("Exclude syntenic blocks with hits for these proteins."),
     )
     csb_selection.add_argument(
         "--redo-base-selection",
@@ -327,12 +327,12 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         "Presence/absence matrix (pam) parameters (advanced)"
     )
     pam_search.add_argument(
-        "--mx-thrs",
+        "--plausability-thrs",
         dest="pam_threshold",
         type=float,
         default=0.8,
         metavar="<float>",
-        help=maybe("Significance threshold for presence/absence matrix co-occurrence."),
+        help=argparse.SUPPRESS, #maybe("Significance threshold for presence/absence matrix co-occurrence."),
     )
     pam_search.add_argument(
         "--mx-bsr",
@@ -340,7 +340,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=float,
         default=0.3,
         metavar="<float>",
-        help=maybe("Minimum BLAST score ratio for pam prediction inclusion."),
+        help=argparse.SUPPRESS, #maybe("Minimum BLAST score ratio for pam prediction inclusion."),
     )
 
     mcl_search = parser.add_argument_group(
