@@ -617,75 +617,105 @@ def calculateMetric(metric: str, TP: int, FP: int, FN: int, TN: int) -> float:
 
 
 def cutoffs(
-    true_positives: Set[str], true_negatives: int, report_filepath: str
+    true_positives: Set[str],
+    true_negatives: int,
+    report_filepath: str,
+    extra_tn_fraction: float = 0.6,
 ) -> Tuple[float, float, float, Dict[str, Any], float, List[int]]:
     """
-    Calculate the optimal cutoff based on MCC, sort proteinIDs into TP, FP, FN, TN.
+    Calculate optimized/trusted/noise cutoffs from HMMsearch hits.
 
-    Args:
-        true_positives: Set of known positive IDs.
-        true_negatives: Total number of negatives.
-        report_filepath: HMMsearch output.
+    After all true positives have been found, continue reading the report down to
+    extra_tn_fraction * noise_cutoff and store these additional low-scoring hits
+    as true negatives for downstream neighborhood reporting.
 
     Returns:
         optimized_cutoff, trusted_cutoff, noise_cutoff, hit_report, best_MCC, best_matrix
     """
 
     sum_TP = len(true_positives)
-    TP, FP, FN, TN = 0, 0, 0, true_negatives
+
+    TP = 0
+    FP = 0
+    FN = sum_TP
+    TN = true_negatives
+
     trusted_cutoff = float("-inf")
-    noise_cutoff = float("inf")  # start high for minimum search!
-    optimized_cutoff = None  # None to signal "not found yet"
+    noise_cutoff = float("inf")
+    optimized_cutoff = None
     best_MCC = float("-inf")
     best_matrix = []
+
     true_positives_set = set(true_positives)
     processed_IDs = set()
-
-    # Hit-Score Dictionaries
     hit_report = {}
+
+    collecting_extra_tn = False
+    extra_tn_lower_bound = None
 
     with open(report_filepath, "r") as file:
         for line in file:
             if line.startswith("#"):
                 continue
+
             fields = line.strip().split()
             if len(fields) < 8:
-                logger.warning(f"Malformed line (skipped): {line.strip()}")
+                logger.warning(f"Malformed line skipped: {line.strip()}")
                 continue
 
-            hit_id, bitscore = fields[0], float(fields[7])
+            hit_id = fields[0]
+            bitscore = float(fields[7])
 
             if hit_id in processed_IDs:
                 continue
 
+            # Phase 2: after all TPs were found, only collect extra low-score TNs
+            if collecting_extra_tn:
+                if bitscore < extra_tn_lower_bound:
+                    break
+
+                processed_IDs.add(hit_id)
+
+                hit_report[hit_id] = {
+                    "bitscore": bitscore,
+                    "MCC": best_MCC,
+                    "TP": TP,
+                    "FP": FP,
+                    "FN": FN,
+                    "TN": TN,
+                    "assignment": "None",
+                    "training_assignment": "TN",
+                    "assignment_optimized_score": "TN",
+                    "assignment_trusted_cutoff": "TN",
+                    "assignment_noise_cutoff": "TN",
+                    "above_noise_cut": False,
+                }
+                continue
+
+            # Phase 1: normal cutoff calculation
             processed_IDs.add(hit_id)
 
-            # Increase counters in confusion matrix
             if hit_id in true_positives_set:
                 TP += 1
                 FN = sum_TP - TP
-                if FP == 0:  # first TP (highest bitscore, da absteigend sortiert)
+
+                if FP == 0:
                     trusted_cutoff = bitscore
 
-                true_value = "TP"  # This hit_id is actually a true positive
+                true_value = "TP"
 
             else:
                 FP += 1
                 TN = true_negatives - FP
+                true_value = "TN"
 
-                true_value = "TN"  # This hit_id is actually a true positive
-
-            # Calculate MCC
             current_MCC = calculateMetric("MCC", TP, FP, FN, TN)
-            # print(f"[DEBUG] TP={TP} FP={FP} FN={FN} TN={TN} MCC={current_MCC:.3f} bitscore={bitscore:.2f} hit_id={hit_id}")
 
-            # Get best MCC
             if current_MCC > best_MCC:
                 best_MCC = current_MCC
                 optimized_cutoff = bitscore
                 best_matrix = [TP, FP, FN, TN]
 
-            # Save hit_id for report
             hit_report[hit_id] = {
                 "bitscore": bitscore,
                 "MCC": current_MCC,
@@ -694,38 +724,44 @@ def cutoffs(
                 "FN": FN,
                 "TN": TN,
                 "assignment": "None",
-                "true_value": true_value,
+                "training_assignment": true_value,
+                "above_noise_cut": True,
             }
 
+            # When the last TP is reached, define noise cutoff and switch to extra-TN collection
             if TP == sum_TP:
                 noise_cutoff = bitscore
-                break
+                extra_tn_lower_bound = noise_cutoff * extra_tn_fraction
+                collecting_extra_tn = True
+                continue
+
             if bitscore < noise_cutoff:
                 noise_cutoff = bitscore
 
-    # Sanity-Check: Warn if no optimal cutoff was found
     if optimized_cutoff is None:
-        logger.warning("No optimized cutoff found for {report_filepath}")
-        optimized_cutoff = trusted_cutoff
+        logger.warning(f"No optimized cutoff found for {report_filepath}")
+        optimized_cutoff = trusted_cutoff if trusted_cutoff != float("-inf") else 10
+        best_MCC = 0
+        best_matrix = [TP, FP, FN, TN]
 
-    # Second pass: assign based on optimized_cutoff
+    # Final assignment for normal hits
     for hit_id, info in hit_report.items():
-        bs = info["bitscore"]
-        true_val = info["true_value"]
+        if not info.get("above_noise_cut", False):
+            continue
 
-        # Assignment at optimized cutoff
+        bs = info["bitscore"]
+        true_val = info["training_assignment"]
+
         if bs >= optimized_cutoff:
             info["assignment_optimized_score"] = "TP" if true_val == "TP" else "FP"
         else:
             info["assignment_optimized_score"] = "FN" if true_val == "TP" else "TN"
 
-        # Assignment at trusted cutoff
         if bs >= trusted_cutoff:
             info["assignment_trusted_cutoff"] = "TP" if true_val == "TP" else "FP"
         else:
             info["assignment_trusted_cutoff"] = "FN" if true_val == "TP" else "TN"
 
-        # Assignment at noise cutoff
         if bs >= noise_cutoff:
             info["assignment_noise_cutoff"] = "TP" if true_val == "TP" else "FP"
         else:

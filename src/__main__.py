@@ -134,9 +134,8 @@ def report_cv_performance(options) -> None:
     Example Output:
         Files: cv_cutoff_performance.txt, cv_strict_cutoffs.txt, plots, etc.
     """
-    logger.info(
-        f"Saving the cutoffs and performance reports from initial calculation to {options.Hidden_markov_model_directory}"
-    )
+
+    """
     mcl_clustering_results_dict = myUtil.load_cache(
         options, "linclust_clustering_results.pkl"
     )
@@ -151,7 +150,11 @@ def report_cv_performance(options) -> None:
         mcl_clustering_results_dict,
         overwrite=True,
     )
+    """
 
+    logger.info(
+        f"Saving the cutoffs and performance reports from self detection test to {options.Hidden_markov_model_directory}"
+    )
     reports_printing.process_initial_validations(
         options,
         options.result_files_directory,
@@ -159,14 +162,6 @@ def report_cv_performance(options) -> None:
         options.database_directory,
     )
 
-    # External R scripts
-    try:
-        logger.info("Plotting confusion matrices per genomic context")
-        # Reports_plotting.process_initial_plotting(options)
-    except Exception as e:
-        logger.error("An error occurred during the R plotting: %s", str(e))
-    # cross validation
-    # logger.info("Starting cross-validation")
     logger.info(
         f"Saving the cutoffs and performance reports from the cross-validation to {options.Hidden_markov_model_directory}"
     )

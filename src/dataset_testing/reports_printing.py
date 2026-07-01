@@ -64,9 +64,6 @@ def process_initial_validations(
 
     write_pkl_tsv_reports(options, db_path, cutoff_collection, output_dir, pkl_files)
 
-    # TODO fix this routine
-    # write_pam_tsv_report(options, output_dir)
-
     return
 
 
@@ -567,7 +564,7 @@ def write_neighborhood_confusion_data(
     cutoff_name: str = "cutoff",
     neighborhood_col: str = "neighborhood",
     score_col: str = "bitscore",
-    true_label_col: str = "true_value",
+    true_label_col: str = "training_assignment",
     top_n: int = None,
     output_dir: str = None,
 ) -> None:
