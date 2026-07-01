@@ -3,8 +3,6 @@
 
 from typing import Dict, Set, Any
 
-from pyzstd import _c
-
 from src.selection_defragmentation import (
     pam_mx_selection,
     pam_mx_calculate_plausability,
