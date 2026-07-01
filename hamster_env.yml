@@ -20,4 +20,3 @@ dependencies:
   - mafft=7.526
   - trimal=1.5.1
   - hmmer=3.4
-  - pyzstd=0.19.1
