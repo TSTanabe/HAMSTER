@@ -14,7 +14,7 @@ dependencies:
   - matplotlib=3.11.0
 
   # --- External bioinformatics tools ---
-  - diamond=2.0.2
+  - diamond>=2.0.2
   - pyrodigal=3.7.1
   - mmseqs2=18.8cc5c
   - mafft=7.526
