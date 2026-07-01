@@ -7,17 +7,17 @@ dependencies:
   - python>=3.8
 
   # --- Core scientific Python stack ---
-  - numpy
-  - pandas
-  - scipy
-  - scikit-learn
-  - matplotlib
+  - numpy=2.5.0
+  - pandas=3.0.3
+  - scipy=1.18.0
+  - scikit-learn=1.9.0
+  - matplotlib=3.11.0
 
   # --- External bioinformatics tools ---
-  - diamond
-  - pyrodigal
-  - mmseqs2
-  - mafft
-  - trimal
-  - hmmer
-  - pyzstd
+  - diamond=2.0.2
+  - pyrodigal=3.7.1
+  - mmseqs2=18.8cc5c
+  - mafft=7.526
+  - trimal=1.5.1
+  - hmmer=3.4
+  - pyzstd=0.19.1
