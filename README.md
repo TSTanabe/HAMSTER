@@ -28,7 +28,7 @@ conda env create -f hamster_env.yml
 conda activate hamster_env
 ```
 
-### Manual installation
+### Manual installation without Conda
 
 Using the provided Conda environment is recommended, because HAMSTER depends on both Python packages and external bioinformatics command-line tools. If HAMSTER is installed without Conda, the following software must be available in the active environment and accessible through `$PATH`.
 
