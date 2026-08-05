@@ -175,11 +175,11 @@ def report_cv_performance(options) -> None:
         options.Hidden_markov_model_directory,
         "/cv_cutoff_performance.txt",
     )
-    reports.concatenate_cv_cutoff_files(
-        options.cross_validation_directory,
-        "_cv_thresholds.txt",
-        options.Hidden_markov_model_directory + "/cv_strict_cutoffs.txt",
-    )
+    #reports.concatenate_cv_cutoff_files(
+    #    options.cross_validation_directory,
+    #    "_cv_thresholds.txt",
+    #    options.Hidden_markov_model_directory + "/cv_strict_cutoffs.txt",
+    #)
 
 
 def main(args: list = None) -> None:
