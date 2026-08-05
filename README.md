@@ -77,7 +77,8 @@ and report files that belong together share the same basename.
 ### Main results
 
 The main output directory contains the final HMMs, selected training sequences, and detailed validation reports.
-
+For each query, up to four HMMs are generated that are build from sequences sets of increasing size diversity. Depending on
+the input genomes not all four HMMs might be generated.
 
 - **Hidden_markov_models/**  
   Contains the generated profile Hidden Markov Models (HMMs) for each protein family and selection rule, together with the corresponding cutoff information.
