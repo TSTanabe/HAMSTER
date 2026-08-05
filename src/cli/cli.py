@@ -322,7 +322,14 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         default=False,
         help=argparse.SUPPRESS,  # help=maybe("Redo all selection steps and overwrite all caches."),
     )
-
+    csb_selection.add_argument(
+        "--singleton-identity-cutoff",
+        dest="singleton_identity_cutoff",
+        type=float,
+        default=70.0,
+        metavar="<float>",
+        help=maybe("Minimum percent identity for seed hits without csb to query sequence."),
+    )
     pam_search = parser.add_argument_group(
         "Presence/absence matrix (pam) parameters (advanced)"
     )

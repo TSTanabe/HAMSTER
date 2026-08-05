@@ -47,6 +47,7 @@ def basis_sequence_fasta(options) -> None:
     grp_score_limit_dict, grouped = (
         csb_proteins_selection.prepare_csb_grouped_training_proteins(options)
     )
+    options.grouped = grouped
 
     ### Collect singletons without any conserved csb
     logger.info(
@@ -64,7 +65,6 @@ def basis_sequence_fasta(options) -> None:
         logger.error(
             "There were no proteins selected for basic training. Consider increasing the input data or lowering selection thresholds - stopping execution"
         )
-        sys.exit()
 
     # Print the grp0 csb and singletons to fasta
     csb_proteins_selection.fetch_training_data_to_fasta(options, merged_grouped, "grp0")

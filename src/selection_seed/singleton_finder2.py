@@ -80,6 +80,85 @@ def _find_context_free_high_identity_hits(
 
     return context_free
 
+def _add_missing_query_domains_to_context_free_dict(
+    database_path: str,
+    context_free_domains_dict: dict[str, set[str]],
+    already_grouped_domains: set[str],
+    identity_cutoff: float = 70.0,
+) -> dict[str, set[str]]:
+    """
+    Adds QUERY domains that are absent from CSB-grouped domains to the
+    context_free_domains_dict used by the singleton finder.
+
+    Important:
+    The added domains are not truly context-free. They are forced singleton
+    seeds based on QUERY presence and homologs above identity_cutoff.
+    """
+
+    with sqlite3.connect(database_path, timeout=120.0) as con:
+        cur = con.cursor()
+
+        # 1. All domains present in QUERY
+        cur.execute(
+            """
+            SELECT DISTINCT d.domain
+            FROM Domains d
+            JOIN Proteins p
+              ON p.proteinID = d.proteinID
+            WHERE p.genomeID = 'QUERY'
+              AND d.domain IS NOT NULL
+            """
+        )
+        query_domains = {row[0] for row in cur.fetchall() if row[0]}
+
+        already_singleton_seed_domains = set(context_free_domains_dict.keys())
+        already_grouped_domains = set(already_grouped_domains or set())
+        missing_domains = (
+            query_domains
+            - already_grouped_domains
+            - already_singleton_seed_domains
+        )
+
+        query_domains_str = ", ".join(sorted(query_domains)) or "none"
+        missing_domains_str = ", ".join(sorted(missing_domains)) or "none"
+        logger.info(
+            "\n"
+            f"QUERY domains ({len(query_domains)}): {query_domains_str}\n"
+            f"Missing singleton candidate domains ({len(missing_domains)}): {missing_domains_str}"
+        )
+
+        for domain in missing_domains:
+            # 2. Find genomes with homologs for this missing domain
+            cur.execute(
+                """
+                SELECT DISTINCT p.genomeID
+                FROM Domains d
+                JOIN Proteins p
+                  ON p.proteinID = d.proteinID
+                WHERE p.genomeID != 'QUERY'
+                  AND d.domain = ?
+                  AND d.identity >= ?
+                """,
+                (domain, identity_cutoff),
+            )
+
+            genomes = {row[0] for row in cur.fetchall() if row[0]}
+
+            if not genomes:
+                logger.warning(
+                    f"Missing QUERY domain '{domain}' was not added as singleton seed: "
+                    f"no non-QUERY genomes with identity >= {identity_cutoff}."
+                )
+                continue
+
+            context_free_domains_dict[domain] = genomes
+
+            logger.debug(
+                f"Added missing Query domain '{domain}' to singleton seeds "
+                f"with {len(genomes)} genomes."
+            )
+
+    return context_free_domains_dict
 
 def _fetch_high_identity_domain_intersection(
     database_path: str,
@@ -112,7 +191,7 @@ def _fetch_high_identity_domain_intersection(
         )
 
         for seed_domain, genomes in domain_to_genomes.items():
-            logger.info(f"Fetching data for {seed_domain} in {len(genomes)} genomes")
+            logger.debug(f"Fetching data for {seed_domain} in {len(genomes)} genomes")
             genomes_list = [g for g in genomes if g and g != "QUERY"]
             if not genomes_list:
                 intersections_per_seed[seed_domain] = set()
@@ -192,7 +271,7 @@ def select_singleton_refs_by_domain_pattern(
             if not pattern_domains:
                 continue
 
-            logger.info(
+            logger.debug(
                 f"Fetching data for {seed_domain} with {len(pattern_domains)} pattern domains"
             )
 
@@ -267,6 +346,47 @@ def select_singleton_refs_by_domain_pattern(
 
     return limits_dict, sng_reference_seq_dict
 
+def add_query_ids_to_proteinIDset(
+    combined_protein_sets: Dict[str, Set[str]], database_path: str
+) -> Dict[str, Set[str]]:
+    """
+    Adds any proteinIDs from the query cluster to each protein group set.
+
+    Args:
+
+        database_path (str): Path to SQLite DB.
+
+    Returns:
+        dict: {group: set(proteinIDs)} (now includes query IDs)
+    """
+    # Connect to the database
+    with sqlite3.connect(database_path, timeout=120.0) as conn:
+        cursor = conn.cursor()
+
+        # **Schritt 1: Finde alle proteinIDs mit genomeID = 'QUERY'**
+        cursor.execute("SELECT proteinID FROM Proteins WHERE genomeID = 'QUERY'")
+        query_protein_ids = {
+            row[0] for row in cursor.fetchall()
+        }  # Set für schnellere Suche
+
+        if not query_protein_ids:
+            return combined_protein_sets  # Falls leer, sofort zurückgeben
+
+        for key in combined_protein_sets:
+            # **Schritt 2: Hole proteinIDs aus Domains, aber nur, wenn sie in query_protein_ids sind**
+            cursor.execute(
+                f"""
+                SELECT proteinID FROM Domains 
+                WHERE domain = ? AND proteinID IN ({",".join(["?"] * len(query_protein_ids))})
+                """,
+                (key, *query_protein_ids),
+            )
+
+            # Add fetched proteinIDs to the protein set
+            protein_ids = {row[0] for row in cursor.fetchall()}
+            combined_protein_sets[key].update(protein_ids)
+
+    return combined_protein_sets
 
 #### Main routine of this module
 def singleton_reference_finder(
@@ -286,8 +406,8 @@ def singleton_reference_finder(
 
     high_identity_cutoff = getattr(options, "singleton_identity_cutoff", 70.0)
     pattern_identity_cutoff = getattr(
-        options, "singleton_pattern_identity_cutoff", 70.0
-    )
+        options, "singleton_identity_cutoff", 30.0
+    ) # Co occurring domains need this identity to be assumed as part of a pattern
 
     # 1) Find genomes & domains with context-free high-identity hits
     context_free_domains_dict = _find_context_free_high_identity_hits(
@@ -295,8 +415,18 @@ def singleton_reference_finder(
         identity_cutoff=high_identity_cutoff,
     )
 
+    # 2) Add QUERY domains that were not selected by CSB grouping.
+    # Genomes that are considered still need a seq with high identity
+    context_free_domains_dict = _add_missing_query_domains_to_context_free_dict(
+        database_path=options.database_directory,
+        context_free_domains_dict=context_free_domains_dict,
+        already_grouped_domains=options.grouped,
+        identity_cutoff=high_identity_cutoff,
+    )
+
+
     logger.info(
-        f"Found {len(context_free_domains_dict)} context-free hits with {high_identity_cutoff} percent identity"
+        f"Found {len(context_free_domains_dict)} genomic context-free domains with >= {high_identity_cutoff} percent identity"
     )
 
     if not context_free_domains_dict:
@@ -327,6 +457,8 @@ def singleton_reference_finder(
             min_identity_cutoff=pattern_identity_cutoff,
         )
     )
+
+    singleton_reference_seqs_dict = add_query_ids_to_proteinIDset(singleton_reference_seqs_dict, options.database_directory)
 
     myUtil.save_cache(
         options, "sng0_training_proteinIDs.pkl", singleton_reference_seqs_dict

@@ -55,8 +55,11 @@ def prepare_csb_grouped_training_proteins(
     )
 
     logger.info(
-        f"Collecting sequences for training datasets with similar csb for {len(grouped_keywords_dict)} proteins"
+        f"Collecting sequences for training datasets with similar csb for "
+        f"{len(grouped_keywords_dict)} proteins: "
+        f"{', '.join(sorted(grouped_keywords_dict.keys()))}"
     )
+
     csb_proteins_dict: dict[tuple[str, str], set[str]] = csb_proteins_datasets(
         options, grouped_keywords_dict
     )
