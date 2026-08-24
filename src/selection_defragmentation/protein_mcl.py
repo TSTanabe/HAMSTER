@@ -51,7 +51,7 @@ def select_hits_by_csb_mcl(
         # Get reference sequences for the domain (if exists in processed reference dict)
         reference_sequences = processed_reference_dict.get(domain, set())
         if not reference_sequences:
-            logger.warning(f"No reference sequences found for {domain}")
+            logger.debug(f"No reference sequences found for {domain}")
             continue
 
         local_density_thrs = density_threshold

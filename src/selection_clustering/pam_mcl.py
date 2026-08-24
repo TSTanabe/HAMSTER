@@ -72,7 +72,7 @@ def select_hits_by_pam_csb_mcl(
             # Get reference sequences for the domain (if exists in processed reference dict)
             reference_sequences = processed_reference_dict.get(domain, set())
             if not reference_sequences:
-                logger.warning(
+                logger.debug(
                     f"No reference sequences found for domain '{domain}' - skipping"
                 )
                 continue
