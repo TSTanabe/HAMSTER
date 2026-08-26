@@ -2,8 +2,6 @@
 import os
 from src.db import database
 from src.search import (
-    global_file_search,
-    create_glob_faa,
     query_selfblast_search,
     blastp_parallel,
 )
@@ -34,13 +32,7 @@ def initial_search(config) -> None:
         logger.info("Created database")
         database.create_database(config.database_directory)
 
-    config.query_file_original = config.query_file
 
-    # Durchnummerierte Query erzeugen und als aktive Query verwenden
-    config.query_file = query_selfblast_search.make_numbered_query_fasta(
-        config.query_file_original,
-        config.result_files_directory,
-    )
 
     # header in glob file are genomeID___proteinID
 

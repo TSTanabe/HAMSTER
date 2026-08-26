@@ -1,19 +1,15 @@
-import gzip
 import os
-import shutil
-import tempfile
 import math
-import csv
 import traceback
 
 from multiprocessing import Pool
-from typing import Dict, Iterable, Tuple, Optional
+from typing import Dict, Optional
 
 from src.core.logging import get_logger
 from src.db import database
 from src.fasta_preparation.materialize import materialize_pair_gz_next_to_input
 from src.parse_reports import parse_reports, csb_finder
-from src.search import diamond_search, blastp_n_filter, query_selfblast_search
+from src.search import diamond_search, query_selfblast_search
 
 logger = get_logger(__name__)
 
@@ -175,6 +171,13 @@ def run_consecutive_parallel_search(
       - logs progress in ~1% steps
     """
     logger.info("Initilize DIAMOND BLASTp self-blast against query")
+    config.query_file_original = config.query_file
+
+    # Durchnummerierte Query erzeugen und als aktive Query verwenden
+    config.query_file = query_selfblast_search.make_numbered_query_fasta(
+        config.query_file_original,
+        config.result_files_directory,
+    )
     selfblast_scores_dict, query_length_dict = query_selfblast_search.self_blast_query(
         config
     )

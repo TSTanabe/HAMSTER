@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import os
 import sys
+import traceback
 from typing import Dict, Any
 
 from src.search import diamond_search
@@ -60,74 +61,135 @@ def make_numbered_query_fasta(input_query: str, result_dir: str) -> str:
     return output_path
 
 
-def create_selfquery_file(
-    query_file: str, result_dir: str, prefix: str = "QUERY"
-) -> tuple[str, str]:
+def _clean_dict_keys_and_protein_ids(
+    input_dict: Dict[str, Any], genomeID: str
+) -> Dict[str, Any]:
     """
-    Create two FASTA files derived from a query FASTA:
+    Removes the genomeID prefix from dictionary keys and proteinID fields.
 
-    - self_blast.faa : headers get prefix + unique counter
-    - self_seqs.faa  : same headers but without prefix
+    Args:
+        input_dict: dict of proteinID -> Protein
+        genomeID: genomeID prefix to remove
 
-    Parameters
-    ----------
-    query_file : str
-        Path to input FASTA with query sequences.
-    result_dir : str
-        Output directory.
-    prefix : str, optional
-        Prefix for self_blast file (default "QUERY___").
+    Returns:
+        dict: updated protein dict
+    """
+    prefix = genomeID + "___"
+    updated_dict = {}
 
-    Returns
-    -------
-    (self_blast_path, self_seqs_path)
+    for key, protein in input_dict.items():
+        # Entferne das Präfix von jedem Key, wenn es vorhanden ist
+        new_key = key[len(prefix) :] if key.startswith(prefix) else key
+
+        # Entferne das Präfix von proteinID, falls es vorhanden ist
+        if hasattr(protein, "proteinID") and protein.proteinID.startswith(prefix):
+            protein.proteinID = protein.proteinID[len(prefix) :]
+
+        # Füge das geänderte Key-Value-Paar zum neuen Dictionary hinzu
+        updated_dict[new_key] = protein
+
+    return updated_dict
+
+
+def _strip_query_suffix(query_id: str) -> str:
+    """
+    Entfernt eine numerische Suffix-Nummerierung der Form '___<int>'.
+    Beispiel:
+        'SmoC___1'  -> 'SmoC'
+        'SmoC___abc' -> 'SmoC___abc' (wird nicht abgeschnitten)
+    """
+    if "___" in query_id:
+        base, suffix = query_id.rsplit("___", 1)
+        if suffix.isdigit():
+            return base
+    return query_id
+
+
+def _parse_self_blastreport(
+    genome_id: str,
+    filepath: str,
+) -> Dict[str, Any]:
+    """
+    Parses a BLAST report for a specific genomeID and extracts protein domain hits.
+
+    Args:
+        genome_id (str): The genome ID to store in the Protein object.
+        filepath (str): Path to BLAST report.
+        thresholds (dict): Score thresholds (unused here).
+        cut_score (int): Score threshold for filtering (optional, derzeit nicht genutzt).
+
+    Returns:
+        dict: proteinID -> Protein object (ParseReports.Protein)
+
+    Output Example:
+        {"WP_012345678": ParseReports.Protein(...), ...}
     """
 
-    # Output paths
-    self_query_path = os.path.join(result_dir, "self_query.faa")
-    self_target_path = os.path.join(result_dir, "self_target.faa")
+    protein_dict: Dict[str, parse_reports.Protein] = {}
 
-    id_count = {}
+    try:
+        with open(filepath, "r") as infile:
+            for line in infile:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
 
-    with (
-        open(self_query_path, "w") as outfile_query,
-        open(self_target_path, "w") as outfile_seqs,
-        open(query_file, "r") as infile,
-    ):
-        header = None
-        sequence = ""
+                columns = line.split("\t")  # Assuming tab-separated format
 
-        for line in infile:
-            line = line.strip()
-            if line.startswith(">"):
-                if header and sequence:
-                    original_id = header[1:].split()[0]
-                    id_count[original_id] = id_count.get(original_id, 0) + 1
-                    count = id_count[original_id]
+                # Mindestens bis hsp_end vorhanden? (0..5)
+                if len(columns) < 6:
+                    continue
 
-                    outfile_query.write(
-                        f">{prefix}___{original_id}___{count}\n{sequence}\n"
+                try:
+                    hit_protein_id = columns[0]  # Protein identifier in BLAST
+                    raw_query_id = columns[1]  # Query sequence ID
+                    query_id = _strip_query_suffix(raw_query_id)
+                    hit_bitscore = int(float(columns[3]))  # Bitscore as integer
+                    hsp_start = int(columns[4])
+                    hsp_end = int(columns[5])
+                    hsp_ident = int(float(columns[6]))
+                    try:
+                        hsp_bsr = float(columns[7])
+                    except (IndexError, ValueError):
+                        hsp_bsr = 1.0  # sinnvoller Default, wenn keine BSR-Spalte
+
+                    # Wenn Protein schon existiert → Domain anhängen
+                    if hit_protein_id in protein_dict:
+                        protein_dict[hit_protein_id].add_domain(
+                            hmm=query_id,
+                            start=hsp_start,
+                            end=hsp_end,
+                            score=hit_bitscore,
+                            ident=hsp_ident,
+                            bsr=hsp_bsr,
+                        )
+                    else:
+                        # Neues Protein-Objekt erzeugen
+                        protein_dict[hit_protein_id] = parse_reports.Protein(
+                            protein_id=hit_protein_id,
+                            hmm=query_id,
+                            start=hsp_start,
+                            end=hsp_end,
+                            score=hit_bitscore,
+                            genome_id=genome_id,
+                            ident=hsp_ident,
+                            bsr=hsp_bsr,
+                        )
+
+                except ValueError as ve:
+                    logger.warning(
+                        f"Skipped malformed line in {filepath}: {line} "
+                        f"(ValueError: {ve})"
                     )
-                    outfile_seqs.write(f">{original_id}___{count}\n{sequence}\n")
 
-                header = line
-                sequence = ""
-            else:
-                sequence += line
+    except Exception as e:
+        logger.error(f"Failed to parse {filepath} for genome {genome_id}: {e}")
+        logger.debug(traceback.format_exc())
 
-        # write last record
-        if header and sequence:
-            original_id = header[1:].split()[0]
-            id_count[original_id] = id_count.get(original_id, 0) + 1
-            count = id_count[original_id]
-
-            outfile_query.write(f">{prefix}{original_id}___{count}\n{sequence}\n")
-            outfile_seqs.write(f">{original_id}___{count}\n{sequence}\n")
-
-    return self_query_path, self_target_path
+    return protein_dict
 
 
-def get_sequence_hits_scores(blast_file: str) -> Dict[str, float]:
+def _get_sequence_hits_scores(blast_file: str) -> Dict[str, float]:
     """
     Generates a dict of self-blast scores from a BLAST table file.
 
@@ -159,7 +221,7 @@ def get_sequence_hits_scores(blast_file: str) -> Dict[str, float]:
     return selfblast_scores
 
 
-def get_sequence_legth(file_path: str) -> Dict[str, float]:
+def _get_sequence_legth(file_path: str) -> Dict[str, float]:
     """
     Gibt die Sequenzlänge pro Query-ID zurück.
 
@@ -189,7 +251,7 @@ def get_sequence_legth(file_path: str) -> Dict[str, float]:
     return lengths
 
 
-def self_blast_query(options: Any) -> tuple[Dict[str, float], Dict[str, float]]:
+def self_blast_query(config: Any) -> tuple[Dict[str, float], Dict[str, float]]:
     """
     Self-BLAST der (bereits durchnummerierten) Query-FASTA gegen sich selbst.
 
@@ -198,36 +260,36 @@ def self_blast_query(options: Any) -> tuple[Dict[str, float], Dict[str, float]]:
       - query_length_dict:     qseqid -> Sequenzlänge
     """
 
-    query_fasta = options.query_file  # das ist jetzt query_numbered.faa
+    query_fasta = config.query_file  # das ist jetzt query_numbered.faa
 
     # Self-BLAST: Query und Target sind gleich
     report = diamond_search.diamond_search(
         query_fasta,  # path = Target-DB
         query_fasta,  # query_fasta
-        options.cores,
-        options.evalue,
+        config.cores,
+        config.evalue,
         1.0,  # coverage 100%
         100.0,  # minseqid 100% (oder 1.0, je nach Skala)
-        options.diamond_report_hits_limit,
-        options.alignment_mode,
+        config.diamond_report_hits_limit,
+        config.alignment_mode,
     )
 
     ## These are for the return
     # Self-BLAST-Scores pro qseqid
-    selfblast_scores_dict = get_sequence_hits_scores(report)
+    selfblast_scores_dict = _get_sequence_hits_scores(report)
     # Sequenzlängen pro qseqid (muss an neues Header-Schema angepasst werden)
-    query_length_dict = get_sequence_legth(query_fasta)
+    query_length_dict = _get_sequence_legth(query_fasta)
 
     ## Save in the database
-    protein_dict = parse_reports.parse_bulk_blastreport_consecutive(
+    protein_dict = _parse_self_blastreport(
         genome_id="QUERY", filepath=report
     )
 
     parse_reports.get_protein_sequence(query_fasta, protein_dict)
-    protein_dict = parse_reports.clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
+    protein_dict = _clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
     database.insert_database_genome_ids(
-        options.database_directory, genome_ids={"QUERY"}
+        config.database_directory, genome_ids={"QUERY"}
     )
 
-    database.insert_database_proteins(options.database_directory, protein_dict)
+    database.insert_database_proteins(config.database_directory, protein_dict)
     return selfblast_scores_dict, query_length_dict
