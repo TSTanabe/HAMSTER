@@ -84,7 +84,7 @@ def csb_prediction(options: Any) -> None:
         options.non_redundant, options.redundancy_hash
     )  # for all which do not have a redundant gene cluster
     # modified CsbfinderS algorithm
-    logger.info("Starting Csb match point algorithm for csb pattern recoginition")
+    logger.info("Starting Csb match point algorithm for csb pattern recognition")
     # computed_Instances_dict = csb_mp_algorithm.csb_finderS_matchpoint_algorithm(
     #    options.redundancy_hash, gene_clusters, options.insertions, options.occurence
     # )  # k insertions und q occurences müssen über die optionen festgelegt werden
