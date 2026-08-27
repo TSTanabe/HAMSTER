@@ -235,7 +235,7 @@ def main(args: list = None) -> None:
         myUtil.print_header(
             "\n 5. Selecting homologs to reference seqs by similarity and synteny"
         )
-        basis_selection_stage.basis_sequence_fasta(options)  # grp0 dataset
+        basis_selection_stage.basis_sequence_fasta(options)  # ds1 dataset
 
     # 6
     if options.stage <= 6 and options.end >= 6:

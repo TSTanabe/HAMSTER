@@ -1,14 +1,11 @@
 #!/usr/bin/python
 
-import statistics
-import os
-import sqlite3
 import csv
 import multiprocessing
-import numpy as np
-
-from typing import Dict, Any, List, Tuple, Optional
-from sklearn.cluster import AgglomerativeClustering
+import os
+import sqlite3
+import statistics
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.core import myUtil
 from src.core.logging import get_logger
@@ -16,25 +13,188 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def group_gene_cluster_statistic(options: Any):
+def get_highest_bitscores_for_genome(database: str, genome_id: str) -> Dict[str, float]:
     """
-    Backward-compatible API:
-        Returns domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
+    Gets the highest bitscore for each domain for a given genome.
 
-    Internally runs:
-        (1) compute_cluster_stats()
-        (2) apply_cluster_selection()
+    Args:
+        database (str): Path to SQLite DB.
+        genome_id (str): GenomeID.
+
+    Returns:
+        dict: {domain: highest_bitscore}
     """
-    filtered_stats_dict, query_score_dict = compute_cluster_stats(options)
+    domain_max_bitscores = {}
 
-    domain_score_limits, grouped_keywords = apply_cluster_selection(
-        options, filtered_stats_dict, query_score_dict
-    )
+    with sqlite3.connect(database) as con:
+        cur = con.cursor()
 
-    return domain_score_limits, filtered_stats_dict, grouped_keywords
+        query = """
+        SELECT d.domain, MIN(d.score) as max_score
+        FROM Domains d
+        JOIN Proteins p ON d.proteinID = p.proteinID
+        WHERE p.genomeID = ?
+        GROUP BY d.domain;
+        """
+
+        cur.execute(query, (genome_id,))
+
+        for domain, max_score in cur.fetchall():
+            domain_max_bitscores[domain] = max_score
+
+    return domain_max_bitscores
+
+def get_keyword_statistics(
+    database: str,
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """
+    Calculate SQL-native score statistics for every keyword × domain pair.
+
+    Returns:
+        {
+            keyword: {
+                domain: {
+                    "n": int,
+                    "min": float,
+                    "max": float,
+                    "avg": float,
+                }
+            }
+        }
+    """
+
+    stats_dict = {}
+
+    query = """
+        SELECT
+            k.keyword,
+            d.domain,
+            COUNT(*) AS n,
+            MIN(d.score) AS min_score,
+            MAX(d.score) AS max_score,
+            AVG(d.score) AS avg_score
+        FROM Keywords AS k
+        JOIN Proteins AS p
+          ON p.clusterID = k.clusterID
+        JOIN Domains AS d
+          ON d.proteinID = p.proteinID
+        WHERE d.domain IS NOT NULL
+          AND d.score IS NOT NULL
+        GROUP BY
+            k.keyword,
+            d.domain;
+    """
+
+    with sqlite3.connect(database, timeout=120.0) as con:
+        cur = con.cursor()
+
+        cur.execute("PRAGMA query_only=TRUE;")
+        cur.execute("PRAGMA cache_size=-262144;")
+        cur.execute("PRAGMA mmap_size=2147483648;")
+        cur.execute("PRAGMA automatic_index=ON;")
+
+        cur.execute(query)
+
+        for keyword, domain, n, min_score, max_score, avg_score in cur:
+            stats_dict.setdefault(keyword, {})[domain] = {
+                "n": n,
+                "min": min_score,
+                "max": max_score,
+                "mean": round(avg_score, 2),
+            }
+
+    return stats_dict
+
+def _filter_out_low_quality_csb(
+    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
+    query_score_dict: Dict[str, float],
+    threshold: float = 0.2,
+    min_occurrences: int = 10,
+    csb_name_prefix: str = "csb-",
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    """
+    Filters out CSBs where all domains have a median score less than the given threshold of the query reference.
+
+    Args:
+        stats_dict (dict): { keyword: { domain: { 'n': int, 'min': float, 'max': float,
+                                                  'mean': float, 'median': float, 'std_dev': float } } }
+        query_score_dict (dict): { domain: max_bitscore }
+        threshold (float): The percentage threshold of the query reference score.
+
+    Returns:
+        dict: Filtered CSBs where at least one domain meets the threshold.
+    """
+    filtered_csb = {}
+
+    # Precompute threshold scores for each domain
+    domain_thresholds = {
+        domain: query_score * threshold # This was previously noted as 1 - threshold
+        for domain, query_score in query_score_dict.items()
+    }
+
+    for keyword, domain_dict in stats_dict.items():
+        csb_should_be_removed = (
+            True  # Assume CSB will be removed unless a domain passes
+        )
+        max_occurrences = max(
+            (stats["n"] for stats in domain_dict.values() if "n" in stats), default=0
+        )
+
+        # Skip CSB if its highest occurrence count is below the minimum required
+        if max_occurrences < min_occurrences:
+            continue
+
+        for domain, stats in domain_dict.items():
+            if domain in domain_thresholds and stats:
+                # Check if at least one domain meets the threshold
+                if stats["max"] >= domain_thresholds[domain]:
+                    csb_should_be_removed = False
+                    break  # No need to check other domains for this CSB
+
+        if not (csb_should_be_removed and keyword.startswith(csb_name_prefix)):
+            filtered_csb[keyword] = (
+                domain_dict  # Keep CSB if at least one domain passed
+            )
+
+    return filtered_csb
+
+####################################################################################
 
 
-def compute_cluster_stats(options: Any) -> Tuple[Dict, Dict]:
+def _filter_out_csb_with_protein_types(
+    stats_dict, exclude_types: list, csb_name_prefix: str
+) -> dict:
+    """
+    Removes all CSBs (keywords) from stats_dict that contain any domain listed in exclude_types.
+
+    Args:
+        stats_dict (dict): {keyword: {domain: {...}}}
+        exclude_types (list): List of domains/types to exclude.
+
+    Returns:
+        dict: Filtered stats_dict.
+    """
+    filtered = {}
+    exclude_set = set(exclude_types)
+    for csb_keyword, domain_dict in stats_dict.items():
+        domains_in_csb = set(domain_dict.keys())
+        intersection = domains_in_csb & exclude_set
+
+        # intersection means excluded proteins were found
+        if intersection and csb_keyword.startswith(csb_name_prefix):
+            logger.debug(f"Removed csb {csb_keyword} due a hit for {intersection}")
+        elif intersection and not csb_keyword.startswith(csb_name_prefix):
+            logger.debug(
+                f"Kept pattern file defined csb {csb_keyword} with hit for {intersection}"
+            )
+            filtered[csb_keyword] = domain_dict
+        else:
+            filtered[csb_keyword] = domain_dict
+
+    return filtered
+
+
+def compute_cluster_stats(config: Any) -> Tuple[Dict, Dict]:
     """
     Phase 1: Compute the statistical basis for cluster selection.
       - Per keyword × domain hitscore statistics
@@ -46,53 +206,58 @@ def compute_cluster_stats(options: Any) -> Tuple[Dict, Dict]:
         query_score_dict    (dict): {domain: best_query_score}
     """
     # Load caches if available
-    filtered_stats_dict = myUtil.load_cache(options, "stat_filtered_stats.pkl")
-    query_score_dict = myUtil.load_cache(options, "stat_query_score_dict.pkl")
+    filtered_stats_dict = myUtil.load_cache(config, "stat_filtered_stats.pkl")
+    query_score_dict = myUtil.load_cache(config, "stat_query_score_dict.pkl")
+    if filtered_stats_dict and query_score_dict:
+        return filtered_stats_dict, query_score_dict
+
+
+    # Get the selfblast scores to get maximum scores
+    logger.info("Extracting highest bitscores per hit for query-selfblast")
+    query_score_dict = get_highest_bitscores_for_genome(
+        config.database_directory, "QUERY"
+    )
+    myUtil.save_cache(config, "stat_query_score_dict.pkl", query_score_dict)
+
 
     # Compute from scratch if not cached
-    if not filtered_stats_dict or not query_score_dict:
-        logger.info("Computing hitscore range per protein per collinear syntenic block")
-        stats_dict = get_keyword_statistics_parallel(
-            options.database_directory, options.cores
-        )
+    logger.info("Computing hitscore range per protein per collinear syntenic block")
+    stats_dict = get_keyword_statistics(
+        config.database_directory#, options.cores
+    )
+    logger.info(
+        f"Filtering out CSBs where all hits are below exclude_csb_hitscore {config.low_hitscore_csb_cutoff}"
+    )
+    filtered_stats_dict = _filter_out_low_quality_csb(
+        stats_dict=stats_dict,
+        query_score_dict=query_score_dict,
+        threshold=config.low_hitscore_csb_cutoff,
+        min_occurrences=min(10, config.min_seqs),
+        csb_name_prefix=config.csb_name_prefix,
+    )
 
-        logger.info("Extracting highest bitscores per hit for query-selfblast")
-        query_score_dict = get_highest_bitscores_for_genome(
-            options.database_directory, "QUERY"
+    if not filtered_stats_dict:
+        logger.warning(
+            "No CSBs passed the strict low-quality filter. "
+            "Falling back to best-per-domain CSB selection."
         )
-        myUtil.save_cache(options, "stat_query_score_dict.pkl", query_score_dict)
-
-        logger.info(
-            f"Filtering out CSBs where all hits are below exclude_csb_hitscore {options.low_hitscore_csb_cutoff}"
-        )
-
-        filtered_stats_dict = filter_out_low_quality_csb(
+        #TODO identify the domains that have no csb. try to find very abundant big clusters for these
+        # not only if there is no csb found but also in case distant genomes from the query were used
+        # Dafür braucht es eine routine die checkd welche domänen gar keinen above threshold hit in einem csb haben
+        filtered_stats_dict = rescue_best_csb_per_domain(
             stats_dict,
-            query_score_dict,
-            options.low_hitscore_csb_cutoff,
-            min(10, options.min_seqs),
-            options.csb_name_prefix,
+            csb_name_prefix=config.csb_name_prefix,
+            score_type="max",  # oder "median", wenn dir das lieber ist
         )
 
-        if not filtered_stats_dict:
-            logger.warning(
-                "No CSBs passed the strict low-quality filter. "
-                "Falling back to best-per-domain CSB selection."
-            )
-            filtered_stats_dict = rescue_best_csb_per_domain(
-                stats_dict,
-                csb_name_prefix=options.csb_name_prefix,
-                score_type="max",  # oder "median", wenn dir das lieber ist
-            )
-
+    if config.exclude_csb_proteins:
         logger.info(
-            f"Filtering hits and csb on the exclusion list {options.exclude_csb_proteins}"
+            f"Filtering hits and csb on the exclusion list {config.exclude_csb_proteins}"
         )
-        filtered_stats_dict = filter_out_csb_with_protein_types(
-            filtered_stats_dict, options.exclude_csb_proteins, options.csb_name_prefix
+        filtered_stats_dict = _filter_out_csb_with_protein_types(
+            filtered_stats_dict, config.exclude_csb_proteins, config.csb_name_prefix
         )
-
-        myUtil.save_cache(options, "stat_filtered_stats.pkl", filtered_stats_dict)
+    myUtil.save_cache(config, "stat_filtered_stats.pkl", filtered_stats_dict)
 
     return filtered_stats_dict, query_score_dict
 
@@ -158,64 +323,6 @@ def rescue_best_csb_per_domain(
         rescued[keyword] = stats_dict[keyword]
 
     return rescued
-
-
-def apply_cluster_selection(
-    options: Any, filtered_stats_dict: Dict, query_score_dict: Dict
-):
-    """
-    Phase 2: Apply selection rules based on precomputed statistics.
-      - Save stats to TSV
-      - Group keywords to domains (extended mode)
-      - Optionally cluster 'excluded' CSBs
-      - Compute domain score limits
-    Saves results to cache.
-
-    Returns:
-        domain_score_limits         (dict)
-        grouped_keywords            (dict): {domain: [[keywords]]} (extended)
-        clustered_excluded_keywords (dict)
-    """
-    # Load caches if available
-    domain_score_limits = myUtil.load_cache(options, "stat_domain_score_limits.pkl")
-    grouped_keywords = myUtil.load_cache(options, "stat_grouped_keywords.pkl")
-
-    # Always save TSV for filtered statistics
-    save_stats_to_tsv(filtered_stats_dict, options.Csb_directory)
-
-    # Extended grouping: if a CSB passes, its keyword is added to all domains in the CSB
-    if not grouped_keywords:
-        logger.info(
-            "Selecting CSB patterns that encode for highly similar query homologs"
-        )
-
-        grouped_keywords = group_keywords_by_domain_passers(
-            filtered_stats_dict, query_score_dict, options.low_hitscore_csb_cutoff
-        )
-
-        if not grouped_keywords:
-            logger.warning(
-                f"No gene cluster encoded hits with at a bitscore of at least {options.low_hitscore_csb_cutoff} of the query. Consider reducing the threshold with the -exclude_csb_score option."
-            )
-        # The following routine includes all domains from a csb were a single domain passes
-        # grouped_keywords = group_keywords_by_domain_extended(
-        #    filtered_stats_dict,
-        #    query_score_dict,
-        #    options.low_hitscore_csb_cutoff
-        # )
-        myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
-
-    # Compute score limits per domain based on grouped keywords
-    if not domain_score_limits:
-        logger.info(
-            "Computing for each protein hit score range across all selected CSBs"
-        )
-        domain_score_limits = compute_score_limits(
-            filtered_stats_dict, grouped_keywords
-        )
-        myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
-
-    return domain_score_limits, grouped_keywords
 
 
 #################################################################################
@@ -413,8 +520,6 @@ def save_stats_to_tsv(
                             stats["min"],
                             stats["max"],
                             stats["mean"],
-                            stats["median"],
-                            stats["std_dev"],
                         ]
                     )
 
@@ -422,226 +527,6 @@ def save_stats_to_tsv(
 
 
 ###########################################################################################################
-# Rountines to combine specific csbs that have similarly high bitscore hits to the reference sequences
-
-
-def get_highest_bitscores_for_genome(database: str, genome_id: str) -> Dict[str, float]:
-    """
-    Gets the highest bitscore for each domain for a given genome.
-
-    Args:
-        database (str): Path to SQLite DB.
-        genome_id (str): GenomeID.
-
-    Returns:
-        dict: {domain: highest_bitscore}
-    """
-    domain_max_bitscores = {}
-
-    with sqlite3.connect(database) as con:
-        cur = con.cursor()
-
-        query = """
-        SELECT d.domain, MIN(d.score) as max_score
-        FROM Domains d
-        JOIN Proteins p ON d.proteinID = p.proteinID
-        WHERE p.genomeID = ?
-        GROUP BY d.domain;
-        """
-
-        cur.execute(query, (genome_id,))
-
-        for domain, max_score in cur.fetchall():
-            domain_max_bitscores[domain] = max_score
-
-    return domain_max_bitscores
-
-
-def filter_out_low_quality_csb(
-    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
-    query_score_dict: Dict[str, float],
-    threshold: float = 0.2,
-    min_occurrences: int = 10,
-    csb_name_prefix: str = "csb-",
-) -> Dict[str, Dict[str, Dict[str, float]]]:
-    """
-    Filters out CSBs where all domains have a median score less than the given threshold of the query reference.
-
-    Args:
-        stats_dict (dict): { keyword: { domain: { 'n': int, 'min': float, 'max': float,
-                                                  'mean': float, 'median': float, 'std_dev': float } } }
-        query_score_dict (dict): { domain: max_bitscore }
-        threshold (float): The percentage threshold of the query reference score.
-
-    Returns:
-        dict: Filtered CSBs where at least one domain meets the threshold.
-    """
-    filtered_csb = {}
-
-    # Precompute threshold scores for each domain
-    domain_thresholds = {
-        domain: query_score * (1 - threshold)
-        for domain, query_score in query_score_dict.items()
-    }
-
-    for keyword, domain_dict in stats_dict.items():
-        csb_should_be_removed = (
-            True  # Assume CSB will be removed unless a domain passes
-        )
-        max_occurrences = max(
-            (stats["n"] for stats in domain_dict.values() if "n" in stats), default=0
-        )
-
-        # Skip CSB if its highest occurrence count is below the minimum required
-        if max_occurrences < min_occurrences:
-            continue
-
-        for domain, stats in domain_dict.items():
-            if domain in domain_thresholds and stats:
-                # Check if at least one domain meets the threshold
-                if stats["median"] >= domain_thresholds[domain]:
-                    csb_should_be_removed = False
-                    break  # No need to check other domains for this CSB
-
-        if not (csb_should_be_removed and keyword.startswith(csb_name_prefix)):
-            filtered_csb[keyword] = (
-                domain_dict  # Keep CSB if at least one domain passed
-            )
-
-    return filtered_csb
-
-
-def filter_out_csb_with_protein_types(
-    stats_dict, exclude_types: list, csb_name_prefix: str
-) -> dict:
-    """
-    Removes all CSBs (keywords) from stats_dict that contain any domain listed in exclude_types.
-
-    Args:
-        stats_dict (dict): {keyword: {domain: {...}}}
-        exclude_types (list): List of domains/types to exclude.
-
-    Returns:
-        dict: Filtered stats_dict.
-    """
-    filtered = {}
-    exclude_set = set(exclude_types)
-    for csb_keyword, domain_dict in stats_dict.items():
-        domains_in_csb = set(domain_dict.keys())
-        intersection = domains_in_csb & exclude_set
-
-        # intersection means excluded proteins were found
-        if intersection and csb_keyword.startswith(csb_name_prefix):
-            logger.debug(f"Removed csb {csb_keyword} due a hit for {intersection}")
-        elif intersection and not csb_keyword.startswith(csb_name_prefix):
-            logger.debug(
-                f"Kept pattern file defined csb {csb_keyword} with hit for {intersection}"
-            )
-            filtered[csb_keyword] = domain_dict
-        else:
-            filtered[csb_keyword] = domain_dict
-
-    return filtered
-
-
-def group_keywords_by_domain_extended_deprecated(
-    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
-    query_score_dict: Dict[str, float],
-    acceptable_deviation: float = 0.30,
-    score_type: str = "max",
-) -> Tuple[Dict[str, List[List[str]]], Dict[str, List[str]]]:
-    """
-    DEPRECATED BECAUSE OPTIMIZED ROUTINE WAS WRITTEN DIRECTLY AFTER THIS ROUTINE
-    Erweitert die Gruppierung von Keywords pro Domain, indem alle Proteine innerhalb eines Genclusters berücksichtigt werden,
-    wenn eine der Domänen eines Genclusters das Kriterium erfüllt. Das Keyword dieses Genclusters wird dann zu allen
-    Domänen im Ausgabecluster unter grouped hinzugefügt, die in diesem Gencluster enthalten sind.
-
-    Args:
-        stats_dict (dict): { gene_cluster: { domain: { 'n': int, 'min': float, 'max': float,
-                                                       'mean': float, 'median': float, 'std_dev': float } } }
-        query_score_dict (dict): { domain: max_bitscore }
-        acceptable_deviation (float): Maximal zulässige Abweichung für die Gruppierung.
-
-    Returns:
-        tuple:
-            - grouped_domains (dict): { domain: [grouped_keywords] }
-    """
-    grouped_domains = {}
-
-    for gene_cluster, domain_dict in stats_dict.items():
-        eligible_domains = set()
-        for domain, stats in domain_dict.items():
-            if stats and domain in query_score_dict:
-                query_score = query_score_dict[domain]  # Max score from QUERY
-                median_score = stats[
-                    score_type
-                ]  # Median score für dieses gene_cluster-domain Paar
-
-                # Berechnung der Abweichung
-                deviation = abs(median_score - query_score) / query_score
-
-                if deviation <= (1 - acceptable_deviation):
-                    eligible_domains.add(domain)
-
-        if eligible_domains:
-            for domain in (
-                domain_dict.keys()
-            ):  # Füge das Keyword für alle Domänen im Gencluster hinzu
-                if domain not in grouped_domains:
-                    grouped_domains[domain] = [[]]
-                if gene_cluster not in grouped_domains[domain][0]:
-                    grouped_domains[domain][0].append(gene_cluster)
-
-    return grouped_domains
-
-
-def group_keywords_by_domain_extended(
-    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
-    query_score_dict: Dict[str, float],
-    acceptable_deviation: float = 0.30,
-    score_type: str = "max",
-) -> Dict[str, List[List[str]]]:
-    """
-    Nimmt ein CSB (gene_cluster), prüft: erreicht *irgendeine* Domain im CSB den
-    Schwellenwert (relativ zum QUERY-Score)? Wenn ja, wird das Keyword (gene_cluster)
-    bei *allen* Domains des CSB eingetragen.
-
-    Rückgabe:
-        { domain: [[keyword1, keyword2, ...]] }  # genau EINE Gruppe je Domain
-    """
-    if not stats_dict or not query_score_dict:
-        return {}
-
-    # Precompute Schwellen je Domain (z. B. 70% des Query-Referenzscores bei 0.30 Abweichung)
-    thresholds = {
-        d: s * (1 - acceptable_deviation) for d, s in query_score_dict.items()
-    }
-    if not thresholds:
-        return {}
-
-    grouped: Dict[str, List[List[str]]] = {}
-
-    for gene_cluster, domain_stats in stats_dict.items():
-        # Prüfen, ob *irgendeine* Domain in diesem CSB die Schwelle erfüllt
-        passes = False
-        for d, st in domain_stats.items():
-            thr = thresholds.get(d)
-            if thr is None or not st:
-                continue
-            val = st.get(score_type)
-            if val is not None and val >= thr:
-                passes = True
-                break
-
-        if not passes:
-            continue
-
-        # Wenn ja: Keyword bei *allen* Domains dieses CSB eintragen
-        for d in domain_stats.keys():
-            bucket = grouped.setdefault(d, [[]])[0]
-            bucket.append(gene_cluster)
-
-    return grouped
 
 
 def group_keywords_by_domain_passers(
@@ -695,81 +580,6 @@ def group_keywords_by_domain_passers(
 
     return grouped
 
-
-def group_excluded_keywords_by_similarity(
-    stats_dict: Dict[str, Dict[str, Dict[str, float]]],
-    excluded_domains: Dict[str, List[str]],
-    threshold: float = 0.2,
-    num_clusters: Optional[int] = None,
-) -> Dict[str, List[List[str]]]:
-    """
-    Groups excluded keywords into clusters based on statistical similarity, preserving domain information.
-
-    Args:
-        stats_dict (dict): { keyword: { domain: { stats } } }
-        excluded_domains (dict): { domain: [excluded_keywords] }
-        threshold (float): Clustering distance threshold.
-        num_clusters (int): If provided, force a fixed number of clusters.
-
-    Returns:
-        dict: { domain: [[grouped_keywords]] }  # List of lists per domain
-    """
-    keyword_vectors = []
-    keyword_info = []  # Stores (keyword, domain) pairs
-
-    # Extract statistics for excluded keywords
-    for domain, keywords in excluded_domains.items():
-        for keyword in keywords:
-            if keyword in stats_dict and domain in stats_dict[keyword]:
-                stats = stats_dict[keyword][domain]
-                keyword_info.append((keyword, domain))
-                keyword_vectors.append(
-                    [stats["median"], stats["mean"], stats["std_dev"]]
-                )
-
-    if not keyword_vectors:
-        logger.warning("There were no keyword statistics for distinct keywords")
-        return {}
-
-    keyword_vectors = np.array(keyword_vectors)
-
-    # Use Agglomerative Clustering for hierarchical grouping
-    clustering = AgglomerativeClustering(
-        n_clusters=num_clusters,
-        metric="euclidean",
-        linkage="ward",
-        distance_threshold=threshold if num_clusters is None else None,
-    )
-    labels = clustering.fit_predict(keyword_vectors)
-    clustered_keywords = {}
-
-    # Map cluster labels to grouped keywords
-    cluster_mapping = {}
-    for idx, label in enumerate(labels):
-        keyword, domain = keyword_info[idx]
-
-        if domain not in clustered_keywords:
-            clustered_keywords[domain] = []  # Initialize domain with an empty list
-
-        if label not in cluster_mapping:
-            cluster_mapping[label] = len(
-                clustered_keywords[domain]
-            )  # Assign a cluster index
-            clustered_keywords[domain].append([])  # Create a new list for this cluster
-
-        # Append the keyword to the correct cluster list
-
-        try:
-            clustered_keywords[domain][cluster_mapping[label]].append(keyword)
-        except IndexError:
-            logger.warning(
-                f"Skipping {domain} with label {label} and keyword {keyword} due to high dissimilarity."
-            )
-            continue
-
-    return clustered_keywords
-
-
 ####################################################################################
 
 
@@ -815,3 +625,78 @@ def compute_score_limits(
             }
 
     return domain_limits
+
+def apply_cluster_selection(
+    options: Any, filtered_stats_dict: Dict, query_score_dict: Dict
+):
+    """
+    Phase 2: Apply selection rules based on precomputed statistics.
+      - Save stats to TSV
+      - Group keywords to domains (extended mode)
+      - Optionally cluster 'excluded' CSBs
+      - Compute domain score limits
+    Saves results to cache.
+
+    Returns:
+        domain_score_limits         (dict)
+        grouped_keywords            (dict): {domain: [[keywords]]} (extended)
+        clustered_excluded_keywords (dict)
+    """
+    # Load caches if available
+    domain_score_limits = myUtil.load_cache(options, "stat_domain_score_limits.pkl")
+    grouped_keywords = myUtil.load_cache(options, "stat_grouped_keywords.pkl")
+
+    # Always save TSV for filtered statistics
+    save_stats_to_tsv(filtered_stats_dict, options.Csb_directory)
+
+    # Extended grouping: if a CSB passes, its keyword is added to all domains in the CSB
+    if not grouped_keywords:
+        logger.info(
+            "Selecting CSB patterns that encode for highly similar query homologs"
+        )
+
+        grouped_keywords = group_keywords_by_domain_passers(
+            filtered_stats_dict, query_score_dict, options.low_hitscore_csb_cutoff
+        )
+
+        if not grouped_keywords:
+            logger.warning(
+                f"No gene cluster encoded hits with at a bitscore of at least {options.low_hitscore_csb_cutoff} of the query. Consider reducing the threshold with the -exclude_csb_score option."
+            )
+        # The following routine includes all domains from a csb were a single domain passes
+        # grouped_keywords = group_keywords_by_domain_extended(
+        #    filtered_stats_dict,
+        #    query_score_dict,
+        #    options.low_hitscore_csb_cutoff
+        # )
+        myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
+
+    # Compute score limits per domain based on grouped keywords
+    if not domain_score_limits:
+        logger.info(
+            "Computing for each protein hit score range across all selected CSBs"
+        )
+        domain_score_limits = compute_score_limits(
+            filtered_stats_dict, grouped_keywords
+        )
+        myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
+
+    return domain_score_limits, grouped_keywords
+
+
+def group_gene_cluster_statistic(options: Any):
+    """
+    Backward-compatible API:
+        Returns domain_score_limits, filtered_stats_dict, grouped_keywords, clustered_excluded_keywords
+
+    Internally runs:
+        (1) compute_cluster_stats()
+        (2) apply_cluster_selection()
+    """
+    filtered_stats_dict, query_score_dict = compute_cluster_stats(options)
+
+    domain_score_limits, grouped_keywords = apply_cluster_selection(
+        options, filtered_stats_dict, query_score_dict
+    )
+
+    return domain_score_limits, filtered_stats_dict, grouped_keywords

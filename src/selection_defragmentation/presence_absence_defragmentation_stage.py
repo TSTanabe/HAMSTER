@@ -10,6 +10,7 @@ from src.selection_defragmentation import (
 )
 from src.selection_seed import (
     csb_proteins_selection,
+    fetch_seed_proteins,
 )
 
 from src.core.logging import get_logger
@@ -83,7 +84,7 @@ def select_similar_csb_patterns_per_protein(
     jaccard_included_patterns = {}  # { domain : set(csb_keywords) }
 
     # Load all CSB patterns from csb_output_file
-    csb_dictionary = csb_proteins_selection.parse_csb_file_to_dict(
+    csb_dictionary = fetch_seed_proteins.parse_csb_file_to_dict(
         options.csb_output_file
     )
 
@@ -323,6 +324,72 @@ def integrate_csb_variants_into_merged_grouped(
     return merged_grouped
 
 
+def generate_score_limit_dict_from_grouped(
+    database_path: str,
+    grouped_dict: Dict[str, Set[str]],
+    default_lower: int = 100,
+    default_upper: int = 2000,
+    chunk_size: int = 999,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Generate a score limit dictionary for each domain from grouped proteinIDs.
+
+    Args:
+        database_path (str): SQLite DB path.
+        grouped_dict (dict): {domain: set(proteinIDs)}
+        default_lower (int): Fallback if no data.
+        default_upper (int): Fallback if no data.
+        chunk_size (int): Max number of SQL params.
+
+    Returns:
+        dict: {domain: {'lower_limit': X, 'upper_limit': Y}}
+    """
+    result = {}
+
+    with sqlite3.connect(database_path) as con:
+        cur = con.cursor()
+
+        for domain, protein_ids in grouped_dict.items():
+            if not protein_ids:
+                result[domain] = {
+                    "lower_limit": default_lower,
+                    "upper_limit": default_upper,
+                }
+                continue
+
+            min_score = float("inf")
+            max_score = float("-inf")
+            protein_id_list = list(protein_ids)
+
+            for i in range(0, len(protein_id_list), chunk_size):
+                chunk = protein_id_list[i : i + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                query = f"""
+                    SELECT MIN(score), MAX(score)
+                    FROM Domains
+                    WHERE domain = ? AND proteinID IN ({placeholders});
+                """
+                cur.execute(query, (domain, *chunk))
+                row = cur.fetchone()
+                if row:
+                    chunk_min, chunk_max = row
+                    if chunk_min is not None:
+                        min_score = min(min_score, chunk_min)
+                    if chunk_max is not None:
+                        max_score = max(max_score, chunk_max)
+
+            if min_score == float("inf") or max_score == float("-inf"):
+                # No valid score data found
+                result[domain] = {
+                    "lower_limit": default_lower,
+                    "upper_limit": default_upper,
+                }
+            else:
+                result[domain] = {"lower_limit": min_score, "upper_limit": max_score}
+
+    return result
+
+
 def pam_defragmentation_stage(options) -> object | None:
     """
     Find additional plausible hits based on presence absence patterns. This should include hits
@@ -378,7 +445,7 @@ def pam_defragmentation_stage(options) -> object | None:
     )
 
     # Calculate the score limits for the reference sequences
-    score_limit_dict = csb_proteins_selection.generate_score_limit_dict_from_grouped(
+    score_limit_dict = generate_score_limit_dict_from_grouped(
         options.database_directory, merged_grouped
     )
 
