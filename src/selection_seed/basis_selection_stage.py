@@ -103,7 +103,7 @@ def basis_sequence_fasta(config) -> None:
 
     # Merge groups and limits from csb and sng and add queries
     merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
-    merged_basis_seed_proteins_dict = {**grouped, **sng_ref_seqs_dict}
+    merged_basis_seed_proteins_dict = csb_proteins_selection.merge_protein_sets(grouped, sng_ref_seqs_dict)
 
     if not merged_basis_seed_proteins_dict:
         logger.error(

@@ -4,6 +4,8 @@ import copy
 import math
 import os
 import sqlite3
+import sys
+
 import pandas as pd
 from collections import defaultdict
 from typing import Dict, Any, Set, Tuple
@@ -296,11 +298,11 @@ def select_singleton_refs_by_domain_pattern(
     seed_to_pattern_domains: Dict[str, Set[str]],
     min_bsr_cutoff: float = 70.0,
 ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
-    limits_dict: Dict[str, Dict[str, float]] = {}
+    score_limits_dict: Dict[str, Dict[str, float]] = {}
     sng_reference_seq_dict: Dict[str, Set[str]] = defaultdict(set)
 
     if not seed_to_pattern_domains:
-        return limits_dict, sng_reference_seq_dict
+        return score_limits_dict, sng_reference_seq_dict
 
     with sqlite3.connect(database_path, timeout=120.0) as con:
         cur = con.cursor()
@@ -361,7 +363,7 @@ def select_singleton_refs_by_domain_pattern(
             # 1) Limits (MIN/MAX) direkt in SQL (kein Python-List-Aufbau)
             cur.execute(
                 """
-                SELECT MIN(d.score), MAX(d.score)
+                SELECT MIN(d.score), AVG(d.score), MAX(d.score)
                 FROM Domains d
                 JOIN Proteins p ON p.proteinID = d.proteinID
                 JOIN tmp_genomes g ON g.genomeID = p.genomeID
@@ -372,9 +374,13 @@ def select_singleton_refs_by_domain_pattern(
                 (seed_domain, min_bsr_cutoff),
             )
             row = cur.fetchone()
-            if not row or row[0] is None or row[1] is None:
+
+            if not row or row[0] is None or row[1] is None or row[2] is None:
                 continue
-            lower, upper = float(row[0]), float(row[1])
+
+            lower = float(row[0])
+            average = float(row[1])
+            upper = float(row[2])
 
             # 2) ProteinIDs holen (DISTINCT)
             cur.execute(
@@ -394,9 +400,13 @@ def select_singleton_refs_by_domain_pattern(
                 continue
 
             sng_reference_seq_dict[seed_domain] = protein_ids
-            limits_dict[seed_domain] = {"lower_limit": lower, "upper_limit": upper}
+            score_limits_dict[seed_domain] = {
+                "lower_limit": lower,
+                "average": average,
+                "upper_limit": upper,
+            }
 
-    return limits_dict, sng_reference_seq_dict
+    return score_limits_dict, sng_reference_seq_dict
 
 
 def _add_bsr_fallback_for_domains_without_pattern(
@@ -572,33 +582,16 @@ def _add_bsr_fallback_for_domains_without_pattern(
         )
 
         for domain, lower, upper in cur:
-
             if lower is None or upper is None:
                 continue
 
             lower = float(lower)
             upper = float(upper)
 
-            # Domain may already have sequences from another selection step.
-            # In this case widen the existing limits.
-            if domain in domain_score_limits:
-
-                existing = domain_score_limits[domain]
-
-                domain_score_limits[domain] = {
-                    "lower_limit": min(
-                        existing["lower_limit"],
-                        lower,
-                    ),
-                    "upper_limit": max(
-                        existing["upper_limit"],
-                        upper,
-                    ),
-                }
-
-            else:
+            if domain not in domain_score_limits:
                 domain_score_limits[domain] = {
                     "lower_limit": lower,
+                    "average": (lower + upper) / 2.0,
                     "upper_limit": upper,
                 }
 
@@ -635,11 +628,10 @@ def prepare_singleton_seed_proteins(
     Then hits that are cooccurring in at least 90 % of the genomes with this high homology singleton are taken
     """
 
-    high_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 70.0)
+    high_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 0.7)
     cooccurence_bsr_cutoff = getattr(
-        options, "singleton_identity_cutoff", 30.0
+        options, "singleton_identity_cutoff", 0.3
     )
-
 
     # 1) Add QUERY domains that were not selected by CSB grouping.
     # Genomes that are considered still need a seq with high identity
@@ -650,7 +642,7 @@ def prepare_singleton_seed_proteins(
     )
 
     logger.info(
-        f"Found {len(context_free_domains_dict)} proteins without syntenic gene cluster and blast score ratio >= {high_bsr_cutoff}"
+        f"Found {len(context_free_domains_dict)} proteins without syntenic gene cluster and blast score ratio >= {options.low_hitscore_csb_cutoff}: {', '.join(sorted(context_free_domains_dict.keys()))}"
     )
 
     if not context_free_domains_dict:

@@ -108,6 +108,10 @@ def prepare_csb_grouped_seed_proteins(
     grouped = _csb_proteins_datasets_combine(seed_grouped_keywords_dict, csb_proteins_dict)
     #grouped = _add_query_ids_to_proteinIDset(grouped, options.database_directory)
 
+    logger.info(
+        f"Found {len(grouped)} proteins types with syntenic gene cluster patterns: {', '.join(sorted(grouped.keys()))}"
+    )
+
     # Step 4: Save in pkl cache
     myUtil.save_cache(config, "grp0_training_proteinIDs.pkl", grouped)
     myUtil.save_cache(config, "grp0_score_limit_dict.pkl", grp_score_limit_dict)
@@ -512,6 +516,16 @@ def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
 
     return {k: v for k, v in merged.items() if not k.startswith("grp0_")}
 
+def merge_protein_sets(
+    *grouped_dicts: Dict[str, Set[str]],
+) -> Dict[str, Set[str]]:
+    merged: Dict[str, Set[str]] = {}
+
+    for grouped in grouped_dicts:
+        for domain, protein_ids in grouped.items():
+            merged.setdefault(domain, set()).update(protein_ids)
+
+    return merged
 
 def fetch_domains_superfamily_to_fasta(options, directory):
     """

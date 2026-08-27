@@ -587,40 +587,59 @@ def compute_score_limits(
     filtered_stats_dict: Dict[str, Dict[str, Dict[str, float]]],
     grouped_keywords_dict: Dict[str, List[List[str]]],
 ) -> Dict[str, Dict[str, float]]:
-    """
-    Compute upper and lower score limits per domain based on the grouped CSBs
-    and their statistical properties from filtered_stats_dict.
 
-    Args:
-        filtered_stats_dict (dict): {csb: {domain: {'mean': X, 'std_dev': Y, ...}}}
-        grouped_keywords_dict (dict): {domain: [[csb1, csb2, ...]]}
-
-    Returns:
-        dict: {domain: {'lower_limit': min_value, 'upper_limit': max_value}}
-    """
     domain_limits = {}
 
     for domain, csb_groups in grouped_keywords_dict.items():
+
         lower_limits = []
         upper_limits = []
 
-        # Flatten list of lists to get all CSBs for this domain
-        csbs = [csb for group in csb_groups for csb in group]
+        weighted_sum = 0.0
+        total_n = 0
+
+        csbs = [
+            csb
+            for group in csb_groups
+            for csb in group
+        ]
 
         for csb in csbs:
-            if csb in filtered_stats_dict and domain in filtered_stats_dict[csb]:
-                stats = filtered_stats_dict[csb][domain]
-                # mean = stats.get("mean", 0)
-                # std_dev = stats.get("std_dev", 0)
-                minimum = stats.get("min", 0)
-                maximum = stats.get("max", 0)
-                lower_limits.append(minimum)
-                upper_limits.append(maximum)
 
-        # Store limits only if valid statistics exist
+            if (
+                csb not in filtered_stats_dict
+                or domain not in filtered_stats_dict[csb]
+            ):
+                continue
+
+            stats = filtered_stats_dict[csb][domain]
+
+            minimum = stats.get("min")
+            maximum = stats.get("max")
+            mean = stats.get("mean")
+            n = stats.get("n", 0)
+
+            if minimum is not None:
+                lower_limits.append(float(minimum))
+
+            if maximum is not None:
+                upper_limits.append(float(maximum))
+
+            if mean is not None and n:
+                weighted_sum += float(mean) * int(n)
+                total_n += int(n)
+
         if lower_limits and upper_limits:
+
+            average = (
+                weighted_sum / total_n
+                if total_n > 0
+                else None
+            )
+
             domain_limits[domain] = {
                 "lower_limit": min(lower_limits),
+                "average": average,
                 "upper_limit": max(upper_limits),
             }
 
