@@ -44,6 +44,7 @@ def get_highest_bitscores_for_genome(database: str, genome_id: str) -> Dict[str,
 
     return domain_max_bitscores
 
+
 def get_keyword_statistics(
     database: str,
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
@@ -70,16 +71,25 @@ def get_keyword_statistics(
             k.keyword,
             d.domain,
             COUNT(*) AS n,
+
             MIN(d.score) AS min_score,
             MAX(d.score) AS max_score,
-            AVG(d.score) AS avg_score
+            AVG(d.score) AS avg_score,
+
+            MIN(d.blast_score_ratio) AS min_bsr,
+            MAX(d.blast_score_ratio) AS max_bsr,
+            AVG(d.blast_score_ratio) AS avg_bsr
+
         FROM Keywords AS k
         JOIN Proteins AS p
           ON p.clusterID = k.clusterID
         JOIN Domains AS d
           ON d.proteinID = p.proteinID
+
         WHERE d.domain IS NOT NULL
           AND d.score IS NOT NULL
+          AND d.blast_score_ratio IS NOT NULL
+
         GROUP BY
             k.keyword,
             d.domain;
@@ -95,15 +105,29 @@ def get_keyword_statistics(
 
         cur.execute(query)
 
-        for keyword, domain, n, min_score, max_score, avg_score in cur:
+        for (
+            keyword,
+            domain,
+            n,
+            min_score,
+            max_score,
+            avg_score,
+            min_bsr,
+            max_bsr,
+            avg_bsr,
+        ) in cur:
             stats_dict.setdefault(keyword, {})[domain] = {
                 "n": n,
                 "min": min_score,
                 "max": max_score,
                 "mean": round(avg_score, 2),
+                "bsr_min": min_bsr,
+                "bsr_max": max_bsr,
+                "bsr_mean": float(avg_bsr),
             }
 
     return stats_dict
+
 
 def _filter_out_low_quality_csb(
     stats_dict: Dict[str, Dict[str, Dict[str, float]]],
@@ -128,7 +152,7 @@ def _filter_out_low_quality_csb(
 
     # Precompute threshold scores for each domain
     domain_thresholds = {
-        domain: query_score * threshold # This was previously noted as 1 - threshold
+        domain: query_score * threshold  # This was previously noted as 1 - threshold
         for domain, query_score in query_score_dict.items()
     }
 
@@ -157,6 +181,7 @@ def _filter_out_low_quality_csb(
             )
 
     return filtered_csb
+
 
 ####################################################################################
 
@@ -211,7 +236,6 @@ def compute_cluster_stats(config: Any) -> Tuple[Dict, Dict]:
     if filtered_stats_dict and query_score_dict:
         return filtered_stats_dict, query_score_dict
 
-
     # Get the selfblast scores to get maximum scores
     logger.info("Extracting highest bitscores per hit for query-selfblast")
     query_score_dict = get_highest_bitscores_for_genome(
@@ -219,11 +243,10 @@ def compute_cluster_stats(config: Any) -> Tuple[Dict, Dict]:
     )
     myUtil.save_cache(config, "stat_query_score_dict.pkl", query_score_dict)
 
-
     # Compute from scratch if not cached
     logger.info("Computing hitscore range per protein per collinear syntenic block")
     stats_dict = get_keyword_statistics(
-        config.database_directory#, options.cores
+        config.database_directory  # , options.cores
     )
     logger.info(
         f"Filtering out CSBs where all hits are below exclude_csb_hitscore {config.low_hitscore_csb_cutoff}"
@@ -241,7 +264,7 @@ def compute_cluster_stats(config: Any) -> Tuple[Dict, Dict]:
             "No CSBs passed the strict low-quality filter. "
             "Falling back to best-per-domain CSB selection."
         )
-        #TODO identify the domains that have no csb. try to find very abundant big clusters for these
+        # TODO identify the domains that have no csb. try to find very abundant big clusters for these
         # not only if there is no csb found but also in case distant genomes from the query were used
         # Dafür braucht es eine routine die checkd welche domänen gar keinen above threshold hit in einem csb haben
         filtered_stats_dict = rescue_best_csb_per_domain(
@@ -580,6 +603,7 @@ def group_keywords_by_domain_passers(
 
     return grouped
 
+
 ####################################################################################
 
 
@@ -587,10 +611,12 @@ def compute_score_limits(
     filtered_stats_dict: Dict[str, Dict[str, Dict[str, float]]],
     grouped_keywords_dict: Dict[str, List[List[str]]],
 ) -> Dict[str, Dict[str, float]]:
-
     domain_limits = {}
 
     for domain, csb_groups in grouped_keywords_dict.items():
+        # --------------------------------------------------------------
+        # Bitscore statistics
+        # --------------------------------------------------------------
 
         lower_limits = []
         upper_limits = []
@@ -598,26 +624,35 @@ def compute_score_limits(
         weighted_sum = 0.0
         total_n = 0
 
-        csbs = [
-            csb
-            for group in csb_groups
-            for csb in group
-        ]
+        # --------------------------------------------------------------
+        # BSR statistics
+        # --------------------------------------------------------------
+
+        bsr_lower_limits = []
+        bsr_upper_limits = []
+
+        bsr_weighted_sum = 0.0
+        bsr_total_n = 0
+
+        # --------------------------------------------------------------
+
+        csbs = [csb for group in csb_groups for csb in group]
 
         for csb in csbs:
-
-            if (
-                csb not in filtered_stats_dict
-                or domain not in filtered_stats_dict[csb]
-            ):
+            if csb not in filtered_stats_dict or domain not in filtered_stats_dict[csb]:
                 continue
 
             stats = filtered_stats_dict[csb][domain]
 
+            n = stats.get("n", 0)
+
+            # ----------------------------------------------------------
+            # Bitscore
+            # ----------------------------------------------------------
+
             minimum = stats.get("min")
             maximum = stats.get("max")
             mean = stats.get("mean")
-            n = stats.get("n", 0)
 
             if minimum is not None:
                 lower_limits.append(float(minimum))
@@ -627,23 +662,54 @@ def compute_score_limits(
 
             if mean is not None and n:
                 weighted_sum += float(mean) * int(n)
+
                 total_n += int(n)
 
-        if lower_limits and upper_limits:
+            # ----------------------------------------------------------
+            # Blast Score Ratio
+            # ----------------------------------------------------------
 
-            average = (
-                weighted_sum / total_n
-                if total_n > 0
-                else None
-            )
+            bsr_minimum = stats.get("bsr_min")
+            bsr_maximum = stats.get("bsr_max")
+            bsr_mean = stats.get("bsr_mean")
+
+            if bsr_minimum is not None:
+                bsr_lower_limits.append(float(bsr_minimum))
+
+            if bsr_maximum is not None:
+                bsr_upper_limits.append(float(bsr_maximum))
+
+            if bsr_mean is not None and n:
+                bsr_weighted_sum += float(bsr_mean) * int(n)
+
+                bsr_total_n += int(n)
+
+        # --------------------------------------------------------------
+        # Final limits
+        # --------------------------------------------------------------
+
+        if lower_limits and upper_limits:
+            average = weighted_sum / total_n if total_n > 0 else None
+
+            bsr_average = bsr_weighted_sum / bsr_total_n if bsr_total_n > 0 else None
 
             domain_limits[domain] = {
+                # Bitscore
                 "lower_limit": min(lower_limits),
                 "average": average,
                 "upper_limit": max(upper_limits),
+                # Blast Score Ratio
+                "bsr_lower_limit": (
+                    min(bsr_lower_limits) if bsr_lower_limits else None
+                ),
+                "bsr_average": bsr_average,
+                "bsr_upper_limit": (
+                    max(bsr_upper_limits) if bsr_upper_limits else None
+                ),
             }
 
     return domain_limits
+
 
 def apply_cluster_selection(
     options: Any, filtered_stats_dict: Dict, query_score_dict: Dict

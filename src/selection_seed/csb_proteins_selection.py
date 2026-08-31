@@ -18,6 +18,7 @@ from src.core import myUtil
 
 logger = myUtil.logger
 
+
 # first get the csb with their identifiers. make sets of appearence as value to key name of the csb
 # do not compare the csb appearences as they jaccard itself should have managed it.
 def _csb_proteins_datasets_combine(
@@ -98,15 +99,17 @@ def prepare_csb_grouped_seed_proteins(
         f"{', '.join(sorted(seed_grouped_keywords_dict.keys()))}"
     )
 
-    csb_proteins_dict: dict[tuple[str, str], set[str]] = fetch_seed_proteins.csb_proteins_datasets(
-        config, seed_grouped_keywords_dict
+    csb_proteins_dict: dict[tuple[str, str], set[str]] = (
+        fetch_seed_proteins.csb_proteins_datasets(config, seed_grouped_keywords_dict)
     )
 
     logger.info("Processing highly similar homologs with specific genomic context")
 
     # Step 3: Export one fasta per protein
-    grouped = _csb_proteins_datasets_combine(seed_grouped_keywords_dict, csb_proteins_dict)
-    #grouped = _add_query_ids_to_proteinIDset(grouped, options.database_directory)
+    grouped = _csb_proteins_datasets_combine(
+        seed_grouped_keywords_dict, csb_proteins_dict
+    )
+    # grouped = _add_query_ids_to_proteinIDset(grouped, options.database_directory)
 
     logger.info(
         f"Found {len(grouped)} proteins types with syntenic gene cluster patterns: {', '.join(sorted(grouped.keys()))}"
@@ -120,6 +123,7 @@ def prepare_csb_grouped_seed_proteins(
 
 
 ################################################################################################
+
 
 def process_keyword_domains(
     args: Tuple[str, str, List[str], int],
@@ -193,13 +197,7 @@ def process_keyword_domains(
     return result
 
 
-
-
-
 ######################################################################################################
-
-
-
 
 
 ###############################################################################
@@ -328,11 +326,12 @@ def _fetch_seqs_to_fasta_parallel(
 
     if not tasks:
         return  # Exit if no tasks remain
-    logger.info("Fetching amino acid sequences from local database. Might take some minutes ...")
+    logger.info(
+        "Fetching amino acid sequences from local database. Might take some minutes ..."
+    )
     # Use multiprocessing to run fetch_seq_to_fasta in parallel
     with multiprocessing.Pool(processes=cores) as pool:
         pool.starmap(_fetch_seq_to_fasta, tasks)
-
 
 
 def fetch_training_data_to_fasta(
@@ -384,7 +383,6 @@ def fetch_protein_family_sequences(options, directory, score_limit_dict, grouped
     )
 
     return
-
 
 
 def fetch_protein_ids_for_domain(
@@ -516,6 +514,7 @@ def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
 
     return {k: v for k, v in merged.items() if not k.startswith("grp0_")}
 
+
 def merge_protein_sets(
     *grouped_dicts: Dict[str, Set[str]],
 ) -> Dict[str, Set[str]]:
@@ -526,6 +525,7 @@ def merge_protein_sets(
             merged.setdefault(domain, set()).update(protein_ids)
 
     return merged
+
 
 def fetch_domains_superfamily_to_fasta(options, directory):
     """
@@ -617,8 +617,6 @@ def fetch_all_proteins(database, filepath):
                 fasta_file.write(f"{row[1]}\n")
 
     return filepath
-
-
 
 
 ##########################################################################################

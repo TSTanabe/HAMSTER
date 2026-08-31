@@ -101,6 +101,7 @@ def filter_dictionary_by_excluding_domains(
         return dictionary
     return {k: v for k, v in dictionary.items() if k not in exclude_list}
 
+
 def _prepare_keyword_domain_tasks_temp(
     cur: sqlite3.Cursor, csb_dictionary: Dict[str, List[str]]
 ) -> int:
@@ -206,6 +207,7 @@ def fetch_proteinIDs_dict(
 
     return out
 
+
 def remove_non_query_clusters(database, dictionary):
     """
     First selects the protein domain types that were assigned by the selfblast.
@@ -254,6 +256,7 @@ def remove_non_query_clusters(database, dictionary):
             selected_dictionary[key] = value
 
     return selected_dictionary
+
 
 def csb_proteins_datasets(
     options: Any, grouped_keywords_dict: Dict

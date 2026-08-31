@@ -32,8 +32,6 @@ def initial_search(config) -> None:
         logger.info("Created database")
         database.create_database(config.database_directory)
 
-
-
     # header in glob file are genomeID___proteinID
 
     # global_file_search.initial_glob_search(config)
