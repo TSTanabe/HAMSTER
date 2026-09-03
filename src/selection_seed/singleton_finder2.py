@@ -83,6 +83,7 @@ def _find_context_free_high_identity_hits(
 
     return context_free
 
+
 def _add_missing_query_domains_to_context_free_dict(
     database_path: str,
     already_grouped_domains: set[str],
@@ -223,11 +224,7 @@ def _fetch_conserved_co_occurrence_pattern(
         )
 
         for seed_domain, genomes in domain_to_genomes.items():
-
-            genomes_list = [
-                g for g in genomes
-                if g and g != "QUERY"
-            ]
+            genomes_list = [g for g in genomes if g and g != "QUERY"]
 
             if not genomes_list:
                 patterns_per_seed[seed_domain] = set()
@@ -243,9 +240,7 @@ def _fetch_conserved_co_occurrence_pattern(
                 ((g,) for g in genomes_list),
             )
 
-            cur.execute(
-                "SELECT COUNT(*) FROM tmp_seed_genomes;"
-            )
+            cur.execute("SELECT COUNT(*) FROM tmp_seed_genomes;")
             n_genomes = cur.fetchone()[0]
 
             if n_genomes == 0:
@@ -253,9 +248,7 @@ def _fetch_conserved_co_occurrence_pattern(
                 continue
 
             # Minimum number of genomes in which a domain must occur.
-            min_genomes = math.ceil(
-                n_genomes * min_presence_fraction
-            )
+            min_genomes = math.ceil(n_genomes * min_presence_fraction)
 
             cur.execute(
                 """
@@ -276,11 +269,7 @@ def _fetch_conserved_co_occurrence_pattern(
                 ),
             )
 
-            patterns_per_seed[seed_domain] = {
-                row[0]
-                for row in cur
-                if row[0]
-            }
+            patterns_per_seed[seed_domain] = {row[0] for row in cur if row[0]}
 
             logger.debug(
                 f"Seed {seed_domain}: "
@@ -363,16 +352,28 @@ def select_singleton_refs_by_domain_pattern(
             # 1) Limits (MIN/MAX) direkt in SQL (kein Python-List-Aufbau)
             cur.execute(
                 """
-                SELECT MIN(d.score), AVG(d.score), MAX(d.score)
+                SELECT
+                    MIN(d.score),
+                    AVG(d.score),
+                    MAX(d.score),
+
+                    MIN(d.blast_score_ratio),
+                    AVG(d.blast_score_ratio),
+                    MAX(d.blast_score_ratio)
+
                 FROM Domains d
-                JOIN Proteins p ON p.proteinID = d.proteinID
-                JOIN tmp_genomes g ON g.genomeID = p.genomeID
+                JOIN Proteins p
+                  ON p.proteinID = d.proteinID
+                JOIN tmp_genomes g
+                  ON g.genomeID = p.genomeID
+
                 WHERE d.domain = ?
                   AND d.identity >= ?
                   AND p.genomeID != 'QUERY'
                 """,
                 (seed_domain, min_bsr_cutoff),
             )
+
             row = cur.fetchone()
 
             if not row or row[0] is None or row[1] is None or row[2] is None:
@@ -381,6 +382,10 @@ def select_singleton_refs_by_domain_pattern(
             lower = float(row[0])
             average = float(row[1])
             upper = float(row[2])
+
+            bsr_lower = float(row[3])
+            bsr_average = float(row[4])
+            bsr_upper = float(row[5])
 
             # 2) ProteinIDs holen (DISTINCT)
             cur.execute(
@@ -404,6 +409,9 @@ def select_singleton_refs_by_domain_pattern(
                 "lower_limit": lower,
                 "average": average,
                 "upper_limit": upper,
+                "bsr_lower_limit": bsr_lower,
+                "bsr_average": bsr_average,
+                "bsr_upper_limit": bsr_upper,
             }
 
     return score_limits_dict, sng_reference_seq_dict
@@ -474,7 +482,6 @@ def _add_bsr_fallback_for_domains_without_pattern(
     fallback_domains = set()
 
     for seed_domain in context_free_domains_dict:
-
         pattern = domain_presence_intersection_pattern.get(seed_domain)
 
         if not pattern:
@@ -545,7 +552,6 @@ def _add_bsr_fallback_for_domains_without_pattern(
         added_counts = defaultdict(int)
 
         for domain, protein_id in cur:
-
             protein_set = singleton_reference_seqs_dict.setdefault(
                 domain,
                 set(),
@@ -566,33 +572,53 @@ def _add_bsr_fallback_for_domains_without_pattern(
             """
             SELECT
                 d.domain,
+
                 MIN(d.score),
-                MAX(d.score)
+                MAX(d.score),
+
+                MIN(d.blast_score_ratio),
+                MAX(d.blast_score_ratio)
+
             FROM Domains AS d
             JOIN Proteins AS p
               ON p.proteinID = d.proteinID
             JOIN tmp_fallback_domains AS f
               ON f.domain = d.domain
+
             WHERE d.blast_score_ratio >= ?
               AND p.genomeID != 'QUERY'
               AND d.score IS NOT NULL
+              AND d.blast_score_ratio IS NOT NULL
+
             GROUP BY d.domain;
             """,
             (bsr_cutoff,),
         )
 
-        for domain, lower, upper in cur:
+        for (
+            domain,
+            lower,
+            upper,
+            bsr_lower,
+            bsr_upper,
+        ) in cur:
             if lower is None or upper is None:
                 continue
 
             lower = float(lower)
             upper = float(upper)
 
+            bsr_lower = float(bsr_lower)
+            bsr_upper = float(bsr_upper)
+
             if domain not in domain_score_limits:
                 domain_score_limits[domain] = {
                     "lower_limit": lower,
                     "average": (lower + upper) / 2.0,
                     "upper_limit": upper,
+                    "bsr_lower_limit": bsr_lower,
+                    "bsr_average": (bsr_lower + bsr_upper) / 2.0,
+                    "bsr_upper_limit": bsr_upper,
                 }
 
     for domain in sorted(fallback_domains):
@@ -629,9 +655,7 @@ def prepare_singleton_seed_proteins(
     """
 
     high_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 0.7)
-    cooccurence_bsr_cutoff = getattr(
-        options, "singleton_identity_cutoff", 0.3
-    )
+    cooccurence_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 0.3)
 
     # 1) Add QUERY domains that were not selected by CSB grouping.
     # Genomes that are considered still need a seq with high identity
@@ -665,7 +689,7 @@ def prepare_singleton_seed_proteins(
         select_singleton_refs_by_domain_pattern(
             database_path=options.database_directory,
             seed_to_pattern_domains=domain_presence_intersection_pattern,
-            min_bsr_cutoff=cooccurence_bsr_cutoff*0.5,
+            min_bsr_cutoff=cooccurence_bsr_cutoff * 0.5,
         )
     )
 

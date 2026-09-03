@@ -7,7 +7,7 @@ from typing import Dict, Set, Any, Tuple
 
 import pandas as pd
 
-from src.selection_defragmentation import pam_mx_algorithm, pam_defragmentation
+from src.selection_defragmentation import pam_mx_algorithm, predictor
 from src.selection_seed import csb_proteins_selection
 from src.core import myUtil
 
@@ -16,139 +16,8 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def select_hits_by_pam_csb_mcl(
-    options: Any,
-    mcl_clustering_results_dict: Dict[str, str],
-    basis_grouped: Dict[str, Set[str]],
-) -> Dict[str, Set[str]]:
-    """
-    ### Main routine to the module ###
-
-    Get all Proteins from MCL clusters with a reference sequence
-
-    Get the csb vicinity from all non-ref seqs => definiert durch die keys in grouped. Diese kommen schließlich aus Genclustern
-
-    Get the csb vinitiy from all ref-seqs => Müssen aus der Datenbank gelesen werden
-
-    Select all non-ref seqs that have a partial ref-seq genomic vicinity into the extended_refseqs
-
-    Wie bisher auch get the sequences that are plausible by liberal selection into the extended_refseqs
-
-
-
-    Args:
-        options (Any): Config/options object.
-        mcl_clustering_results_dict (dict): {domain: mcl_cluster_file_path}
-        basis_grouped (dict): {domain: set(reference protein IDs)}
-
-    Returns:
-        dict: {domain: set(protein IDs)} merged final set.
-    """
-
-    grouped_3_dict = myUtil.load_cache(options, "mcl_truncated_csb_hits.pkl")
-    grouped_4_dict = myUtil.load_cache(options, "mcl_PAM_plausible_hits.pkl")
-    extended_grouped = myUtil.load_cache(options, "mcl_PAM_csb_merged_hits.pkl")
-
-    if extended_grouped:
-        return extended_grouped
-    else:
-        extended_grouped = {}
-
-    # Process reference_dict to extract the actual domain names
-    processed_reference_dict = {
-        key.split("_", 1)[-1]: value for key, value in basis_grouped.items()
-    }
-
-    total = len(mcl_clustering_results_dict)
-
-    if not grouped_3_dict:
-        grouped_3_dict = {}
-        logger.info("Selecting sequences from mcl clusters with truncated csb pattern")
-        for i, (domain, mcl_file) in enumerate(mcl_clustering_results_dict.items(), 1):
-            p = Path(mcl_file)
-            short_path = Path(*p.parts[-3:])  # letzte 2 Ordner + Datei
-            logger.debug(f"[{i}/{total}] Processing: {domain} in file {short_path}")
-
-            # Get reference sequences for the domain (if exists in processed reference dict)
-            reference_sequences = processed_reference_dict.get(domain, set())
-            if not reference_sequences:
-                logger.debug(
-                    f"No reference sequences found for domain '{domain}' - skipping"
-                )
-                continue
-
-            # Get the common gene cluster vicinity (presence without order or doublication)
-            common_gene_vicinity = myUtil.load_cache(
-                options, f"mcl_common_gene_vicinity_{domain}.pkl"
-            )
-            if not common_gene_vicinity:
-                common_gene_vicinity, neighbors_dict = (
-                    select_gene_cluster_vicinity_domains(
-                        options.database_directory, reference_sequences
-                    )
-                )  # Neighbors dict ist proteinID => vicinity
-                myUtil.save_cache(
-                    options,
-                    f"mcl_common_gene_vicinity_{domain}.pkl",
-                    common_gene_vicinity,
-                )
-                myUtil.save_cache(
-                    options, f"mcl_gene_vicinity_dict_{domain}.pkl", neighbors_dict
-                )
-
-            mcl_cluster_protID_set = select_ref_seq_mcl_sequences(
-                mcl_file, domain, reference_sequences
-            )
-
-            # Save for later use in the PAM calculation
-            extended_grouped[domain] = mcl_cluster_protID_set
-
-            # only the new proteinIDs without the refseq are processed for common csb
-            new_proteinID_set = mcl_cluster_protID_set - reference_sequences
-
-            # Select the proteins with a truncated csb, that fits the other csbs
-            filtered_proteinIDs = select_seqs_with_truncated_csb_vicinity(
-                options.database_directory, new_proteinID_set, common_gene_vicinity
-            )
-            grouped_3_dict[domain] = filtered_proteinIDs
-    myUtil.save_cache(options, "mcl_truncated_csb_hits.pkl", grouped_3_dict)
-
-
-    logger.info(
-        f"Selecting sequences from with plausible co-occurence in the genome"
-    )
-    # Select the proteins with plausible PAM
-    grouped_3_dict = myUtil.merge_grouped_refseq_dicts_simple(
-        grouped_3_dict, basis_grouped
-    ) # Full representation of all sequences after the group 3 addition
-    if not grouped_4_dict:
-        grouped_4_dict = pam_defragmentation.pam_genome_defragmentation_hit_finder(
-            options=options, basis_grouped=grouped_3_dict, plausability_cutoff=options.pam_threshold, support_models_name="grp3_support_models.pkl"
-        )
-
-    # Print statistics on selection to the terminal
-    logger.debug("Extended reference sequence datasets")
-    log_all_mcl_cluster_statistics(
-        processed_reference_dict, extended_grouped, grouped_3_dict, grouped_4_dict
-    )
-
-    merged_dict = myUtil.merge_grouped_refseq_dicts_simple(
-        grouped_3_dict, grouped_4_dict
-    )
-
-    merged_dict = myUtil.merge_grouped_refseq_dicts_simple(
-        processed_reference_dict, merged_dict
-    )
-
-
-    myUtil.save_cache(options, "mcl_PAM_plausible_hits.pkl", grouped_4_dict)
-    myUtil.save_cache(options, "mcl_PAM_csb_merged_hits.pkl", merged_dict)
-
-    return merged_dict
-
-
-def select_ref_seq_mcl_sequences(
-    mcl_file: str, domain: str, reference_sequences: Set[str]
+def _select_ref_seq_mcl_sequences(
+    mcl_file: str, reference_sequences: Set[str]
 ) -> Set[str]:
     """
     Returns all protein IDs from MCL clusters that contain at least one reference sequence.
@@ -165,25 +34,19 @@ def select_ref_seq_mcl_sequences(
         select_ref_seq_mcl_sequences("a_mcl_clusters.txt", "A", {"ref1","ref2"})
     """
 
-    def parse_mcl_clusters(path):
-        # Read MCL file and return a list of clusters (each cluster is a list of protein IDs)
-        with open(path, "r") as f:
-            return [line.strip().split() for line in f if line.strip()]
+    selected: set[str] = set()
 
-    clusters = parse_mcl_clusters(mcl_file)
+    with open(mcl_file, "r") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
 
-    all_protein_ids_with_refseqs = set()
+            cluster = set(line.split())
 
-    for cluster in clusters:
-        cluster_set = set(cluster)
+            if cluster & reference_sequences:
+                selected.update(cluster)
 
-        # If the cluster contains at least one reference protein, add all proteins from that cluster
-        if cluster_set & reference_sequences:
-            all_protein_ids_with_refseqs.update(cluster_set)
-
-    # print(f"[{domain}] Clusters with reference sequences found: {len(all_protein_ids_with_refseqs)} proteins total")
-
-    return all_protein_ids_with_refseqs
+    return selected
 
 
 def select_seqs_with_truncated_csb_vicinity(
@@ -211,8 +74,10 @@ def select_seqs_with_truncated_csb_vicinity(
     selected = set()
 
     def chunked(iterable, size):
-        for i in range(0, len(iterable), size):
-            yield list(iterable)[i : i + size]
+        items = list(iterable)
+
+        for start in range(0, len(items), size):
+            yield items[start : start + size]
 
     with sqlite3.connect(database_path) as con:
         cur = con.cursor()
@@ -383,3 +248,196 @@ def log_all_mcl_cluster_statistics(
         logger.debug(f"     ├─ from (CSB) & (PAM):            {len(grp3_grp4_part)}")
         logger.debug(f"     ├─ from (CSB) only:               {len(grp3_part)}")
         logger.debug(f"     └─ from (PAM) only:               {len(grp4_part)}")
+
+
+def _select_truncated_csb_hits(
+    config: Any,
+    clustering_results: Dict[str, str],
+    basis_grouped: Dict[str, Set[str]],
+) -> tuple[
+    Dict[str, Set[str]],
+    Dict[str, Set[str]],
+]:
+    truncated_csb_hits = myUtil.load_cache(
+        config,
+        "mcl_truncated_csb_hits.pkl",
+    )
+
+    if truncated_csb_hits:
+        return truncated_csb_hits, {}
+
+    truncated_csb_hits = {}
+    cluster_candidates = {}
+
+    total = len(clustering_results)
+
+    for index, (domain, cluster_file) in enumerate(
+        clustering_results.items(),
+        start=1,
+    ):
+        reference_sequences = basis_grouped.get(domain, set())
+
+        if not reference_sequences:
+            logger.debug(
+                "No reference sequences found for domain '%s' - skipping",
+                domain,
+            )
+            continue
+
+        logger.debug(
+            "[%d/%d] Processing domain %s",
+            index,
+            total,
+            domain,
+        )
+
+        common_gene_vicinity = _get_common_gene_vicinity(
+            config=config,
+            domain=domain,
+            reference_sequences=reference_sequences,
+        )
+
+        cluster_protein_ids = _select_ref_seq_mcl_sequences(
+            mcl_file=cluster_file,
+            reference_sequences=reference_sequences,
+        )
+
+        cluster_candidates[domain] = cluster_protein_ids
+
+        candidate_ids = cluster_protein_ids - reference_sequences
+
+        truncated_csb_hits[domain] = select_seqs_with_truncated_csb_vicinity(
+            config.database_directory,
+            candidate_ids,
+            common_gene_vicinity,
+        )
+
+    myUtil.save_cache(
+        config,
+        "mcl_truncated_csb_hits.pkl",
+        truncated_csb_hits,
+    )
+
+    return truncated_csb_hits, cluster_candidates
+
+
+def _get_common_gene_vicinity(
+    config: Any,
+    domain: str,
+    reference_sequences: Set[str],
+) -> Set[frozenset]:
+    cache_name = f"mcl_common_gene_vicinity_{domain}.pkl"
+
+    common_gene_vicinity = myUtil.load_cache(
+        config,
+        cache_name,
+    )
+
+    if common_gene_vicinity:
+        return common_gene_vicinity
+
+    common_gene_vicinity, neighbors = select_gene_cluster_vicinity_domains(
+        config.database_directory,
+        reference_sequences,
+    )
+
+    myUtil.save_cache(
+        config,
+        cache_name,
+        common_gene_vicinity,
+    )
+
+    myUtil.save_cache(
+        config,
+        f"mcl_gene_vicinity_dict_{domain}.pkl",
+        neighbors,
+    )
+
+    return common_gene_vicinity
+
+
+def _select_pam_hits(
+    config: Any,
+    basis_seed_sequences: Dict[str, Set[str]],
+    basis_score_limit: Dict[str, Dict[str, float]],
+) -> Dict[str, Set[str]]:
+    pam_hits = myUtil.load_cache(
+        config,
+        "mcl_PAM_plausible_hits.pkl",
+    )
+
+    if pam_hits:
+        return pam_hits
+
+    logger.info(
+        "Selecting sequences with plausible genomic co-occurrence"
+    )
+
+    pam_hits = predictor.predictor_training_calibration_application(
+        config=config,
+        basis_seed_sequences=basis_seed_sequences,
+        basis_score_limit=basis_score_limit,
+        probability_cutoff=config.pam_threshold,
+        support_models_name="grp3_support_models.pkl",
+    )
+
+    myUtil.save_cache(
+        config,
+        "mcl_PAM_plausible_hits.pkl",
+        pam_hits,
+    )
+
+    return pam_hits
+
+
+def select_hits_by_pam_csb_mcl(
+    config: Any,
+    clustering_results: Dict[str, str],
+    basis_seed_sequences: Dict[str, Set[str]],
+    basis_score_limit: Dict[str, Dict[str, float]],
+) -> Dict[str, Set[str]]:
+
+    cached_result = myUtil.load_cache(
+        config,
+        "mcl_PAM_csb_merged_hits.pkl",
+    )
+    if cached_result:
+        return cached_result
+
+    truncated_csb_hits, cluster_candidates = _select_truncated_csb_hits(
+        config=config,
+        clustering_results=clustering_results,
+        basis_grouped=basis_seed_sequences,
+    )
+
+    pam_seed_sequences = csb_proteins_selection.merge_protein_sets(
+        basis_seed_sequences,
+        truncated_csb_hits,
+    )
+
+    pam_hits = _select_pam_hits(
+        config=config,
+        basis_seed_sequences=pam_seed_sequences,
+        basis_score_limit=basis_score_limit,
+    )
+
+    log_all_mcl_cluster_statistics(
+        reference_dict=basis_seed_sequences,
+        cluster_proteins_dict=cluster_candidates,
+        grouped_3_dict=truncated_csb_hits,
+        grouped_4_dict=pam_hits,
+    )
+
+    merged_grouped = csb_proteins_selection.merge_protein_sets(
+        basis_seed_sequences,
+        truncated_csb_hits,
+        pam_hits,
+    )
+
+    myUtil.save_cache(
+        config,
+        "mcl_PAM_csb_merged_hits.pkl",
+        merged_grouped,
+    )
+
+    return merged_grouped

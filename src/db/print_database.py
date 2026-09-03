@@ -70,10 +70,7 @@ def main():
     )
 
     parser.add_argument(
-        "-db",
-        "--database",
-        required=True,
-        help="Path to SQLite database."
+        "-db", "--database", required=True, help="Path to SQLite database."
     )
 
     parser.add_argument(
@@ -81,7 +78,7 @@ def main():
         "--limit",
         type=int,
         default=None,
-        help="Optional maximum number of rows printed per table."
+        help="Optional maximum number of rows printed per table.",
     )
 
     args = parser.parse_args()

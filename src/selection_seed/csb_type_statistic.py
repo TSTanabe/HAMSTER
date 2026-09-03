@@ -710,6 +710,179 @@ def compute_score_limits(
 
     return domain_limits
 
+def generate_score_limits_from_seed_dict(
+    database_path: str,
+    grouped_dict: dict[str, set[str]],
+) -> dict[str, dict[str, float]]:
+    """
+    Calculate raw-score and BSR limits for selected reference proteins.
+
+    Only protein IDs explicitly contained in ``grouped_dict`` are used.
+    Raw DIAMOND scores and Blast Score Ratios are aggregated directly in
+    SQLite.
+
+    Parameters
+    ----------
+    database_path
+        Path to the HAMSTER SQLite database.
+
+    grouped_dict
+        Mapping of target domains to selected reference protein IDs:
+
+        {
+            "DsrA": {"protein1", "protein2", ...},
+            "DsrB": {"protein3", "protein4", ...},
+        }
+
+    Returns
+    -------
+    dict
+        Domain-specific score limits:
+
+        {
+            "DsrA": {
+                "lower_limit": ...,
+                "average": ...,
+                "upper_limit": ...,
+                "bsr_lower_limit": ...,
+                "bsr_average": ...,
+                "bsr_upper_limit": ...,
+            }
+        }
+
+    Raises
+    ------
+    ValueError
+        If no valid score or Blast Score Ratio values can be retrieved for
+        one or more domains containing selected reference proteins.
+    """
+    if not grouped_dict:
+        return {}
+
+    score_limit_dict: dict[str, dict[str, float]] = {}
+
+    with sqlite3.connect(database_path, timeout=120.0) as con:
+        cur = con.cursor()
+
+        cur.execute("PRAGMA temp_store=MEMORY;")
+
+        # --------------------------------------------------------------
+        # Store selected reference proteins in a temporary lookup table
+        # --------------------------------------------------------------
+        cur.execute(
+            """
+            CREATE TEMP TABLE tmp_reference_proteins (
+                domain TEXT NOT NULL,
+                proteinID TEXT NOT NULL,
+                PRIMARY KEY (domain, proteinID)
+            ) WITHOUT ROWID;
+            """
+        )
+
+        reference_rows = (
+            (domain, protein_id)
+            for domain, protein_ids in grouped_dict.items()
+            for protein_id in protein_ids
+        )
+
+        cur.executemany(
+            """
+            INSERT OR IGNORE INTO tmp_reference_proteins (
+                domain,
+                proteinID
+            )
+            VALUES (?, ?);
+            """,
+            reference_rows,
+        )
+
+        # --------------------------------------------------------------
+        # Aggregate all score limits in a single SQL query
+        # --------------------------------------------------------------
+        cur.execute(
+            """
+            SELECT
+                r.domain,
+
+                MIN(d.score),
+                AVG(d.score),
+                MAX(d.score),
+
+                MIN(d.blast_score_ratio),
+                AVG(d.blast_score_ratio),
+                MAX(d.blast_score_ratio),
+
+                COUNT(d.score),
+                COUNT(d.blast_score_ratio)
+
+            FROM tmp_reference_proteins AS r
+
+            LEFT JOIN Domains AS d
+              ON d.domain = r.domain
+             AND d.proteinID = r.proteinID
+
+            GROUP BY r.domain;
+            """
+        )
+
+        found_domains: set[str] = set()
+
+        for (
+            domain,
+            score_min,
+            score_average,
+            score_max,
+            bsr_min,
+            bsr_average,
+            bsr_max,
+            score_count,
+            bsr_count,
+        ) in cur:
+            found_domains.add(domain)
+
+            expected_count = len(grouped_dict[domain])
+
+            if score_count == 0:
+                raise ValueError(
+                    f"No valid score values found for domain {domain!r}, "
+                    f"although {expected_count} reference protein IDs "
+                    f"were provided."
+                )
+
+            if bsr_count == 0:
+                raise ValueError(
+                    f"No valid blast_score_ratio values found for domain "
+                    f"{domain!r}, although {expected_count} reference "
+                    f"protein IDs were provided."
+                )
+
+            score_limit_dict[domain] = {
+                "lower_limit": float(score_min),
+                "average": float(score_average),
+                "upper_limit": float(score_max),
+                "bsr_lower_limit": float(bsr_min),
+                "bsr_average": float(bsr_average),
+                "bsr_upper_limit": float(bsr_max),
+            }
+
+        # --------------------------------------------------------------
+        # Detect domains that somehow disappeared entirely
+        # --------------------------------------------------------------
+        expected_domains = {
+            domain
+            for domain, protein_ids in grouped_dict.items()
+            if protein_ids
+        }
+
+        missing_domains = expected_domains - found_domains
+
+        if missing_domains:
+            raise ValueError(
+                "No score statistics could be generated for the following "
+                f"domains: {', '.join(sorted(missing_domains))}"
+            )
+
+    return score_limit_dict
 
 def apply_cluster_selection(
     options: Any, filtered_stats_dict: Dict, query_score_dict: Dict

@@ -281,15 +281,11 @@ def self_blast_query(config: Any) -> tuple[Dict[str, float], Dict[str, float]]:
     query_length_dict = _get_sequence_legth(query_fasta)
 
     ## Save in the database
-    protein_dict = _parse_self_blastreport(
-        genome_id="QUERY", filepath=report
-    )
+    protein_dict = _parse_self_blastreport(genome_id="QUERY", filepath=report)
 
     parse_reports.get_protein_sequence(query_fasta, protein_dict)
     protein_dict = _clean_dict_keys_and_protein_ids(protein_dict, "QUERY")
-    database.insert_database_genome_ids(
-        config.database_directory, genome_ids={"QUERY"}
-    )
+    database.insert_database_genome_ids(config.database_directory, genome_ids={"QUERY"})
 
     database.insert_database_proteins(config.database_directory, protein_dict)
     return selfblast_scores_dict, query_length_dict

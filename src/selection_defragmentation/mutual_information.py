@@ -1043,6 +1043,7 @@ def _prepare_thresholds(
             raise ValueError(f"No minimum cutoff found for domain {domain!r}")
 
         if average is None:
+            print(score_limit_dict)
             raise ValueError(
                 f"No average cutoff found for domain {domain!r}. "
                 f"The score_limit_dict must contain a mean/average score."

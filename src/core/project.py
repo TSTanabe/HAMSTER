@@ -20,6 +20,7 @@ PROJECT_DIRS = {
     "Csb_directory": "Collinear_syntenic_blocks",
 }
 
+
 def prepare_directory_structure(directory: str) -> None:
     """
     Sets up the `bin` and `src` directories within the specified directory.

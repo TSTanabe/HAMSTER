@@ -67,8 +67,6 @@ def process_initial_validations(
     return
 
 
-
-
 #
 # Add Taxonomy to dataframe routinen
 #

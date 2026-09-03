@@ -195,11 +195,17 @@ def process_detailed_report(report_file, cutoff_file, output_dir, top_n):
     for cutoff_name, cutoff_value in cutoffs.items():
         summary = summarize_by_neighborhood(df, cutoff_value)
 
-        summary_file = output_dir / f"{protein_name}_{cutoff_name}_neighborhood_confusion.tsv"
+        summary_file = (
+            output_dir / f"{protein_name}_{cutoff_name}_neighborhood_confusion.tsv"
+        )
         summary.to_csv(summary_file, sep="\t", index=False)
 
-        plot_file = output_dir / f"{protein_name}_{cutoff_name}_neighborhood_confusion.png"
-        title = f"{protein_name}: genomic neighbourhood confusion at {cutoff_name} cutoff"
+        plot_file = (
+            output_dir / f"{protein_name}_{cutoff_name}_neighborhood_confusion.png"
+        )
+        title = (
+            f"{protein_name}: genomic neighbourhood confusion at {cutoff_name} cutoff"
+        )
         plot_summary(summary, plot_file, title, top_n=top_n)
 
         print(f"[SAVE] {summary_file}")
@@ -219,17 +225,20 @@ def main():
         description="Plot TP/FP/FN/TN composition per genomic neighbourhood from HAMSTER detailed reports."
     )
     parser.add_argument(
-        "-i", "--input",
+        "-i",
+        "--input",
         required=True,
         help="Detailed report file or directory containing *_detailed.txt files.",
     )
     parser.add_argument(
-        "-c", "--cutoffs",
+        "-c",
+        "--cutoffs",
         required=True,
         help="all_cutoffs.txt file with columns: name, optimized, trusted, noise.",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         default="neighborhood_plots",
         help="Output directory.",
     )

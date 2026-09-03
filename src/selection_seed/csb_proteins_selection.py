@@ -116,88 +116,10 @@ def prepare_csb_grouped_seed_proteins(
     )
 
     # Step 4: Save in pkl cache
-    myUtil.save_cache(config, "grp0_training_proteinIDs.pkl", grouped)
-    myUtil.save_cache(config, "grp0_score_limit_dict.pkl", grp_score_limit_dict)
+    #myUtil.save_cache(config, "grp0_training_proteinIDs.pkl", grouped)
+    #myUtil.save_cache(config, "grp0_score_limit_dict.pkl", grp_score_limit_dict)
 
     return grp_score_limit_dict, grouped
-
-
-################################################################################################
-
-
-def process_keyword_domains(
-    args: Tuple[str, str, List[str], int],
-) -> Dict[Tuple[str, str], Set[str]]:
-    """
-    Efficiently process a keyword and its domains, using chunked SQL queries for large IN clauses.
-
-    Args:
-        args (tuple): (database_path, keyword, domains, min_seqs)
-            - database_path (str): Path to SQLite DB.
-            - keyword (str): Cluster keyword.
-            - domains (list): List of domains.
-            - min_seqs (int): Minimum number of sequences.
-
-    Returns:
-        dict: {(keyword, domain): set(proteinIDs)}
-
-    Example:
-        ('db.sqlite', 'kword', ['ABC', 'DEF'], 5)
-        → {('kword','ABC'): {'prot1','prot2'}}
-    """
-    database, keyword, domains, min_seqs = args
-    result = {}
-    chunk_size = 900  # Sicher unter dem SQLite-Limit von 999 bleiben
-    logger.debug(f"Selecting proteinIDs for {keyword} {domains}")
-
-    with sqlite3.connect(database, timeout=120.0) as con:
-        cur = con.cursor()
-
-        # Schritt 1: Alle Proteins.proteinID für das Keyword abrufen
-        cur.execute(
-            """
-            SELECT DISTINCT Proteins.proteinID
-            FROM Proteins
-            INNER JOIN Keywords ON Proteins.clusterID = Keywords.clusterID
-            WHERE Keywords.keyword = ?;
-        """,
-            (keyword,),
-        )
-
-        protein_ids = {
-            row[0] for row in cur.fetchall()
-        }  # Set für schnelleres Nachschlagen
-
-        if not protein_ids:
-            return result  # Falls keine Treffer, direkt zurückgeben
-
-        # Schritt 2: Passende Protein-IDs mit den gewünschten Domains abrufen (in Chunks)
-        query_conditions = " OR ".join(["Domains.domain = ?"] * len(domains))
-
-        for i in range(0, len(protein_ids), chunk_size):
-            chunk = list(protein_ids)[i : i + chunk_size]  # Nimm max. 900 Protein-IDs
-
-            query = f"""
-                SELECT DISTINCT Proteins.proteinID, Domains.domain
-                FROM Proteins
-                INNER JOIN Domains ON Proteins.proteinID = Domains.proteinID
-                WHERE ({query_conditions}) AND Proteins.proteinID IN ({",".join(["?"] * len(chunk))});
-            """
-
-            cur.execute(query, (*domains, *chunk))
-            rows = cur.fetchall()
-
-            # Ergebnisse in Dictionary speichern
-            for proteinID, domain in rows:
-                key = (keyword, domain)
-                if key not in result:
-                    result[key] = set()
-                result[key].add(proteinID)
-
-    return result
-
-
-######################################################################################################
 
 
 ###############################################################################
@@ -364,28 +286,39 @@ def fetch_training_data_to_fasta(
     )
 
 
-def fetch_protein_family_sequences(options, directory, score_limit_dict, grouped):
-    # Training datasets with additional sequences
-    score_limit_dict = filter_existing_faa_files(
-        score_limit_dict, directory
-    )  # Do not fetch again for existing files
-    decorated_grouped_dict = fetch_protein_ids_parallel(
-        options.database_directory, score_limit_dict, options.cores, options.max_seqs
-    )  # get the proteinIDs within the score limits for each domain, new keys are domain only
-    decorated_grouped_dict = merge_grouped_protein_ids(decorated_grouped_dict, grouped)
-    _fetch_seqs_to_fasta_parallel(
-        options.database_directory,
-        decorated_grouped_dict,
-        directory,
-        options.min_seqs,
-        options.max_seqs,
-        options.cores,
-    )
+###############################################################################
+#################### Get proteinIDs from database #############################
+###############################################################################
 
-    return
+def _filter_existing_faa_files(
+    domain_dict: Dict[str, Any], directory: str
+) -> Dict[str, Any]:
+    """
+    Removes entries from domain_dict if a .faa file already exists.
 
+    Args:
+        domain_dict (dict): {domain: ...}
+        directory (str): Directory to check.
 
-def fetch_protein_ids_for_domain(
+    Returns:
+        dict: Only domains with no .faa in directory.
+
+    Example:
+        {'A':{...}}, 'dir/' (and 'dir/A.faa' exists) → {}
+    """
+    # Hole eine Liste aller existierenden .faa-Dateien im Verzeichnis
+    existing_files = {f for f in os.listdir(directory) if f.endswith(".faa")}
+
+    # Bereinige das Dictionary: Entferne Domains mit vorhandener .faa-Datei
+    filtered_dict = {
+        domain: values
+        for domain, values in domain_dict.items()
+        if f"{domain}.faa" not in existing_files
+    }
+
+    return filtered_dict
+
+def _fetch_protein_ids_for_domain(
     database: str,
     domain: str,
     lower_limit: float,
@@ -446,36 +379,7 @@ def fetch_protein_ids_for_domain(
     return domain, protein_ids
 
 
-def filter_existing_faa_files(
-    domain_dict: Dict[str, Any], directory: str
-) -> Dict[str, Any]:
-    """
-    Removes entries from domain_dict if a .faa file already exists.
-
-    Args:
-        domain_dict (dict): {domain: ...}
-        directory (str): Directory to check.
-
-    Returns:
-        dict: Only domains with no .faa in directory.
-
-    Example:
-        {'A':{...}}, 'dir/' (and 'dir/A.faa' exists) → {}
-    """
-    # Hole eine Liste aller existierenden .faa-Dateien im Verzeichnis
-    existing_files = {f for f in os.listdir(directory) if f.endswith(".faa")}
-
-    # Bereinige das Dictionary: Entferne Domains mit vorhandener .faa-Datei
-    filtered_dict = {
-        domain: values
-        for domain, values in domain_dict.items()
-        if f"{domain}.faa" not in existing_files
-    }
-
-    return filtered_dict
-
-
-def fetch_protein_ids_parallel(database, score_limit_dict, cores, max_seqs=50000):
+def _fetch_protein_ids_parallel(database, score_limit_dict, cores, max_seqs=50000):
     """
     Fetch all protein IDs per domain in parallel using multiprocessing.
 
@@ -493,12 +397,57 @@ def fetch_protein_ids_parallel(database, score_limit_dict, cores, max_seqs=50000
 
     # Use multiprocessing to run fetch_protein_ids_for_domain in parallel. This routine fetches seqs up to a limiter and then all seqs with the same score
     with multiprocessing.Pool(processes=cores) as pool:
-        results = pool.starmap(fetch_protein_ids_for_domain, tasks)
+        results = pool.starmap(_fetch_protein_ids_for_domain, tasks)
 
     # Combine results into a dictionary
     domain_protein_ids = {domain: protein_ids for domain, protein_ids in results}
 
     return domain_protein_ids
+
+
+def fetch_protein_family_sequences(
+    config: Any,
+    directory: str,
+    score_limit_dict: dict[str, dict[str, float]],
+    domain_to_proteinID: dict[str, set[str]],
+) -> None:
+    """Fetch protein-family sequences within score limits and write them to FASTA."""
+
+    # Do not fetch again for existing files.
+    score_limit_dict = _filter_existing_faa_files(
+        domain_dict=score_limit_dict,
+        directory=directory,
+    )
+
+    # Get protein IDs within the score limits for each domain.
+    decorated_grouped_dict: dict[str, set[str]] = _fetch_protein_ids_parallel(
+        config.database_directory,
+        score_limit_dict,
+        config.cores,
+        config.max_seqs,
+    )
+
+    decorated_grouped_dict = merge_protein_sets(
+        decorated_grouped_dict,
+        domain_to_proteinID,
+    )
+
+    _fetch_seqs_to_fasta_parallel(
+        config.database_directory,
+        decorated_grouped_dict,
+        directory,
+        config.min_seqs,
+        config.max_seqs,
+        config.cores,
+    )
+
+
+
+
+
+
+
+
 
 
 def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):

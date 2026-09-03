@@ -146,7 +146,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=int,
         default=3000,
         metavar="<int>",
-        help=argparse.SUPPRESS, #maybe("Chunk size for batch parsing of large files."),
+        help=argparse.SUPPRESS,  # maybe("Chunk size for batch parsing of large files."),
     )
     resources2.add_argument(
         "--enable-glob",
@@ -328,7 +328,9 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=float,
         default=70.0,
         metavar="<float>",
-        help=maybe("Minimum percent identity for seed hits without csb to query sequence."),
+        help=maybe(
+            "Minimum percent identity for seed hits without csb to query sequence."
+        ),
     )
     pam_search = parser.add_argument_group(
         "Presence/absence matrix (pam) parameters (advanced)"
@@ -339,7 +341,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=float,
         default=0.8,
         metavar="<float>",
-        help=argparse.SUPPRESS, #maybe("Significance threshold for presence/absence matrix co-occurrence."),
+        help=argparse.SUPPRESS,  # maybe("Significance threshold for presence/absence matrix co-occurrence."),
     )
     pam_search.add_argument(
         "--mx-bsr",
@@ -347,7 +349,7 @@ def _add_all_groups(parser: argparse.ArgumentParser, show_advanced: bool) -> Non
         type=float,
         default=0.3,
         metavar="<float>",
-        help=argparse.SUPPRESS, #maybe("Minimum BLAST score ratio for pam prediction inclusion."),
+        help=argparse.SUPPRESS,  # maybe("Minimum BLAST score ratio for pam prediction inclusion."),
     )
 
     mcl_search = parser.add_argument_group(

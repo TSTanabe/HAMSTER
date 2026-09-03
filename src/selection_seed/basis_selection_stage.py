@@ -13,6 +13,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+
 def _add_query_ids_to_proteinIDset(
     combined_protein_sets: Dict[str, Set[str]], database_path: str
 ) -> Dict[str, Set[str]]:
@@ -103,7 +104,9 @@ def basis_sequence_fasta(config) -> None:
 
     # Merge groups and limits from csb and sng and add queries
     merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
-    merged_basis_seed_proteins_dict = csb_proteins_selection.merge_protein_sets(grouped, sng_ref_seqs_dict)
+    merged_basis_seed_proteins_dict = csb_proteins_selection.merge_protein_sets(
+        grouped, sng_ref_seqs_dict
+    )
 
     if not merged_basis_seed_proteins_dict:
         logger.error(
@@ -114,10 +117,14 @@ def basis_sequence_fasta(config) -> None:
     )
 
     # Print the grp0 csb and singletons to fasta
-    csb_proteins_selection.fetch_training_data_to_fasta(config, merged_basis_seed_proteins_dict, "ds1")
+    csb_proteins_selection.fetch_training_data_to_fasta(
+        config, merged_basis_seed_proteins_dict, "ds1"
+    )
 
     # Save the merged groups
-    myUtil.save_cache(config, "basis_merged_grouped.pkl", merged_basis_seed_proteins_dict)
+    myUtil.save_cache(
+        config, "basis_merged_grouped.pkl", merged_basis_seed_proteins_dict
+    )
     myUtil.save_cache(config, "basis_merged_score.pkl", merged_score_limit_dict)
 
     # Update options object with the fetched proteinID groups and score limits

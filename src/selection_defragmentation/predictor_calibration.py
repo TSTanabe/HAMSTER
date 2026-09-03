@@ -13,6 +13,9 @@ from sklearn.model_selection import KFold
 
 from src.selection_defragmentation import mutual_information
 
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # ======================================================================
 # Data structures
@@ -560,6 +563,21 @@ def _fit_target_calibration(
         None,
     )
 
+def _calibration_failure_category(reason: str) -> str:
+    if "usable calibration samples" in reason:
+        return "too few usable samples"
+
+    if "positive calibration samples" in reason:
+        return "too few positive samples"
+
+    if "negative calibration samples" in reason:
+        return "too few negative samples"
+
+    if "no variation" in reason:
+        return "no context-evidence variation"
+
+    return "other"
+
 
 # ======================================================================
 # Main calibration routine
@@ -926,12 +944,41 @@ def calibrate_predictor_models(
 
         calibrations[target] = calibration
 
+    failure_categories = sorted(
+        {_calibration_failure_category(reason) for reason in skipped_targets.values()}
+    )
+
+    failure_summary = ", ".join(failure_categories)
+
+    if skipped_targets:
+        logger.info(
+            "Predictor calibration completed: %d/%d models calibrated, "
+            "%d models could not be calibrated (%s).",
+            len(calibrations),
+            len(candidate_targets),
+            len(skipped_targets),
+            failure_summary,
+        )
+    else:
+        logger.info(
+            "Predictor calibration completed: %d/%d models calibrated.",
+            len(calibrations),
+            len(candidate_targets),
+        )
+
+    for target, reason in sorted(skipped_targets.items()):
+        logger.warning(
+            "Predictor model %s could not be calibrated: %s",
+            target,
+            reason,
+        )
+
     return CalibrationResult(
         n_folds=n_folds,
         n_genomes=n_genomes,
         calibrations=calibrations,
         samples=samples,
-        skipped_targets=(skipped_targets),
+        skipped_targets=skipped_targets,
     )
 
 

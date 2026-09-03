@@ -139,7 +139,7 @@ def apply_predictor_models(
         store_predictions=False,
     )
 
-    application_result.print_summary()
+    #application_result.print_summary()
 
     plausible_hits: Dict[
         str,
@@ -170,16 +170,16 @@ def predictor_training_calibration_application(
 ) -> Dict[str, Set[str]]:
     predictor_models = get_or_train_predictor_models(
         config=config,
-        basis_score_limit=(basis_score_limit),
-        support_models_name=(support_models_name),
+        basis_score_limit=basis_score_limit,
+        support_models_name=support_models_name,
     )
 
     plausible_hits = apply_predictor_models(
         config=config,
-        predictor_models=(predictor_models),
-        basis_seed_sequences=(basis_seed_sequences),
-        basis_score_limit=(basis_score_limit),
-        probability_cutoff=(probability_cutoff),
+        predictor_models=predictor_models,
+        basis_seed_sequences=basis_seed_sequences,
+        basis_score_limit=basis_score_limit,
+        probability_cutoff=probability_cutoff,
     )
 
     return plausible_hits

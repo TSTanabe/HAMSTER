@@ -15,95 +15,7 @@ logger = get_logger(__name__)
 #### Main for the mcl cluster iteration ####
 
 
-def select_hits_by_csb_mcl(
-    options: Any,
-    mcl_output_dict: Dict[str, str],
-    reference_dict: Dict[str, Set[str]],
-    density_threshold: Optional[float] = None,
-    reference_threshold: Optional[float] = None,
-) -> Tuple[Dict[str, Set[str]], Dict[str, Dict[str, float]]]:
-    """
-    Selects clusters from MCL output based on density and reference thresholds.
-
-    Args:
-        options: Not used here but passed for consistency.
-        mcl_output_dict (dict): {domain: mcl_cluster_file_path}
-        reference_dict (dict): {domain: set(reference sequence IDs)}
-        density_threshold (float): Minimum reference density required.
-        reference_threshold (float): Minimum reference coverage required.
-
-    Returns:
-        tuple:
-            - all_clusters (dict): {domain: set(selected protein IDs)}
-            - all_cutoffs (dict): {domain: {'density_threshold': x, 'reference_threshold': y}}
-    """
-
-    all_clusters = {}
-    all_cutoffs = {}
-    # Process reference_dict to extract the actual domain names
-    processed_reference_dict = {
-        key.split("_", 1)[-1]: value for key, value in reference_dict.items()
-    }
-
-    for domain, mcl_file in mcl_output_dict.items():
-        logger.debug(f"Selecting hits by sequence clustering for {domain}")
-
-        # Get reference sequences for the domain (if exists in processed reference dict)
-        reference_sequences = processed_reference_dict.get(domain, set())
-        if not reference_sequences:
-            logger.debug(f"No reference sequences found for {domain}")
-            continue
-
-        local_density_thrs = density_threshold
-        local_reference_thrs = reference_threshold
-
-        # Step 1 Calculate the optimal density and reference thresholds
-        local_density_thrs, local_reference_thrs = calculate_optimized_mcl_threshold(
-            mcl_file,
-            domain,
-            reference_sequences,
-            fixed_density_threshold=local_density_thrs,
-            fixed_reference_threshold=local_reference_thrs,
-        )
-
-        # Get fallback values if thresholds were not provided
-        if local_density_thrs is None:
-            logger.warning(
-                f"MCL density threshold was not calculated for {domain}, fallback 0.1"
-            )
-            local_density_thrs = 0.1
-        if local_reference_thrs is None:
-            logger.warning(
-                f"MCL reference threshold was not calculated for {domain}, fallback 0.001"
-            )
-            local_reference_thrs = 0.01
-
-        # print(f"[INFO] {domain} with local_density_thrs {local_density_thrs} and reference thrs {local_reference_thrs}")
-
-        # Step 1 Process the MCL file for this domain
-        mcl_domain_clusters_dict = process_single_mcl_file(
-            mcl_file,
-            domain,
-            reference_sequences,
-            local_density_thrs,
-            local_reference_thrs,
-        )
-
-        # Step 2 Combine all individual cluster sets into one merged set
-        combined_set = (
-            set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
-        )
-
-        all_clusters[domain] = combined_set
-        all_cutoffs[domain] = {
-            "density_threshold": local_density_thrs,
-            "reference_threshold": local_reference_thrs,
-        }
-
-    return all_clusters, all_cutoffs
-
-
-def calculate_optimized_mcl_threshold(
+def _calculate_optimized_mcl_threshold(
     mcl_file: str,
     domain: str,
     reference_sequences: Set[str],
@@ -224,7 +136,7 @@ def calculate_optimized_mcl_threshold(
     return best_coords[1], best_coords[0]  # Return in order: (density, reference)
 
 
-def process_single_mcl_file(
+def _process_single_mcl_file(
     mcl_file: str,
     domain: str,
     reference_sequences: Set[str],
@@ -283,52 +195,95 @@ def process_single_mcl_file(
     return cluster_dict
 
 
-def DiamondSearch(
-    path: str,
-    query_fasta: str,
-    cores: int,
-    evalue: float,
-    coverage: float,
-    minseqid: float,
-    diamond_report_hits_limit: int,
-    alignment_mode: int = 2,
-    sensitivity: str = "ultra-sensitive",
-) -> str:
+def select_hits_by_csb_mcl(
+    config: Any,
+    mcl_output_dict: Dict[str, str],
+    reference_dict: Dict[str, Set[str]],
+    density_threshold: Optional[float] = None,
+    reference_threshold: Optional[float] = None,
+) -> Tuple[Dict[str, Set[str]], Dict[str, Dict[str, float]]]:
     """
-    Runs DIAMOND BLASTP on a FASTA against itself, output in tab format.
+    Selects clusters from MCL output based on density and reference thresholds.
 
     Args:
-        path (str): FASTA file path.
-        query_fasta (str): Query FASTA.
-        cores (int): Number of threads.
-        evalue (float): E-value cutoff.
-        coverage (float): Coverage threshold.
-        minseqid (float): Minimum sequence identity.
-        diamond_report_hits_limit (int): Report limit.
-        alignment_mode (int): Not used, for consistency.
-        sensitivity (str): Sensitivity flag.
+        config: Not used here but passed for consistency.
+        mcl_output_dict (dict): {domain: mcl_cluster_file_path}
+        reference_dict (dict): {domain: set(reference sequence IDs)}
+        density_threshold (float): Minimum reference density required.
+        reference_threshold (float): Minimum reference coverage required.
 
     Returns:
-        str: Path to DIAMOND output file (.diamond.tab)
+        tuple:
+            - all_clusters (dict): {domain: set(selected protein IDs)}
+            - all_cutoffs (dict): {domain: {'density_threshold': x, 'reference_threshold': y}}
     """
 
-    diamond = myUtil.find_executable("diamond")
-    # Erstellen der Diamond-Datenbank
-    target_db_name = f"{path}.dmnd"
-    os.system(
-        f"{diamond} makedb --quiet --in {path} -d {target_db_name} --threads {cores} 1>/dev/null 0>/dev/null"
-    )
+    all_clusters = {}
+    all_cutoffs = {}
+    # Process reference_dict to extract the actual domain names
+    processed_reference_dict = {
+        key.split("_", 1)[-1]: value for key, value in reference_dict.items()
+    }
 
-    # Suchergebnisse-Dateien
-    output_results_tab = f"{path}.diamond.tab"
+    for domain, mcl_file in mcl_output_dict.items():
+        logger.debug(f"Selecting hits by sequence clustering for {domain}")
 
-    os.system(
-        f"{diamond} blastp --quiet --{sensitivity} -d {target_db_name} -q {query_fasta} -o {output_results_tab} --threads {cores} -e {evalue} -k {diamond_report_hits_limit} --outfmt 6 sseqid qseqid bitscore 1>/dev/null 0>/dev/null"
-    )
+        # Get reference sequences for the domain (if exists in processed reference dict)
+        reference_sequences = processed_reference_dict.get(domain, set())
+        if not reference_sequences:
+            logger.debug(f"No reference sequences found for {domain}")
+            continue
 
-    # output format hit query evalue score identity alifrom alito
+        local_density_thrs = density_threshold
+        local_reference_thrs = reference_threshold
 
-    return output_results_tab
+        # Step 1 Calculate the optimal density and reference thresholds
+        local_density_thrs, local_reference_thrs = _calculate_optimized_mcl_threshold(
+            mcl_file,
+            domain,
+            reference_sequences,
+            fixed_density_threshold=local_density_thrs,
+            fixed_reference_threshold=local_reference_thrs,
+        )
+
+        # Get fallback values if thresholds were not provided
+        if local_density_thrs is None:
+            logger.warning(
+                f"MCL density threshold was not calculated for {domain}, fallback 0.1"
+            )
+            local_density_thrs = 0.1
+        if local_reference_thrs is None:
+            logger.warning(
+                f"MCL reference threshold was not calculated for {domain}, fallback 0.001"
+            )
+            local_reference_thrs = 0.01
+
+        # print(f"[INFO] {domain} with local_density_thrs {local_density_thrs} and reference thrs {local_reference_thrs}")
+
+        # Step 1 Process the MCL file for this domain
+        mcl_domain_clusters_dict = _process_single_mcl_file(
+            mcl_file,
+            domain,
+            reference_sequences,
+            local_density_thrs,
+            local_reference_thrs,
+        )
+
+        # Step 2 Combine all individual cluster sets into one merged set
+        combined_set = (
+            set().union(*mcl_domain_clusters_dict.values()).union(reference_sequences)
+        )
+
+        all_clusters[domain] = combined_set
+        all_cutoffs[domain] = {
+            "density_threshold": local_density_thrs,
+            "reference_threshold": local_reference_thrs,
+        }
+
+    return all_clusters, all_cutoffs
+
+
+
 
 
 def validate_mcl_cluster_paths(
