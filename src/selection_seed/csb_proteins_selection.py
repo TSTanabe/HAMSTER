@@ -415,6 +415,7 @@ def fetch_protein_family_sequences(
     )
 
     # Get protein IDs within the score limits for each domain.
+    print("Point 1 collecting the protein ids")
     decorated_grouped_dict: dict[str, set[str]] = _fetch_protein_ids_parallel(
         config.database_directory,
         score_limit_dict,
@@ -426,7 +427,7 @@ def fetch_protein_family_sequences(
         decorated_grouped_dict,
         domain_to_proteinID,
     )
-
+    print("Point 2 fetching the the sequences")
     _fetch_seqs_to_fasta_parallel(
         config.database_directory,
         decorated_grouped_dict,

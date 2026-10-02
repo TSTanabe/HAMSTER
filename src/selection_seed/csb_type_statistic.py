@@ -756,6 +756,7 @@ def generate_score_limits_from_seed_dict(
         If no valid score or Blast Score Ratio values can be retrieved for
         one or more domains containing selected reference proteins.
     """
+    logger.debug("Calculating hit score ranges for current seed sequence dataset")
     if not seed_dict:
         return {}
 
@@ -843,14 +844,14 @@ def generate_score_limits_from_seed_dict(
             expected_count = len(seed_dict[domain])
 
             if score_count == 0:
-                raise ValueError(
+                logger.warning(
                     f"No valid score values found for domain {domain!r}, "
                     f"although {expected_count} reference protein IDs "
                     f"were provided."
                 )
 
             if bsr_count == 0:
-                raise ValueError(
+                logger.warning(
                     f"No valid blast_score_ratio values found for domain "
                     f"{domain!r}, although {expected_count} reference "
                     f"protein IDs were provided."
@@ -877,11 +878,11 @@ def generate_score_limits_from_seed_dict(
         missing_domains = expected_domains - found_domains
 
         if missing_domains:
-            raise ValueError(
+            logger.warning(
                 "No score statistics could be generated for the following "
                 f"domains: {', '.join(sorted(missing_domains))}"
             )
-
+    logger.debug("Finished calculating hit score ranges for current seed sequence dataset")
     return score_limit_dict
 
 def apply_cluster_selection(

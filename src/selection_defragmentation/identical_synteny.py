@@ -19,7 +19,7 @@ def extend_merged_grouped_by_csb_similarity(
     Extend grouped protein sets by including proteins from
     highly similar CSB patterns.
     """
-
+    
     protein_to_new_keywords_dict = myUtil.load_cache(
         options,
         "grp1_protein_to_key.pkl",
@@ -56,6 +56,10 @@ def extend_merged_grouped_by_csb_similarity(
             "grp1_extended_grouped.pkl",
             extended_grouped,
         )
+
+    logger.debug(
+        "Extended seed protein sequence sets with sequences with syntenic csb"
+    )
 
     return extended_grouped
 
