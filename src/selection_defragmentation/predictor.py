@@ -141,7 +141,7 @@ def apply_predictor_models(
         store_predictions=False,
     )
 
-    #application_result.print_summary()
+    # application_result.print_summary()
 
     plausible_hits: Dict[
         str,
@@ -159,9 +159,9 @@ def apply_predictor_models(
 
 def predictor_training_calibration_application(
     config: Any,
-    basis_seed_sequences: Dict[str,Set[str]],
-    basis_score_limit: Dict[str,Dict[str, float]],
-    probability_cutoff: float, # probability for presence at which new hits are accepted as TP
+    basis_seed_sequences: Dict[str, Set[str]],
+    basis_score_limit: Dict[str, Dict[str, float]],
+    probability_cutoff: float,  # probability for presence at which new hits are accepted as TP
     support_models_name: str,
 ) -> Dict[str, Set[str]]:
     plausible_hits_name = "grp2_plausible_hits_name"
@@ -173,7 +173,6 @@ def predictor_training_calibration_application(
             str(domain): set(protein_ids)
             for domain, protein_ids in plausible_hits.items()
         }
-
 
     predictor_models = get_or_train_predictor_models(
         config=config,

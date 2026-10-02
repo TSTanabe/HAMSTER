@@ -19,7 +19,7 @@ def extend_merged_grouped_by_csb_similarity(
     Extend grouped protein sets by including proteins from
     highly similar CSB patterns.
     """
-    
+
     protein_to_new_keywords_dict = myUtil.load_cache(
         options,
         "grp1_protein_to_key.pkl",
@@ -57,9 +57,7 @@ def extend_merged_grouped_by_csb_similarity(
             extended_grouped,
         )
 
-    logger.debug(
-        "Extended seed protein sequence sets with sequences with syntenic csb"
-    )
+    logger.debug("Extended seed protein sequence sets with sequences with syntenic csb")
 
     return extended_grouped
 
@@ -81,9 +79,7 @@ def select_similar_csb_patterns_per_protein(
 
     jaccard_included_patterns: Dict[str, Set[str]] = {}
 
-    csb_dictionary = fetch_seed_proteins.parse_csb_file_to_dict(
-        options.csb_output_file
-    )
+    csb_dictionary = fetch_seed_proteins.parse_csb_file_to_dict(options.csb_output_file)
 
     for domain, protein_ids in merged_grouped.items():
         logger.debug(f"Processing domain {domain}")
@@ -98,7 +94,11 @@ def select_similar_csb_patterns_per_protein(
             continue
 
         domain_pattern_union = set().union(
-            *(csb_dictionary[keyword] for keyword in all_keywords if keyword in csb_dictionary)
+            *(
+                csb_dictionary[keyword]
+                for keyword in all_keywords
+                if keyword in csb_dictionary
+            )
         )
 
         logger.debug(
@@ -138,17 +138,9 @@ def select_similar_csb_patterns_per_protein(
             if intersection == 0 and jaccard_threshold > 0.0:
                 continue
 
-            union = (
-                domain_pattern_union_len
-                + csb_pattern_len
-                - intersection
-            )
+            union = domain_pattern_union_len + csb_pattern_len - intersection
 
-            similarity = (
-                intersection / union
-                if union > 0
-                else 0.0
-            )
+            similarity = intersection / union if union > 0 else 0.0
 
             if similarity >= jaccard_threshold:
                 similar_csb_keywords.add(csb_key)
@@ -173,9 +165,7 @@ def fetch_keywords_for_proteins(
     """
 
     if not protein_ids:
-        logger.warning(
-            "No proteinIDs provided to fetch_keywords_for_proteins."
-        )
+        logger.warning("No proteinIDs provided to fetch_keywords_for_proteins.")
         return set()
 
     with sqlite3.connect(
@@ -197,9 +187,7 @@ def fetch_keywords_for_proteins(
             """
         )
 
-        cur.execute(
-            "DELETE FROM tmp_protein_ids;"
-        )
+        cur.execute("DELETE FROM tmp_protein_ids;")
 
         protein_id_list = list(protein_ids)
 
@@ -208,9 +196,7 @@ def fetch_keywords_for_proteins(
             len(protein_id_list),
             chunk_size,
         ):
-            batch = protein_id_list[
-                start : start + chunk_size
-            ]
+            batch = protein_id_list[start : start + chunk_size]
 
             cur.executemany(
                 """
@@ -220,9 +206,7 @@ def fetch_keywords_for_proteins(
                 ((protein_id,) for protein_id in batch),
             )
 
-        cur.execute(
-            "PRAGMA query_only=TRUE;"
-        )
+        cur.execute("PRAGMA query_only=TRUE;")
 
         cur.execute(
             """
@@ -239,14 +223,10 @@ def fetch_keywords_for_proteins(
             """
         )
 
-        all_keywords = {
-            keyword
-            for (keyword,) in cur
-        }
+        all_keywords = {keyword for (keyword,) in cur}
 
     logger.debug(
-        f"Retrieved {len(all_keywords)} keywords for "
-        f"{len(protein_ids)} proteins."
+        f"Retrieved {len(all_keywords)} keywords for {len(protein_ids)} proteins."
     )
 
     return all_keywords
@@ -263,9 +243,7 @@ def integrate_csb_variants_into_merged_grouped(
     corresponding grouped domain sets.
     """
 
-    logger.info(
-        "Integration of added CSB proteins to grouped dataset"
-    )
+    logger.info("Integration of added CSB proteins to grouped dataset")
 
     if not domain_to_new_keywords_dict:
         return merged_grouped
@@ -293,9 +271,7 @@ def integrate_csb_variants_into_merged_grouped(
 
         for domain, new_keywords in domain_to_new_keywords_dict.items():
             if not new_keywords:
-                logger.debug(
-                    f"Domain {domain}: No new keywords to integrate."
-                )
+                logger.debug(f"Domain {domain}: No new keywords to integrate.")
                 continue
 
             merged_grouped.setdefault(
@@ -308,28 +284,18 @@ def integrate_csb_variants_into_merged_grouped(
                 f"{len(new_keywords)} new keywords."
             )
 
-            before = len(
-                merged_grouped[domain]
-            )
+            before = len(merged_grouped[domain])
 
-            cur.execute(
-                "DELETE FROM tmp_keywords;"
-            )
+            cur.execute("DELETE FROM tmp_keywords;")
 
-            keyword_list = [
-                keyword
-                for keyword in new_keywords
-                if keyword
-            ]
+            keyword_list = [keyword for keyword in new_keywords if keyword]
 
             for start in range(
                 0,
                 len(keyword_list),
                 chunk_size,
             ):
-                batch = keyword_list[
-                    start : start + chunk_size
-                ]
+                batch = keyword_list[start : start + chunk_size]
 
                 cur.executemany(
                     """
@@ -339,9 +305,7 @@ def integrate_csb_variants_into_merged_grouped(
                     ((keyword,) for keyword in batch),
                 )
 
-            cur.execute(
-                "PRAGMA query_only=TRUE;"
-            )
+            cur.execute("PRAGMA query_only=TRUE;")
 
             cur.execute(
                 """
@@ -368,18 +332,12 @@ def integrate_csb_variants_into_merged_grouped(
                 if protein_id in merged_grouped[domain]:
                     continue
 
-                merged_grouped[domain].add(
-                    protein_id
-                )
+                merged_grouped[domain].add(protein_id)
                 added += 1
 
-            cur.execute(
-                "PRAGMA query_only=FALSE;"
-            )
+            cur.execute("PRAGMA query_only=FALSE;")
 
-            after = len(
-                merged_grouped[domain]
-            )
+            after = len(merged_grouped[domain])
 
             logger.info(
                 f"Domain {domain}: Added {added} new proteins with matching "

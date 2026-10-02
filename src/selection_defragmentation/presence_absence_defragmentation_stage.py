@@ -25,6 +25,7 @@ logger = get_logger(__name__)
 ######################### Extend grouped reference proteins with similar csb #############################
 ##########################################################################################################
 
+
 def pam_defragmentation_stage(config) -> object | None:
     """
     Find additional plausible hits based on presence absence patterns. This should include hits
@@ -66,13 +67,15 @@ def pam_defragmentation_stage(config) -> object | None:
     )
 
     # Adds potential hits by presence absence matrix
-    predictor_probability_proteins = predictor.predictor_training_calibration_application(
+    predictor_probability_proteins = (
+        predictor.predictor_training_calibration_application(
             config=config,
             basis_seed_sequences=basis_grouped,
             basis_score_limit=basis_score_limits,
             probability_cutoff=config.pam_threshold,
             support_models_name="grp2_predictor_models.pkl",
         )
+    )
 
     # Adds protein sequences from csb that are below jaccard distance threshold distance to grp0 csb
     syntenic_proteins = identical_synteny.extend_merged_grouped_by_csb_similarity(
@@ -92,19 +95,30 @@ def pam_defragmentation_stage(config) -> object | None:
     ## Clustering at 90 % identitity
     # Write fasta files with the reference sequences and similar sequences within the score cutoff range of the reference seqs for the linclustering
     csb_proteins_selection.fetch_protein_family_sequences(
-        config=config, directory=config.fasta_initial_hit_directory, score_limit_dict=score_limit_dict, domain_to_proteinID=merged_grouped
+        config=config,
+        directory=config.fasta_initial_hit_directory,
+        score_limit_dict=score_limit_dict,
+        domain_to_proteinID=merged_grouped,
+    )
+
+    # remove artifects from previous runs
+    seq_clustering.clean_clustering_directory_keep_fastas(
+        config.fasta_initial_hit_directory
     )
 
     # Cluster sequences at 90 % identity and 70 % coverage to select highly similar proteins without context
     linclust_mcl_format_output_files_dict = seq_clustering.run_mmseqs_linclust_lowlevel(
-        directory=config.fasta_initial_hit_directory, min_seq_id= 0.9, min_aln_len= 0.7, cores=config.cores
+        directory=config.fasta_initial_hit_directory,
+        min_seq_id=0.9,
+        min_aln_len=0.7,
+        cores=config.cores,
     )  # seq identity=> float 0.9 und min aln length => float 0.7
 
     # Add the clustered hits to the reference sequence sets
-    # _linclust_mcl_format.txt select from these files in fasta_initial_hit_directory
-    mcl_extended_seed, mcl_cutoffs = protein_mcl.select_hits_by_csb_mcl(
-        config=config, mcl_output_dict=linclust_mcl_format_output_files_dict, reference_dict=merged_grouped, density_threshold=0.0, reference_threshold=0.00000000001
-    )  # low cutoffs for closely related protein clusters
+    mcl_extended_seed = protein_mcl.select_clusters_with_any_reference(
+        mcl_output_dict=linclust_mcl_format_output_files_dict,
+        reference_dict=merged_grouped,
+    )
 
     ## Storage
     # Save computed grp1 datasets
@@ -112,7 +126,9 @@ def pam_defragmentation_stage(config) -> object | None:
     myUtil.save_cache(config, "grp1_merged_score_limits.pkl", score_limit_dict)
 
     # Print the grp0 csb and singletons to fasta
-    csb_proteins_selection.fetch_training_data_to_fasta(config, mcl_extended_seed, "ds2")
+    csb_proteins_selection.fetch_training_data_to_fasta(
+        config, mcl_extended_seed, "ds2"
+    )
 
     # Result dictionary is stores in options.grouped, overwriting the grp0 with grp1 key_domain pairs
     config.grouped = mcl_extended_seed

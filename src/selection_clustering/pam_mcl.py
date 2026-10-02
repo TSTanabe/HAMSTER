@@ -369,9 +369,7 @@ def _select_pam_hits(
     if pam_hits:
         return pam_hits
 
-    logger.info(
-        "Selecting sequences with plausible genomic co-occurrence"
-    )
+    logger.info("Selecting sequences with plausible genomic co-occurrence")
 
     pam_hits = predictor.predictor_training_calibration_application(
         config=config,
@@ -396,7 +394,6 @@ def select_hits_by_pam_csb_mcl(
     basis_seed_sequences: Dict[str, Set[str]],
     basis_score_limit: Dict[str, Dict[str, float]],
 ) -> Dict[str, Set[str]]:
-
     cached_result = myUtil.load_cache(
         config,
         "mcl_PAM_csb_merged_hits.pkl",

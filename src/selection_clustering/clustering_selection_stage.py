@@ -66,24 +66,16 @@ def mcl_family_clustering_sequences(config: Any) -> None:
         - FASTA files for protein families.
         - Clustering result files for further analysis.
     """
-
-    # Load grp1 datasets, that includes basis + proteins with similar csb and presence absence patterns
-    grouped = _get_grp1_grouped(config)
-    
-    score_limit_dict = (
-        config.score_limit_dict
-        if hasattr(config, "score_limit_dict")
-        else myUtil.load_cache(config, "grp1_merged_score_limits.pkl")
-    )
-
-    logger.info("Prepare protein sequence identity clustering")
-    csb_proteins_selection.fetch_protein_family_sequences(
-        config, config.phylogeny_directory, score_limit_dict, grouped
+    seq_clustering.clean_clustering_directory_keep_fastas(
+        config.fasta_initial_hit_directory
     )
 
     # Cluster sequences with linclust at 40 % identitiy
     linclust_mcl_format_output_files_dict = seq_clustering.run_mmseqs_linclust_lowlevel(
-        directory=config.phylogeny_directory, min_seq_id=config.mcl_min_seq_id, min_aln_len=0.7, cores=config.cores
+        directory=config.fasta_initial_hit_directory,
+        min_seq_id=config.mcl_min_seq_id,
+        min_aln_len=0.7,
+        cores=config.cores,
     )
 
     myUtil.save_cache(
@@ -160,14 +152,16 @@ def mcl_select_grp3_clusters(config, seed_sequences) -> dict:
 
     clustering_results = _load_linclust_results(config)
 
-    score_limit_dict = csb_type_statistic.generate_score_limits_from_seed_dict(config.database_directory, seed_sequences)
+    score_limit_dict = csb_type_statistic.generate_score_limits_from_seed_dict(
+        config.database_directory, seed_sequences
+    )
 
     # Extend references via PAM model
     regrouped = pam_mcl.select_hits_by_pam_csb_mcl(
         config=config,
         clustering_results=clustering_results,
         basis_seed_sequences=seed_sequences,
-        basis_score_limit=score_limit_dict
+        basis_score_limit=score_limit_dict,
     )
     myUtil.save_cache(config, "grp3_selection_ref_seqs.pkl", regrouped)
 

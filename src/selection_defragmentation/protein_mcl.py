@@ -283,7 +283,67 @@ def select_hits_by_csb_mcl(
     return all_clusters, all_cutoffs
 
 
+def select_clusters_with_any_reference(
+    mcl_output_dict: Dict[str, str],
+    reference_dict: Dict[str, Set[str]],
+) -> Dict[str, Set[str]]:
+    """
+    Select all sequences from every cluster containing at least one
+    reference/seed sequence.
 
+    Intended for the high-identity (90 %) clustering step.
+    """
+
+    processed_reference_dict = {
+        key.split("_", 1)[-1]: set(value) for key, value in reference_dict.items()
+    }
+
+    # Always retain all reference sequences.
+    selected_by_domain = {
+        domain: set(reference_sequences)
+        for domain, reference_sequences in processed_reference_dict.items()
+    }
+
+    for domain, mcl_file in mcl_output_dict.items():
+        reference_sequences = processed_reference_dict.get(
+            domain,
+            set(),
+        )
+
+        if not reference_sequences:
+            logger.debug(f"No reference sequences found for {domain}")
+            continue
+
+        selected_sequences = selected_by_domain.setdefault(
+            domain,
+            set(reference_sequences),
+        )
+
+        kept_clusters = 0
+        new_sequences = set()
+
+        with open(mcl_file, "r") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+
+                cluster_sequences = set(line.strip().split())
+
+                # Exact rule:
+                # at least one seed -> keep complete cluster
+                if cluster_sequences & reference_sequences:
+                    kept_clusters += 1
+                    new_sequences.update(cluster_sequences)
+
+        selected_sequences.update(new_sequences)
+
+        logger.info(
+            f"{domain:<12} | "
+            f"90%-clusters kept: {kept_clusters:>5} | "
+            f"total sequences: {len(selected_sequences):>7}"
+        )
+
+    return selected_by_domain
 
 
 def validate_mcl_cluster_paths(

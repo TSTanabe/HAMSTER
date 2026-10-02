@@ -563,6 +563,7 @@ def _fit_target_calibration(
         None,
     )
 
+
 def _calibration_failure_category(reason: str) -> str:
     if "usable calibration samples" in reason:
         return "too few usable samples"

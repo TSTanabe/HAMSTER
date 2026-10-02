@@ -2,6 +2,7 @@
 
 import csv
 import os
+import shutil
 import subprocess
 from collections import defaultdict
 from typing import Dict
@@ -76,6 +77,30 @@ def run_mmseqs_clustering(
             logger.error(f"Expected cluster file not found: {output_file_path}")
 
     return output_files_dict
+
+
+def clean_clustering_directory_keep_fastas(directory: str) -> None:
+    """Remove everything except .faa files from a clustering directory."""
+
+    if not os.path.isdir(directory):
+        return
+
+    removed = 0
+    for name in os.listdir(directory):
+        if name.endswith(".faa"):
+            continue
+
+        path = os.path.join(directory, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            removed += 1
+        except OSError as exc:
+            logger.warning(f"Could not remove clustering artifact {path}: {exc}")
+
+    logger.debug(f"Removed {removed} clustering artifacts; retained .faa files.")
 
 
 def run_mmseqs_linclust_lowlevel(
