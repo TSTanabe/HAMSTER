@@ -162,6 +162,17 @@ def predictor_training_calibration_application(
     probability_cutoff: float, # probability for presence at which new hits are accepted as TP
     support_models_name: str,
 ) -> Dict[str, Set[str]]:
+    plausible_hits_name = "grp2_plausible_hits_name"
+    plausible_hits = myUtil.load_cache(config, plausible_hits_name)
+
+    if plausible_hits is not None:
+        logger.info("Loaded plausible predictor hits")
+        return {
+            str(domain): set(protein_ids)
+            for domain, protein_ids in plausible_hits.items()
+        }
+
+
     predictor_models = get_or_train_predictor_models(
         config=config,
         basis_score_limit=basis_score_limit,
@@ -175,5 +186,8 @@ def predictor_training_calibration_application(
         basis_score_limit=basis_score_limit,
         probability_cutoff=probability_cutoff,
     )
+
+    myUtil.save_cache(config, plausible_hits_name, plausible_hits)
+    logger.debug(f"Saved plausible predictor hits to {plausible_hits_name}")
 
     return plausible_hits
