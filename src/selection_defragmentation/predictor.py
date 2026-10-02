@@ -157,14 +157,8 @@ def apply_predictor_models(
 
 def predictor_training_calibration_application(
     config: Any,
-    basis_seed_sequences: Dict[
-        str,
-        Set[str],
-    ],
-    basis_score_limit: Dict[
-        str,
-        Dict[str, float],
-    ],
+    basis_seed_sequences: Dict[str,Set[str]],
+    basis_score_limit: Dict[str,Dict[str, float]],
     probability_cutoff: float, # probability for presence at which new hits are accepted as TP
     support_models_name: str,
 ) -> Dict[str, Set[str]]:

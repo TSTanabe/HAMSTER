@@ -712,7 +712,7 @@ def compute_score_limits(
 
 def generate_score_limits_from_seed_dict(
     database_path: str,
-    grouped_dict: dict[str, set[str]],
+    seed_dict: dict[str, set[str]],
 ) -> dict[str, dict[str, float]]:
     """
     Calculate raw-score and BSR limits for selected reference proteins.
@@ -726,7 +726,7 @@ def generate_score_limits_from_seed_dict(
     database_path
         Path to the HAMSTER SQLite database.
 
-    grouped_dict
+    seed_dict
         Mapping of target domains to selected reference protein IDs:
 
         {
@@ -756,7 +756,7 @@ def generate_score_limits_from_seed_dict(
         If no valid score or Blast Score Ratio values can be retrieved for
         one or more domains containing selected reference proteins.
     """
-    if not grouped_dict:
+    if not seed_dict:
         return {}
 
     score_limit_dict: dict[str, dict[str, float]] = {}
@@ -781,7 +781,7 @@ def generate_score_limits_from_seed_dict(
 
         reference_rows = (
             (domain, protein_id)
-            for domain, protein_ids in grouped_dict.items()
+            for domain, protein_ids in seed_dict.items()
             for protein_id in protein_ids
         )
 
@@ -840,7 +840,7 @@ def generate_score_limits_from_seed_dict(
         ) in cur:
             found_domains.add(domain)
 
-            expected_count = len(grouped_dict[domain])
+            expected_count = len(seed_dict[domain])
 
             if score_count == 0:
                 raise ValueError(
@@ -870,7 +870,7 @@ def generate_score_limits_from_seed_dict(
         # --------------------------------------------------------------
         expected_domains = {
             domain
-            for domain, protein_ids in grouped_dict.items()
+            for domain, protein_ids in seed_dict.items()
             if protein_ids
         }
 
@@ -896,12 +896,9 @@ def apply_cluster_selection(
     Saves results to cache.
 
     Returns:
-        domain_score_limits         (dict)
         grouped_keywords            (dict): {domain: [[keywords]]} (extended)
-        clustered_excluded_keywords (dict)
     """
     # Load caches if available
-    domain_score_limits = myUtil.load_cache(options, "stat_domain_score_limits.pkl")
     grouped_keywords = myUtil.load_cache(options, "stat_grouped_keywords.pkl")
 
     # Always save TSV for filtered statistics
@@ -921,25 +918,10 @@ def apply_cluster_selection(
             logger.warning(
                 f"No gene cluster encoded hits with at a bitscore of at least {options.low_hitscore_csb_cutoff} of the query. Consider reducing the threshold with the -exclude_csb_score option."
             )
-        # The following routine includes all domains from a csb were a single domain passes
-        # grouped_keywords = group_keywords_by_domain_extended(
-        #    filtered_stats_dict,
-        #    query_score_dict,
-        #    options.low_hitscore_csb_cutoff
-        # )
+
         myUtil.save_cache(options, "stat_grouped_keywords.pkl", grouped_keywords)
 
-    # Compute score limits per domain based on grouped keywords
-    if not domain_score_limits:
-        logger.info(
-            "Computing for each protein hit score range across all selected CSBs"
-        )
-        domain_score_limits = compute_score_limits(
-            filtered_stats_dict, grouped_keywords
-        )
-        myUtil.save_cache(options, "stat_domain_score_limits.pkl", domain_score_limits)
-
-    return domain_score_limits, grouped_keywords
+    return grouped_keywords
 
 
 def group_gene_cluster_statistic(options: Any):
@@ -950,11 +932,13 @@ def group_gene_cluster_statistic(options: Any):
     Internally runs:
         (1) compute_cluster_stats()
         (2) apply_cluster_selection()
+
+        filtered_stat_dict contains the domain specific score values per csb
     """
     filtered_stats_dict, query_score_dict = compute_cluster_stats(options)
 
-    domain_score_limits, grouped_keywords = apply_cluster_selection(
+    grouped_keywords = apply_cluster_selection(
         options, filtered_stats_dict, query_score_dict
     )
 
-    return domain_score_limits, filtered_stats_dict, grouped_keywords
+    return grouped_keywords

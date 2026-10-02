@@ -286,12 +286,12 @@ def select_singleton_refs_by_domain_pattern(
     database_path: str,
     seed_to_pattern_domains: Dict[str, Set[str]],
     min_bsr_cutoff: float = 70.0,
-) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Set[str]]]:
-    score_limits_dict: Dict[str, Dict[str, float]] = {}
+):
+
     sng_reference_seq_dict: Dict[str, Set[str]] = defaultdict(set)
 
     if not seed_to_pattern_domains:
-        return score_limits_dict, sng_reference_seq_dict
+        return sng_reference_seq_dict
 
     with sqlite3.connect(database_path, timeout=120.0) as con:
         cur = con.cursor()
@@ -379,14 +379,6 @@ def select_singleton_refs_by_domain_pattern(
             if not row or row[0] is None or row[1] is None or row[2] is None:
                 continue
 
-            lower = float(row[0])
-            average = float(row[1])
-            upper = float(row[2])
-
-            bsr_lower = float(row[3])
-            bsr_average = float(row[4])
-            bsr_upper = float(row[5])
-
             # 2) ProteinIDs holen (DISTINCT)
             cur.execute(
                 """
@@ -405,16 +397,9 @@ def select_singleton_refs_by_domain_pattern(
                 continue
 
             sng_reference_seq_dict[seed_domain] = protein_ids
-            score_limits_dict[seed_domain] = {
-                "lower_limit": lower,
-                "average": average,
-                "upper_limit": upper,
-                "bsr_lower_limit": bsr_lower,
-                "bsr_average": bsr_average,
-                "bsr_upper_limit": bsr_upper,
-            }
 
-    return score_limits_dict, sng_reference_seq_dict
+
+    return sng_reference_seq_dict
 
 
 def _add_bsr_fallback_for_domains_without_pattern(
@@ -422,12 +407,8 @@ def _add_bsr_fallback_for_domains_without_pattern(
     context_free_domains_dict: Dict[str, Set[str]],
     domain_presence_intersection_pattern: Dict[str, Set[str]],
     singleton_reference_seqs_dict: Dict[str, Set[str]],
-    domain_score_limits: Dict[str, Dict[str, float]],
     bsr_cutoff: float,
-) -> Tuple[
-    Dict[str, Dict[str, float]],
-    Dict[str, Set[str]],
-]:
+) -> dict[str, set[str]]:
     """
     Add BSR-based fallback reference sequences for seed domains for which
     no informative co-occurrence pattern could be identified.
@@ -471,7 +452,6 @@ def _add_bsr_fallback_for_domains_without_pattern(
 
     Returns:
         Updated:
-            domain_score_limits,
             singleton_reference_seqs_dict
     """
 
@@ -496,7 +476,7 @@ def _add_bsr_fallback_for_domains_without_pattern(
         logger.info(
             "All singleton seed domains have informative co-occurrence patterns."
         )
-        return domain_score_limits, singleton_reference_seqs_dict
+        return singleton_reference_seqs_dict
 
     logger.info(
         f"Using BSR-only fallback for {len(fallback_domains)} domains "
@@ -605,22 +585,6 @@ def _add_bsr_fallback_for_domains_without_pattern(
             if lower is None or upper is None:
                 continue
 
-            lower = float(lower)
-            upper = float(upper)
-
-            bsr_lower = float(bsr_lower)
-            bsr_upper = float(bsr_upper)
-
-            if domain not in domain_score_limits:
-                domain_score_limits[domain] = {
-                    "lower_limit": lower,
-                    "average": (lower + upper) / 2.0,
-                    "upper_limit": upper,
-                    "bsr_lower_limit": bsr_lower,
-                    "bsr_average": (bsr_lower + bsr_upper) / 2.0,
-                    "bsr_upper_limit": bsr_upper,
-                }
-
     for domain in sorted(fallback_domains):
         logger.debug(
             f"BSR fallback for {domain}: "
@@ -628,18 +592,18 @@ def _add_bsr_fallback_for_domains_without_pattern(
             f"with BSR >= {bsr_cutoff}"
         )
 
-    return domain_score_limits, singleton_reference_seqs_dict
+    return singleton_reference_seqs_dict
 
 
 #### Main routine of this module
 def prepare_singleton_seed_proteins(
-    options: Any,
-) -> tuple[object, object] | tuple[dict[str, dict[str, float]], dict[str, set[str]]]:
+    config: Any,
+) -> dict[str, set[str]]:
     """
     Main routine: finds and predicts reference singletons for each protein/domain.
 
     Args:
-        options (Any): Configuration/options.
+        config (Any): Configuration/options.
 
     Returns:
         tuple:
@@ -654,30 +618,30 @@ def prepare_singleton_seed_proteins(
     Then hits that are cooccurring in at least 90 % of the genomes with this high homology singleton are taken
     """
 
-    high_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 0.7)
-    cooccurence_bsr_cutoff = getattr(options, "singleton_identity_cutoff", 0.3)
+    high_bsr_cutoff = getattr(config, "singleton_identity_cutoff", 0.7)
+    cooccurence_bsr_cutoff = getattr(config, "singleton_identity_cutoff", 0.3)
 
     # 1) Add QUERY domains that were not selected by CSB grouping.
     # Genomes that are considered still need a seq with high identity
     context_free_domains_dict = _add_missing_query_domains_to_context_free_dict(
-        database_path=options.database_directory,
-        already_grouped_domains=options.grouped,
-        blast_score_ratio_cutoff=options.low_hitscore_csb_cutoff,
+        database_path=config.database_directory,
+        already_grouped_domains=config.grouped,
+        blast_score_ratio_cutoff=config.low_hitscore_csb_cutoff,
     )
 
     logger.info(
-        f"Found {len(context_free_domains_dict)} proteins without syntenic gene cluster and blast score ratio >= {options.low_hitscore_csb_cutoff}: {', '.join(sorted(context_free_domains_dict.keys()))}"
+        f"Found {len(context_free_domains_dict)} proteins without syntenic gene cluster and blast score ratio >= {config.low_hitscore_csb_cutoff}: {', '.join(sorted(context_free_domains_dict.keys()))}"
     )
 
     if not context_free_domains_dict:
         logger.warning(
             "No context-free high-identity hits found – stopping singleton selection."
         )
-        return {}, {}
+        return {}
 
     # 2) For these genomes, determine coccurrence patterns of hits with bsr >= cooccurence_bsr_cutoff
     domain_presence_intersection_pattern = _fetch_conserved_co_occurrence_pattern(
-        database_path=options.database_directory,
+        database_path=config.database_directory,
         domain_to_genomes=context_free_domains_dict,
         min_bsr_cutoff=cooccurence_bsr_cutoff,  # identity cutoff for co occurring pattern domains
         min_presence_fraction=cooccurence_bsr_cutoff,
@@ -685,31 +649,27 @@ def prepare_singleton_seed_proteins(
 
     # 3) Select seed hits for singletons from genomes with this cooccurence. Seed hit needs score >= high_bsr/2
     logger.info("Fetching co-occurence-based singleton candidates")
-    domain_score_limits, singleton_reference_seqs_dict = (
+    singleton_reference_seqs_dict = (
         select_singleton_refs_by_domain_pattern(
-            database_path=options.database_directory,
+            database_path=config.database_directory,
             seed_to_pattern_domains=domain_presence_intersection_pattern,
             min_bsr_cutoff=cooccurence_bsr_cutoff * 0.5,
         )
     )
 
     # 4) Fallback for all that have no cooccurence pattern add everything above high bsr score
-    domain_score_limits, singleton_reference_seqs_dict = (
+    singleton_reference_seqs_dict = (
         _add_bsr_fallback_for_domains_without_pattern(
-            database_path=options.database_directory,
+            database_path=config.database_directory,
             context_free_domains_dict=context_free_domains_dict,
             domain_presence_intersection_pattern=domain_presence_intersection_pattern,
             singleton_reference_seqs_dict=singleton_reference_seqs_dict,
-            domain_score_limits=domain_score_limits,
             bsr_cutoff=high_bsr_cutoff,
         )
     )
 
     myUtil.save_cache(
-        options, "sng0_training_proteinIDs.pkl", singleton_reference_seqs_dict
-    )
-    myUtil.save_cache(
-        options, "sng0_training_proteinIDs_limits.pkl", domain_score_limits
+        config, "sng0_training_proteinIDs.pkl", singleton_reference_seqs_dict
     )
 
-    return domain_score_limits, singleton_reference_seqs_dict
+    return singleton_reference_seqs_dict

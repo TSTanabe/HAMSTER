@@ -8,6 +8,7 @@ from src.core import myUtil
 from src.selection_seed import (
     csb_proteins_selection,
     singleton_finder2,
+    csb_type_statistic,
 )
 from src.core.logging import get_logger
 
@@ -89,7 +90,7 @@ def basis_sequence_fasta(config) -> None:
     database.index_database(config.database_directory)
 
     ### Collect the sequences from csb where at least one query is encoded
-    grp_score_limit_dict, grouped = (
+    grouped = (
         csb_proteins_selection.prepare_csb_grouped_seed_proteins(config)
     )
     config.grouped = grouped
@@ -98,12 +99,10 @@ def basis_sequence_fasta(config) -> None:
     logger.info(
         "Collecting highly similar homologs from query hits without any conserved genomic context"
     )
-    sng_score_limit_dict, sng_ref_seqs_dict = (
+    sng_ref_seqs_dict = (
         singleton_finder2.prepare_singleton_seed_proteins(config)
     )
 
-    # Merge groups and limits from csb and sng and add queries
-    merged_score_limit_dict = {**grp_score_limit_dict, **sng_score_limit_dict}
     merged_basis_seed_proteins_dict = csb_proteins_selection.merge_protein_sets(
         grouped, sng_ref_seqs_dict
     )
@@ -116,6 +115,12 @@ def basis_sequence_fasta(config) -> None:
         merged_basis_seed_proteins_dict, config.database_directory
     )
 
+    # Merge groups and limits from csb and sng and add queries
+    score_limit_dict = csb_type_statistic.generate_score_limits_from_seed_dict(
+            database_path=config.database_directory,
+            seed_dict=merged_basis_seed_proteins_dict,
+        )
+
     # Print the grp0 csb and singletons to fasta
     csb_proteins_selection.fetch_training_data_to_fasta(
         config, merged_basis_seed_proteins_dict, "ds1"
@@ -125,10 +130,10 @@ def basis_sequence_fasta(config) -> None:
     myUtil.save_cache(
         config, "basis_merged_grouped.pkl", merged_basis_seed_proteins_dict
     )
-    myUtil.save_cache(config, "basis_merged_score.pkl", merged_score_limit_dict)
+    myUtil.save_cache(config, "basis_merged_score.pkl", score_limit_dict)
 
     # Update options object with the fetched proteinID groups and score limits
     config.grouped = merged_basis_seed_proteins_dict
-    config.score_limit_dict = merged_score_limit_dict
+    config.score_limit_dict = score_limit_dict
 
     return

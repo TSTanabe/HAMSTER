@@ -56,10 +56,7 @@ def _csb_proteins_datasets_combine(
 
 def prepare_csb_grouped_seed_proteins(
     config: Any,
-) -> Tuple[
-    Dict[str, Dict[str, float]],
-    Dict[str, Set[str]],
-]:
+) -> Dict[str, Set[str]]:
     """
     Prepares grouped protein sequences for training by analyzing gene clusters (CSBs)
     and extracting associated proteins with conserved genomic context.
@@ -80,16 +77,15 @@ def prepare_csb_grouped_seed_proteins(
     """
 
     # Step 1: Try loading cached grouped training data
-    grouped = myUtil.load_cache(
+    grouped_seed_sequences = myUtil.load_cache(
         config, "grp0_training_proteinIDs.pkl"
     )  # Name is defined by fetch_to_fasta routine
-    grp_score_limit_dict = myUtil.load_cache(config, "grp0_score_limit_dict.pkl")
-    if grouped and grp_score_limit_dict:
-        return grp_score_limit_dict, grouped
+    if grouped_seed_sequences:
+        return grouped_seed_sequences
 
     # Step 2: Compute score limits and keyword clusters
     # seed_grouped_keywords_dict => domain: [[csb_keyword1, csb_keyword2, ...]]
-    grp_score_limit_dict, _, seed_grouped_keywords_dict = (
+    seed_grouped_keywords_dict = (
         csb_type_statistic.group_gene_cluster_statistic(config)
     )
 
@@ -106,20 +102,19 @@ def prepare_csb_grouped_seed_proteins(
     logger.info("Processing highly similar homologs with specific genomic context")
 
     # Step 3: Export one fasta per protein
-    grouped = _csb_proteins_datasets_combine(
+    grouped_seed_sequences = _csb_proteins_datasets_combine(
         seed_grouped_keywords_dict, csb_proteins_dict
     )
     # grouped = _add_query_ids_to_proteinIDset(grouped, options.database_directory)
 
     logger.info(
-        f"Found {len(grouped)} proteins types with syntenic gene cluster patterns: {', '.join(sorted(grouped.keys()))}"
+        f"Found {len(grouped_seed_sequences)} proteins types with syntenic gene cluster patterns: {', '.join(sorted(grouped_seed_sequences.keys()))}"
     )
 
     # Step 4: Save in pkl cache
-    #myUtil.save_cache(config, "grp0_training_proteinIDs.pkl", grouped)
-    #myUtil.save_cache(config, "grp0_score_limit_dict.pkl", grp_score_limit_dict)
+    myUtil.save_cache(config, "grp0_training_proteinIDs.pkl", grouped_seed_sequences)
 
-    return grp_score_limit_dict, grouped
+    return grouped_seed_sequences
 
 
 ###############################################################################

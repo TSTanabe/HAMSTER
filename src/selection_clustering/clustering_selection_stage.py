@@ -3,7 +3,7 @@ from typing import Any
 from src.core import myUtil
 from src.selection_clustering import pam_mcl
 from src.selection_defragmentation import seq_clustering, protein_mcl
-from src.selection_seed import csb_proteins_selection
+from src.selection_seed import csb_proteins_selection, csb_type_statistic
 
 from src.core.logging import get_logger
 
@@ -139,7 +139,7 @@ def mcl_select_grp2_clusters(config) -> dict:
     return mcl_extended_grouped
 
 
-def mcl_select_grp3_clusters(config, grouped) -> dict:
+def mcl_select_grp3_clusters(config, seed_sequences) -> dict:
     """
     Extends grp2 by PAM model, produces grp3.
 
@@ -160,17 +160,13 @@ def mcl_select_grp3_clusters(config, grouped) -> dict:
 
     clustering_results = _load_linclust_results(config)
 
-    score_limit_dict = (
-        config.score_limit_dict
-        if hasattr(config, "score_limit_dict")
-        else myUtil.load_cache(config, "grp1_merged_score_limits.pkl")
-    )
+    score_limit_dict = csb_type_statistic.generate_score_limits_from_seed_dict(config.database_directory, seed_sequences)
 
     # Extend references via PAM model
     regrouped = pam_mcl.select_hits_by_pam_csb_mcl(
         config=config,
         clustering_results=clustering_results,
-        basis_seed_sequences=grouped,
+        basis_seed_sequences=seed_sequences,
         basis_score_limit=score_limit_dict
     )
     myUtil.save_cache(config, "grp3_selection_ref_seqs.pkl", regrouped)
