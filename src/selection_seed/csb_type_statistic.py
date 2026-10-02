@@ -710,6 +710,7 @@ def compute_score_limits(
 
     return domain_limits
 
+
 def generate_score_limits_from_seed_dict(
     database_path: str,
     seed_dict: dict[str, set[str]],
@@ -870,9 +871,7 @@ def generate_score_limits_from_seed_dict(
         # Detect domains that somehow disappeared entirely
         # --------------------------------------------------------------
         expected_domains = {
-            domain
-            for domain, protein_ids in seed_dict.items()
-            if protein_ids
+            domain for domain, protein_ids in seed_dict.items() if protein_ids
         }
 
         missing_domains = expected_domains - found_domains
@@ -884,6 +883,7 @@ def generate_score_limits_from_seed_dict(
             )
     logger.debug("Finished calculating hit score ranges for current seed sequence dataset")
     return score_limit_dict
+
 
 def apply_cluster_selection(
     options: Any, filtered_stats_dict: Dict, query_score_dict: Dict

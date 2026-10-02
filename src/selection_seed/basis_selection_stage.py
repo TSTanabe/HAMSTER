@@ -90,18 +90,14 @@ def basis_sequence_fasta(config) -> None:
     database.index_database(config.database_directory)
 
     ### Collect the sequences from csb where at least one query is encoded
-    grouped = (
-        csb_proteins_selection.prepare_csb_grouped_seed_proteins(config)
-    )
+    grouped = csb_proteins_selection.prepare_csb_grouped_seed_proteins(config)
     config.grouped = grouped
 
     ### Collect singletons without any conserved csb
     logger.info(
         "Collecting highly similar homologs from query hits without any conserved genomic context"
     )
-    sng_ref_seqs_dict = (
-        singleton_finder2.prepare_singleton_seed_proteins(config)
-    )
+    sng_ref_seqs_dict = singleton_finder2.prepare_singleton_seed_proteins(config)
 
     merged_basis_seed_proteins_dict = csb_proteins_selection.merge_protein_sets(
         grouped, sng_ref_seqs_dict
@@ -117,9 +113,9 @@ def basis_sequence_fasta(config) -> None:
 
     # Merge groups and limits from csb and sng and add queries
     score_limit_dict = csb_type_statistic.generate_score_limits_from_seed_dict(
-            database_path=config.database_directory,
-            seed_dict=merged_basis_seed_proteins_dict,
-        )
+        database_path=config.database_directory,
+        seed_dict=merged_basis_seed_proteins_dict,
+    )
 
     # Print the grp0 csb and singletons to fasta
     csb_proteins_selection.fetch_training_data_to_fasta(

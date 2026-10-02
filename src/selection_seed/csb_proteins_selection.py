@@ -85,9 +85,7 @@ def prepare_csb_grouped_seed_proteins(
 
     # Step 2: Compute score limits and keyword clusters
     # seed_grouped_keywords_dict => domain: [[csb_keyword1, csb_keyword2, ...]]
-    seed_grouped_keywords_dict = (
-        csb_type_statistic.group_gene_cluster_statistic(config)
-    )
+    seed_grouped_keywords_dict = csb_type_statistic.group_gene_cluster_statistic(config)
 
     logger.info(
         f"Collecting sequences for training datasets with similar csb for "
@@ -192,7 +190,7 @@ def _fetch_seqs_to_fasta_parallel(
     max_seq: int,
     cores: int = 4,
     chunk_size: int = 990,
-    hardcap: int = 5000,
+    hardcap: int | None = None,
 ) -> None:
     """
     Write each protein family in dataset_dict to a FASTA file using multiprocessing.
@@ -225,9 +223,9 @@ def _fetch_seqs_to_fasta_parallel(
             )
             continue  # Skip this domain
 
-        if num_sequences > (max_seq + hardcap):
+        if hardcap is not None and num_sequences > (max_seq + hardcap):
             logger.warning(
-                f"'{domain}' has too many sequences ({num_sequences}), "
+                f"'{domain}' exceeds sequences limit ({num_sequences}) "
                 f"randomly subsampling to {max_seq}"
             )
             protein_ids = set(random.sample(sorted(protein_ids), max_seq))
@@ -276,7 +274,7 @@ def fetch_training_data_to_fasta(
         options.fasta_output_directory,
         min_seq=options.min_seqs,
         max_seq=options.max_seqs,
-        cores=options.cores,
+        cores=4,
         hardcap=options.hardcap,
     )
 
@@ -284,6 +282,7 @@ def fetch_training_data_to_fasta(
 ###############################################################################
 #################### Get proteinIDs from database #############################
 ###############################################################################
+
 
 def _filter_existing_faa_files(
     domain_dict: Dict[str, Any], directory: str
@@ -312,6 +311,7 @@ def _filter_existing_faa_files(
     }
 
     return filtered_dict
+
 
 def _fetch_protein_ids_for_domain(
     database: str,
@@ -368,7 +368,7 @@ def _fetch_protein_ids_for_domain(
 
     if tie_count > 0:
         logger.warning(
-            f"max_count {max_count} reached for {domain}, but {tie_count} more proteins with same bitscore ({last_score}) included."
+            f"Maximum sequence number ({max_count}) reached for {domain}. {tie_count} sequences with the same bitscore ({last_score}) included."
         )
 
     return domain, protein_ids
@@ -415,49 +415,28 @@ def fetch_protein_family_sequences(
     )
 
     # Get protein IDs within the score limits for each domain.
-    print("Point 1 collecting the protein ids")
-    decorated_grouped_dict: dict[str, set[str]] = _fetch_protein_ids_parallel(
-        config.database_directory,
-        score_limit_dict,
-        config.cores,
-        config.max_seqs,
-    )
 
+    decorated_grouped_dict: dict[str, set[str]] = _fetch_protein_ids_parallel(
+        database=config.database_directory,
+        score_limit_dict=score_limit_dict,
+        cores=4,
+        max_seqs=config.max_seqs,
+    )
+    logger.info("Merging fetched sequence identifiers and seed sequence identifiers")
     decorated_grouped_dict = merge_protein_sets(
         decorated_grouped_dict,
         domain_to_proteinID,
     )
-    print("Point 2 fetching the the sequences")
+
     _fetch_seqs_to_fasta_parallel(
-        config.database_directory,
-        decorated_grouped_dict,
-        directory,
-        config.min_seqs,
-        config.max_seqs,
-        config.cores,
+        database=config.database_directory,
+        dataset_dict=decorated_grouped_dict,
+        output_directory=directory,
+        min_seq=config.min_seqs,
+        max_seq=config.max_seqs,
+        hardcap=None,
+        cores=4,
     )
-
-
-
-
-
-
-
-
-
-
-def merge_grouped_protein_ids(protein_ids_by_domain, grouped_dict):
-    # Merge the grp0 seqIDs and the decorate seqIDs into a new dictionary which has only domain without prefix
-    # this value set is used for the fetching of the sequences to a file for the further classification steps
-    merged = protein_ids_by_domain.copy()
-    for grouped_key, protein_ids in grouped_dict.items():
-        domain = grouped_key.replace("grp0_", "", 1)
-        if domain in merged:
-            merged[domain].update(protein_ids)
-        else:
-            merged[domain] = set(protein_ids)
-
-    return {k: v for k, v in merged.items() if not k.startswith("grp0_")}
 
 
 def merge_protein_sets(

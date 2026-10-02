@@ -102,20 +102,20 @@ def pam_defragmentation_stage(config) -> object | None:
 
     # Add the clustered hits to the reference sequence sets
     # _linclust_mcl_format.txt select from these files in fasta_initial_hit_directory
-    mcl_extended_grouped, mcl_cutoffs = protein_mcl.select_hits_by_csb_mcl(
-        config=config, mcl_output_dict=linclust_mcl_format_output_files_dict, reference_dict=merged_grouped, density_threshold=0.0, reference_threshold=0.0001
+    mcl_extended_seed, mcl_cutoffs = protein_mcl.select_hits_by_csb_mcl(
+        config=config, mcl_output_dict=linclust_mcl_format_output_files_dict, reference_dict=merged_grouped, density_threshold=0.0, reference_threshold=0.00000000001
     )  # low cutoffs for closely related protein clusters
 
     ## Storage
     # Save computed grp1 datasets
-    myUtil.save_cache(config, "grp1_merged_grouped.pkl", mcl_extended_grouped)
+    myUtil.save_cache(config, "grp1_merged_grouped.pkl", mcl_extended_seed)
     myUtil.save_cache(config, "grp1_merged_score_limits.pkl", score_limit_dict)
 
     # Print the grp0 csb and singletons to fasta
-    csb_proteins_selection.fetch_training_data_to_fasta(config, merged_grouped, "ds2")
+    csb_proteins_selection.fetch_training_data_to_fasta(config, mcl_extended_seed, "ds2")
 
     # Result dictionary is stores in options.grouped, overwriting the grp0 with grp1 key_domain pairs
-    config.grouped = merged_grouped
+    config.grouped = mcl_extended_seed
 
     return
 

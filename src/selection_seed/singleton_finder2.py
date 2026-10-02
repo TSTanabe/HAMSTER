@@ -287,7 +287,6 @@ def select_singleton_refs_by_domain_pattern(
     seed_to_pattern_domains: Dict[str, Set[str]],
     min_bsr_cutoff: float = 70.0,
 ):
-
     sng_reference_seq_dict: Dict[str, Set[str]] = defaultdict(set)
 
     if not seed_to_pattern_domains:
@@ -397,7 +396,6 @@ def select_singleton_refs_by_domain_pattern(
                 continue
 
             sng_reference_seq_dict[seed_domain] = protein_ids
-
 
     return sng_reference_seq_dict
 
@@ -649,23 +647,19 @@ def prepare_singleton_seed_proteins(
 
     # 3) Select seed hits for singletons from genomes with this cooccurence. Seed hit needs score >= high_bsr/2
     logger.info("Fetching co-occurence-based singleton candidates")
-    singleton_reference_seqs_dict = (
-        select_singleton_refs_by_domain_pattern(
-            database_path=config.database_directory,
-            seed_to_pattern_domains=domain_presence_intersection_pattern,
-            min_bsr_cutoff=cooccurence_bsr_cutoff * 0.5,
-        )
+    singleton_reference_seqs_dict = select_singleton_refs_by_domain_pattern(
+        database_path=config.database_directory,
+        seed_to_pattern_domains=domain_presence_intersection_pattern,
+        min_bsr_cutoff=cooccurence_bsr_cutoff * 0.5,
     )
 
     # 4) Fallback for all that have no cooccurence pattern add everything above high bsr score
-    singleton_reference_seqs_dict = (
-        _add_bsr_fallback_for_domains_without_pattern(
-            database_path=config.database_directory,
-            context_free_domains_dict=context_free_domains_dict,
-            domain_presence_intersection_pattern=domain_presence_intersection_pattern,
-            singleton_reference_seqs_dict=singleton_reference_seqs_dict,
-            bsr_cutoff=high_bsr_cutoff,
-        )
+    singleton_reference_seqs_dict = _add_bsr_fallback_for_domains_without_pattern(
+        database_path=config.database_directory,
+        context_free_domains_dict=context_free_domains_dict,
+        domain_presence_intersection_pattern=domain_presence_intersection_pattern,
+        singleton_reference_seqs_dict=singleton_reference_seqs_dict,
+        bsr_cutoff=high_bsr_cutoff,
     )
 
     myUtil.save_cache(
