@@ -128,6 +128,8 @@ def apply_predictor_models(
     ],
     probability_cutoff: float,
 ) -> Dict[str, Set[str]]:
+    logger.info("Applying predictor models")
+
     application_result = predictor_application.evaluate_predictor_models(
         database_path=(config.database_directory),
         predictor_models=(predictor_models),
