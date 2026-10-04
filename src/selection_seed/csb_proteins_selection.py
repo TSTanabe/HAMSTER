@@ -131,6 +131,50 @@ def _fetch_seq_to_fasta(
     domain: str,
     protein_ids: Set[str],
     output_directory: str,
+) -> None:
+    output_file = os.path.join(output_directory, f"{domain}.faa")
+
+    if not protein_ids or os.path.exists(output_file):
+        return
+
+    uri = f"file:{database}?mode=ro"
+
+    with sqlite3.connect(uri, uri=True) as con:
+        con.execute("PRAGMA temp_store=FILE;")
+
+        con.execute("""
+            CREATE TEMP TABLE tmp_ids (
+                proteinID TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+        """)
+
+        con.executemany(
+            "INSERT OR IGNORE INTO tmp_ids VALUES (?);",
+            ((str(pid),) for pid in protein_ids),
+        )
+
+        tmp_file = output_file + ".tmp"
+
+        with open(tmp_file, "w") as fasta:
+            cur = con.execute("""
+                SELECT p.proteinID, p.sequence
+                FROM Proteins AS p
+                JOIN tmp_ids AS t
+                  ON t.proteinID = p.proteinID
+                ORDER BY p.proteinID;
+            """)
+
+            for protein_id, sequence in cur:
+                fasta.write(f">{protein_id}\n{sequence}\n")
+
+        os.replace(tmp_file, output_file)
+
+
+def _fetch_seq_to_fasta_deprecated(
+    database: str,
+    domain: str,
+    protein_ids: Set[str],
+    output_directory: str,
     chunk_size: int = 990,
 ) -> None:
     """
@@ -182,75 +226,43 @@ def _fetch_seq_to_fasta(
     logger.debug(f"FASTA file saved: {fasta_file_path}")
 
 
-def _fetch_seqs_to_fasta_parallel(
+def _fetch_seqs_to_fasta(
     database: str,
     dataset_dict: Dict[str, Set[str]],
     output_directory: str,
     min_seq: int,
     max_seq: int,
-    cores: int = 4,
-    chunk_size: int = 990,
     hardcap: int | None = None,
 ) -> None:
-    """
-    Write each protein family in dataset_dict to a FASTA file using multiprocessing.
-
-    Args:
-        database (str): SQLite DB.
-        dataset_dict (dict): {domain: set(proteinIDs)}
-        output_directory (str): Directory for FASTA output.
-        min_seq (int): Minimum seqs required.
-        max_seq (int): Maximum seqs allowed.
-        cores (int): Multiprocessing processes.
-        chunk_size (int): SQL batch.
-        hardcap (int): Absolute max allowed (protect from runaway).
-
-    Returns:
-        None (writes FASTA).
-    """
-    os.makedirs(output_directory, exist_ok=True)  # Ensure the output directory exists
-
-    tasks = []
+    os.makedirs(output_directory, exist_ok=True)
 
     for domain, protein_ids in dataset_dict.items():
         num_sequences = len(protein_ids)
         output_file = os.path.join(output_directory, f"{domain}.faa")
 
-        # Check limits and file existence
         if num_sequences < min_seq:
-            logger.warn(
-                f"'{domain}' was skipped due to too few sequences: {num_sequences} < {min_seq}"
-            )
-            continue  # Skip this domain
-
-        if hardcap is not None and num_sequences > (max_seq + hardcap):
-            logger.warning(
-                f"'{domain}' exceeds sequences limit ({num_sequences}) "
-                f"randomly subsampling to {max_seq}"
-            )
-            protein_ids = set(random.sample(sorted(protein_ids), max_seq))
+            logger.warning(f"{domain:<15} | skipped: {num_sequences} < {min_seq}")
+            continue
 
         if os.path.exists(output_file):
-            logger.debug(
-                f"Skipped '{domain}'. FASTA file already exists: {output_file}"
-            )
-            continue  # Skip existing files
+            continue
 
-        # If all checks pass, add to tasks
-        tasks.append((database, domain, protein_ids, output_directory, chunk_size))
+        if hardcap is not None and num_sequences > max_seq + hardcap:
+            protein_ids = set(sorted(protein_ids)[:max_seq])
+            logger.warning(f"{domain:<15} | reduced {num_sequences} -> {max_seq}")
 
-    if not tasks:
-        return  # Exit if no tasks remain
-    logger.info(
-        "Fetching amino acid sequences from local database. Might take some minutes ..."
-    )
-    # Use multiprocessing to run fetch_seq_to_fasta in parallel
-    with multiprocessing.Pool(processes=cores) as pool:
-        pool.starmap(_fetch_seq_to_fasta, tasks)
+        _fetch_seq_to_fasta(
+            database,
+            domain,
+            protein_ids,
+            output_directory,
+        )
 
 
 def fetch_training_data_to_fasta(
-    options: Any, grouped: Dict[str, Set[str]], prefix: str
+    options: Any,
+    grouped: Dict[str, Set[str]],
+    prefix: str,
 ) -> None:
     """
     Writes training FASTA files per group/domain, using a prefix.
@@ -266,15 +278,14 @@ def fetch_training_data_to_fasta(
 
     extended_grouped_prefixed = {
         f"{prefix}_{key}": value for key, value in grouped.items()
-    }  # Extend dictionary with a prefix
+    }
 
-    _fetch_seqs_to_fasta_parallel(
+    _fetch_seqs_to_fasta(
         options.database_directory,
         extended_grouped_prefixed,
         options.fasta_output_directory,
         min_seq=options.min_seqs,
         max_seq=options.max_seqs,
-        cores=4,
         hardcap=options.hardcap,
     )
 
@@ -400,7 +411,161 @@ def _fetch_protein_ids_parallel(database, score_limit_dict, cores, max_seqs=5000
     return domain_protein_ids
 
 
+def _stream_protein_family_to_fasta(
+    con: sqlite3.Connection,
+    domain: str,
+    lower_limit: float,
+    upper_limit: float,
+    seed_ids: set[str],
+    output_file: str,
+    min_seqs: int,
+    max_seqs: int,
+    batch_size: int = 2000,
+) -> None:
+    con.execute("DELETE FROM tmp_selected;")
+
+    # Always retain seed/reference proteins.
+    con.executemany(
+        "INSERT OR IGNORE INTO tmp_selected(proteinID) VALUES (?);",
+        ((str(pid),) for pid in seed_ids),
+    )
+
+    seed_count = con.execute("SELECT COUNT(*) FROM tmp_selected;").fetchone()[0]
+
+    remaining = max(0, max_seqs - seed_count)
+
+    if seed_count > max_seqs:
+        logger.warning(
+            f"{domain:<12} | {seed_count} seed sequences exceed "
+            f"max_seqs={max_seqs}; retaining all seeds"
+        )
+
+    # ---------------------------------------------------------
+    # Stream candidates ordered by score.
+    # No fetchall().
+    # ---------------------------------------------------------
+
+    if remaining > 0:
+        read_cur = con.cursor()
+        insert_cur = con.cursor()
+
+        read_cur.execute(
+            """
+            SELECT proteinID, score
+            FROM Domains
+            WHERE domain = ?
+              AND score BETWEEN ? AND ?
+            ORDER BY score DESC, proteinID ASC;
+            """,
+            (domain, lower_limit, upper_limit),
+        )
+
+        added = 0
+
+        while added < remaining:
+            n_to_fetch = min(batch_size, remaining - added)
+            rows = read_cur.fetchmany(n_to_fetch)
+
+            if not rows:
+                break
+
+            before = con.total_changes
+
+            insert_cur.executemany(
+                """
+                INSERT OR IGNORE INTO tmp_selected(proteinID)
+                VALUES (?);
+                """,
+                ((protein_id,) for protein_id, _ in rows),
+            )
+
+            added += con.total_changes - before
+
+    selected_count = con.execute("SELECT COUNT(*) FROM tmp_selected;").fetchone()[0]
+
+    if selected_count < min_seqs:
+        logger.warning(
+            f"{domain:<12} | skipped: {selected_count} < {min_seqs} sequences"
+        )
+        return
+
+    # ---------------------------------------------------------
+    # Stream selected sequences directly to FASTA.
+    # ---------------------------------------------------------
+
+    tmp_file = output_file + ".tmp"
+    written = 0
+
+    try:
+        with open(tmp_file, "w") as fasta:
+            cur = con.execute(
+                """
+                SELECT p.proteinID, p.sequence
+                FROM Proteins AS p
+                JOIN tmp_selected AS s
+                  ON s.proteinID = p.proteinID
+                ORDER BY p.proteinID;
+                """
+            )
+
+            for protein_id, sequence in cur:
+                fasta.write(f">{protein_id}\n{sequence}\n")
+                written += 1
+
+        os.replace(tmp_file, output_file)
+
+    except Exception:
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
+        raise
+
+    logger.info(
+        f"{domain:<12} | seeds: {seed_count:>6} | "
+        f"selected: {selected_count:>7} | written: {written:>7}"
+    )
+
+
 def fetch_protein_family_sequences(
+    config: Any,
+    directory: str,
+    score_limit_dict: dict[str, dict[str, float]],
+    domain_to_proteinID: dict[str, set[str]],
+) -> None:
+    """Stream protein-family sequences directly from SQLite to FASTA."""
+
+    os.makedirs(directory, exist_ok=True)
+
+    uri = f"file:{config.database_directory}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=120.0) as con:
+        con.execute("PRAGMA temp_store=FILE;")
+        con.execute("PRAGMA cache_size=-32768;")
+
+        con.execute("""
+            CREATE TEMP TABLE tmp_selected (
+                proteinID TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+        """)
+
+        for domain, limits in score_limit_dict.items():
+            output_file = os.path.join(directory, f"{domain}.faa")
+
+            if os.path.exists(output_file):
+                logger.debug(f"{domain:<12} | FASTA exists - skipping")
+                continue
+
+            _stream_protein_family_to_fasta(
+                con=con,
+                domain=domain,
+                lower_limit=limits["lower_limit"],
+                upper_limit=limits["upper_limit"],
+                seed_ids=domain_to_proteinID.get(domain, set()),
+                output_file=output_file,
+                min_seqs=config.min_seqs,
+                max_seqs=config.max_seqs,
+            )
+
+
+def fetch_protein_family_sequences_deprecated(
     config: Any,
     directory: str,
     score_limit_dict: dict[str, dict[str, float]],
@@ -428,7 +593,7 @@ def fetch_protein_family_sequences(
         domain_to_proteinID,
     )
 
-    _fetch_seqs_to_fasta_parallel(
+    _fetch_seqs_to_fasta(
         database=config.database_directory,
         dataset_dict=decorated_grouped_dict,
         output_directory=directory,

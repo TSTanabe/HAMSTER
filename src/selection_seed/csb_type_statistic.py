@@ -881,7 +881,9 @@ def generate_score_limits_from_seed_dict(
                 "No score statistics could be generated for the following "
                 f"domains: {', '.join(sorted(missing_domains))}"
             )
-    logger.debug("Finished calculating hit score ranges for current seed sequence dataset")
+    logger.debug(
+        "Finished calculating hit score ranges for current seed sequence dataset"
+    )
     return score_limit_dict
 
 

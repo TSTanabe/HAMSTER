@@ -4,6 +4,7 @@ import sys
 from typing import Any, Dict, Set
 
 from src.core import myUtil
+from src.db import database
 from src.selection_defragmentation import (
     seq_clustering,
     protein_mcl,
@@ -94,6 +95,7 @@ def pam_defragmentation_stage(config) -> object | None:
 
     ## Clustering at 90 % identitity
     # Write fasta files with the reference sequences and similar sequences within the score cutoff range of the reference seqs for the linclustering
+    database.index_database(config.database_directory)
     csb_proteins_selection.fetch_protein_family_sequences(
         config=config,
         directory=config.fasta_initial_hit_directory,

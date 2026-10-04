@@ -177,6 +177,11 @@ def index_database(database: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_domains_domain_protein "
             "ON Domains(domain, proteinID)",
         ),
+        (
+            "idx_domains_domain_score_protein",
+            "CREATE INDEX IF NOT EXISTS idx_domains_domain_score_protein "
+            "ON Domains(domain, score DESC, proteinID ASC)",
+        ),
         # -----------------------------
         # High-identity + genome intersection accelerators
         # -----------------------------
