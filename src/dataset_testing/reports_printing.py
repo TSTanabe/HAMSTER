@@ -200,12 +200,12 @@ def write_pkl_tsv_reports(
         os.makedirs(report_dir, exist_ok=True)
 
         if _skip_if_all_outputs_exist(protein, report_dir, collections):
-            return
+            continue
 
         df = _load_and_validate_report(options, pkl_file)
 
         if df is None:
-            return
+            continue
 
         df = _add_neighborhood_info(df, protein, options, db_path)
         df["genomeID"] = df.index.astype(str).str.split("-", n=1).str[0]
