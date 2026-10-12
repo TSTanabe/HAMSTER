@@ -4,7 +4,7 @@ import os
 import sys
 
 from src.cli import cli
-from src.db import taxonomy
+from src.db import taxonomy, database
 
 from src.fasta_preparation import fasta_preparation_stage
 
@@ -276,6 +276,7 @@ def main(args: list = None) -> None:
     # mach eine weitere HMMsearch mit dem vollen model auf alle seqs und prüfe die treffer
     if options.stage <= 10 and options.end >= 10:
         myUtil.print_header("\n 10. Writing dataset performance reports")
+        database.index_database(options.database_directory)
         taxonomy.collect_taxonomy_information(options)
         report_cv_performance(options)
 

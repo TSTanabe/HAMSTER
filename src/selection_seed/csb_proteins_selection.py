@@ -837,43 +837,118 @@ def _fetch_neighbours_chunk(
 
 
 def fetch_neighbouring_genes_with_domains(
-    db_path: str, protein_ids: Set[str], chunk_size: int = 999, threads: int = 8
+    db_path: str,
+    protein_ids: Set[str],
 ) -> Tuple[Dict[str, List[List[str]]], List[Tuple[Tuple, int]]]:
-    """
-    Threaded: process protein_ids in chunks and get all their cluster neighbours' domain arrays.
-
-    Args:
-        db_path (str): Path to SQLite DB.
-        protein_ids (set): Input protein IDs to analyze.
-        chunk_size (int): How many IDs per thread.
-        threads (int): Thread pool size.
-
-    Returns:
-        tuple:
-            - full_neighbours: {proteinID: [ [domain,...], ... ] }
-            - sorted_compositions: [ (composition tuple, count), ... ] (sorted by count)
-
-    Example:
-        full_neigh, comp = fetch_neighbouring_genes_with_domains("db.sqlite", {"p1","p2"}, 500, 8)
-    """
-    protein_list = list(protein_ids)
     if not protein_ids:
         return {}, []
 
-    chunks = [
-        protein_list[i : i + chunk_size] for i in range(0, len(protein_ids), chunk_size)
-    ]
-    args = [(db_path, chunk) for chunk in chunks]
+    uri = f"file:{db_path}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as con:
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA temp_store=FILE;")
+        con.execute("PRAGMA cache_size=-32768;")
 
-    with ThreadPoolExecutor(max_workers=threads) as executor:
-        partials = list(executor.map(_fetch_neighbours_chunk, args))
+        # Input proteins
+        con.execute("""
+            CREATE TEMP TABLE tmp_hits (
+                proteinID TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+        """)
 
-    full_neighbours: Dict[str, List[List[str]]] = {}
-    total_counts: DefaultDict[Tuple, int] = defaultdict(int)
-    for neigh_dict, comp_dict in partials:
-        full_neighbours.update(neigh_dict)
-        for comp, cnt in comp_dict.items():
-            total_counts[comp] += cnt
+        con.executemany(
+            "INSERT OR IGNORE INTO tmp_hits VALUES (?);",
+            ((str(pid),) for pid in protein_ids),
+        )
 
-    sorted_compositions = sorted(total_counts.items(), key=lambda x: x[1], reverse=True)
-    return full_neighbours, sorted_compositions
+        # Unique clusters represented by the input proteins
+        con.execute("""
+            CREATE TEMP TABLE tmp_clusters (
+                clusterID TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+        """)
+
+        con.execute("""
+            INSERT OR IGNORE INTO tmp_clusters(clusterID)
+            SELECT p.clusterID
+            FROM Proteins p
+            JOIN tmp_hits h ON h.proteinID = p.proteinID
+            WHERE p.clusterID IS NOT NULL;
+        """)
+
+        # Input protein -> cluster
+        hit2cid = {
+            row["proteinID"]: row["clusterID"]
+            for row in con.execute("""
+                SELECT h.proteinID, p.clusterID
+                FROM tmp_hits h
+                LEFT JOIN Proteins p
+                    ON p.proteinID = h.proteinID;
+            """)
+        }
+
+        # All proteins from these clusters, fetched only once
+        cluster_to_nids = defaultdict(list)
+
+        for row in con.execute("""
+            SELECT p.clusterID, p.proteinID
+            FROM Proteins p
+            JOIN tmp_clusters c
+                ON c.clusterID = p.clusterID
+            ORDER BY p.clusterID, p.start, p.proteinID;
+        """):
+            cluster_to_nids[row["clusterID"]].append(row["proteinID"])
+
+        # Make lookup table for all neighbour proteins
+        con.execute("""
+            CREATE TEMP TABLE tmp_neighbors (
+                proteinID TEXT PRIMARY KEY
+            ) WITHOUT ROWID;
+        """)
+
+        con.execute("""
+            INSERT OR IGNORE INTO tmp_neighbors(proteinID)
+            SELECT p.proteinID
+            FROM Proteins p
+            JOIN tmp_clusters c
+                ON c.clusterID = p.clusterID;
+        """)
+
+        # Fetch all domains once
+        domains_by_nid = defaultdict(list)
+
+        for row in con.execute("""
+            SELECT d.proteinID, d.domain
+            FROM Domains d
+            JOIN tmp_neighbors n
+                ON n.proteinID = d.proteinID
+            ORDER BY d.proteinID, d.domain;
+        """):
+            domains_by_nid[row["proteinID"]].append(row["domain"] or "no_neighbours")
+
+    # Build result for individual hits
+    neighbours = {
+        hit: [
+            domains_by_nid.get(nid, ["singleton"])
+            for nid in cluster_to_nids.get(cid, [])
+        ]
+        or [["singleton"]]
+        for hit, cid in hit2cid.items()
+    }
+
+    # Count each cluster only once
+    comp_counts = defaultdict(int)
+
+    for cid, ids in cluster_to_nids.items():
+        comp = tuple(
+            sorted(tuple(sorted(domains_by_nid.get(nid, ["singleton"]))) for nid in ids)
+        )
+        comp_counts[comp] += 1
+
+    sorted_compositions = sorted(
+        comp_counts.items(),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    return neighbours, sorted_compositions

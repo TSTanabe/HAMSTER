@@ -245,7 +245,7 @@ def _add_neighborhood_info(
     missing = [hid for hid in df.index if hid not in neighbors]
     if missing:
         new_nb, _ = csb_proteins_selection.fetch_neighbouring_genes_with_domains(
-            db_path, missing, options.sqlite_chunks
+            db_path, missing
         )
         neighbors.update(new_nb)
         myUtil.save_cache(options, cache_name, neighbors)

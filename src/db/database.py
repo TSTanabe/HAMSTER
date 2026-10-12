@@ -221,6 +221,16 @@ def index_database(database: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_domains_domain_identity_protein "
             "ON Domains(domain, identity, proteinID)",
         ),
+        (
+            "idx_proteins_cluster_start_protein",
+            "CREATE INDEX IF NOT EXISTS idx_proteins_cluster_start_protein "
+            "ON Proteins(clusterID, start, proteinID)",
+        ),
+        (
+            "idx_domains_protein_domain",
+            "CREATE INDEX IF NOT EXISTS idx_domains_protein_domain "
+            "ON Domains(proteinID, domain)",
+        ),
     ]
 
     try:
